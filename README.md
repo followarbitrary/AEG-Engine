@@ -56,17 +56,19 @@ ctest --preset release
 .\build\debug\bin\aeg_editor.exe --model 'D:\Models\example.glb'
 .\build\debug\bin\aeg_editor.exe --model 'D:\Models\character\model.pmx'
 .\build\debug\bin\aeg_editor.exe --font 'D:\Fonts\NotoSansSC-Regular.ttf'
+.\build\debug\bin\aeg_editor.exe --msaa 4 --fxaa
 .\build\debug\bin\aeg_editor.exe --frames 12 --capture '.\build\viewport.ppm'
 .\build\debug\bin\aeg_editor.exe --no-validation
 ```
 
-`--model PATH` 选择 OBJ、glTF、GLB 或 PMX；`--font PATH` 指定支持中文的 TTF、OTF 或 TTC 字体；`--frames N` 在指定帧数后退出；`--capture PATH` 导出场景视口的 PPM 图像；`--hidden` 使用隐藏窗口，适合配合 `--frames` 自动验证；`--no-validation` 关闭 Vulkan 验证层。默认尝试启用验证层，未安装时仍可启动。参数缺失或未知参数会报告错误。
+`--model PATH` 选择 OBJ、glTF、GLB 或 PMX；`--font PATH` 指定支持中文的 TTF、OTF 或 TTC 字体；`--msaa 1|2|4|8` 选择场景采样数，1 为关闭；`--fxaa` 开启 FXAA 后处理，可与 MSAA 叠加；`--frames N` 在指定帧数后退出；`--capture PATH` 导出场景视口的 PPM 图像；`--hidden` 使用隐藏窗口，适合配合 `--frames` 自动验证；`--no-validation` 关闭 Vulkan 验证层。默认尝试启用验证层，未安装时仍可启动。参数缺失或未知参数会报告错误。
 
 ## 使用方法
 
 - **导入**：在界面的模型路径栏输入文件路径并点击导入，或把模型文件拖入窗口。模型附带的相对纹理路径会相对模型文件解析。导入失败会保留当前模型并显示错误。
 - **观察**：在场景视口内拖动鼠标旋转相机，水平拖动时可见模型表面跟随鼠标方向；使用中键拖动平移，滚轮缩放；点击“聚焦模型”或按 `F` 重新聚焦模型。具体拖动按键以界面底部提示为准。
 - **调整**：在属性面板修改模型位置、旋转、缩放，以及光照方向、环境光、背景色等；可查看网格、顶点和三角形数量。
+- **抗锯齿**：在属性面板的“抗锯齿”中选择 MSAA 关闭、2x、4x 或 8x，并独立切换“FXAA 后处理”。界面只提供设备支持的采样档位，显示当前有效采样数；命令行请求不支持的档位时，向下降到最高可用档位并显示提示。默认两项均关闭。
 - **布局**：拖动 ImGui 面板标题可重新停靠；窗口与视口可调整尺寸。
 
 ## 中文界面与字体
@@ -83,6 +85,14 @@ ctest --preset release
 
 当前字库范围包含基本拉丁文、中日韩标点、假名、基本汉字及 CJK 扩展 A；实际字形取决于所选字体，不覆盖所有 Unicode 扩展区。已在真实窗口验证中文路径输入、复制粘贴、导入及名称显示；当前测试环境未验证拼音输入法的组合文本和候选窗。
 
+## 抗锯齿渲染
+
+MSAA 使用匹配采样数的场景颜色与深度附件，再解析到单采样场景图像；采样能力同时查询设备上限及实际颜色/深度格式。FXAA 在解析之后，根据感知亮度检测边缘并做有界方向搜索及亚像素过滤。两项均只作用于模型视口，ImGui 界面和文字保持清晰。
+
+FXAA 保持线性 RGB 输出，使用线性过滤和边缘钳制；平坦区域直接保留原色。它属于空间近似抗锯齿，细节处可能略有柔化；没有时间累积或 TAA。截图导出的是最终抗锯齿结果。切换或缩放时先创建完整的新视口资源，成功后再替换，失败时保留此前有效设置和资源。
+
+实现参考 [Vulkan 图像格式采样能力](https://docs.vulkan.org/refpages/latest/refpages/source/VkImageFormatProperties.html) 和 [NVIDIA FXAA 白皮书](https://developer.download.nvidia.com/assets/gamedev/files/sdk/11/FXAA_WhitePaper.pdf)。
+
 ## 范围与限制
 
 当前里程碑支持静态 OBJ / glTF / GLB / PMX 网格、节点变换、基础颜色、常见基础颜色纹理、深度测试和简单方向光照。纹理缺失或无法解码时使用白色回退并记录警告。
@@ -95,9 +105,11 @@ glTF 的 OPAQUE 会忽略 alpha，MASK 使用模型指定的 cutoff（默认 0.5
 
 ## 已验证的里程碑
 
-2026-10-25 在本机 MSVC 19.51 / RTX 5070 / Vulkan SDK 1.4.357.0 上完成 Debug、Release 编译。完整 CTest **16/16 通过**，包含两个具有 **33 项模型/相机用例及 8 项字体用例**的 CPU 目标，以及 **14 项真实 GPU 测试**。MinGW 构建和两个 CPU 目标也通过验证。CPU 回归覆盖左右拖动时模型表面的投影运动方向，以及 PMX 编码、坐标/绕序、UV、材质、中文路径、透明裁切和错误输入；字体回归检查中文实际字形、Unicode 字体路径、字体数据所有权和无效字体诊断；GPU 测试另检查 PMX 场景确实可见。
+2026-10-25 在本机 MSVC 19.51 / RTX 5070 / Vulkan SDK 1.4.357.0 上完成 Debug、Release 编译。完整 CTest **17/17 通过**，包含两个具有 **33 项模型/相机用例及 8 项字体用例**的 CPU 目标，以及 **15 项真实 GPU 测试**。MinGW 构建和两个 CPU 目标也通过验证。CPU 回归覆盖左右拖动时模型表面的投影运动方向，以及 PMX 编码、坐标/绕序、UV、材质、中文路径、透明裁切和错误输入；字体回归检查中文实际字形、Unicode 字体路径、字体数据所有权和无效字体诊断；GPU 测试另检查 PMX 场景确实可见。
 
 GPU 测试检查场景截图确实包含模型，覆盖 OPAQUE/MASK 材质、含空格及中文资源 URI、窗口与视口反复缩放、导入替换失败后画面保持不变，以及 ImGui 初始化失败时的资源回收。测试同时检查 Vulkan 同步验证及退出阶段的错误输出。测试使用隐藏窗口；`-GpuTests` 仍需要可用的 Windows 桌面和 Vulkan 驱动。
+
+抗锯齿 GPU 回归检查斜边的实际像素覆盖、纯色和模型内部颜色、MSAA/FXAA 叠加后的最终截图、恢复关闭后的像素一致性，以及单像素/奇数尺寸、窗口缩放、重复切换、错误参数和模型替换。当前 RTX 5070 支持全部四档；缺少部分采样档位的物理设备尚未实测。MinGW 命令行已另验证所有档位叠加 FXAA 的真实渲染，Vulkan 验证错误均为零。
 
 ## 代码结构与依赖
 

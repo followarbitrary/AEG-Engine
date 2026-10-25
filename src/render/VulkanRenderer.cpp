@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <cmath>
 #include <cstddef>
 #include <fstream>
@@ -61,6 +62,35 @@ struct GpuModel {
     }
 };
 
+struct ScenePipeline {
+    VkDevice device{};
+    VkRenderPass pass{};
+    VkPipeline pipeline{};
+    VkSampleCountFlagBits samples{VK_SAMPLE_COUNT_1_BIT};
+    ~ScenePipeline() {
+        if (pipeline) vkDestroyPipeline(device, pipeline, nullptr);
+        if (pass) vkDestroyRenderPass(device, pass, nullptr);
+    }
+};
+
+// A complete candidate owns all its handles, including on partial allocation
+// failure. Framebuffers/descriptors are released before the image views.
+struct ViewportTargets {
+    VkDevice device{};
+    VkDescriptorPool uiPool{}, postPool{};
+    VkDescriptorSet descriptor{}, postDescriptor{};
+    VkFramebuffer sceneFrame{}, postFrame{};
+    detail::Image color, depth, multisample, filtered;
+    std::uint32_t width{}, height{};
+    ~ViewportTargets() {
+        if (descriptor) vkFreeDescriptorSets(device, uiPool, 1, &descriptor);
+        if (postPool) vkDestroyDescriptorPool(device, postPool, nullptr);
+        if (postFrame) vkDestroyFramebuffer(device, postFrame, nullptr);
+        if (sceneFrame) vkDestroyFramebuffer(device, sceneFrame, nullptr);
+    }
+    const detail::Image& output() const { return filtered.handle ? filtered : color; }
+};
+
 std::string pathText(const std::filesystem::path& path) {
     const auto text = path.u8string();
     return {reinterpret_cast<const char*>(text.data()), text.size()};
@@ -106,19 +136,20 @@ struct VulkanRenderer::Impl {
     std::vector<VkFramebuffer> swapFrames;
     std::vector<VkSemaphore> renderFinished;
     bool rebuildSwapchain{};
-    VkRenderPass presentPass{}, scenePass{};
+    VkRenderPass presentPass{}, postPass{};
     VkDescriptorPool uiPool{}, uniformPool{};
     VkDescriptorSetLayout sceneLayout{}, materialLayout{};
     VkDescriptorSet sceneDescriptor{};
-    VkPipelineLayout pipelineLayout{};
-    VkPipeline pipeline{};
-    VkSampler sampler{};
+    VkPipelineLayout pipelineLayout{}, postLayout{};
+    VkPipeline postPipeline{};
+    VkSampler sampler{}, viewportSampler{};
+    std::filesystem::path shaderDirectory;
+    std::array<std::unique_ptr<ScenePipeline>, 4> scenePipelines;
+    AntialiasingSettings aa;
+    std::uint32_t sampleMask{1}, maximumViewport{1};
     detail::Buffer uniformBuffer;
     std::unique_ptr<GpuModel> model;
-    detail::Image viewportColor, viewportDepth;
-    VkFramebuffer viewportFrame{};
-    VkDescriptorSet viewportDescriptor{};
-    std::uint32_t viewportWidth{}, viewportHeight{};
+    std::unique_ptr<ViewportTargets> viewport;
     bool sceneRendered{};
 
     ~Impl() { shutdown(); }
@@ -278,6 +309,29 @@ struct VulkanRenderer::Impl {
             }
         }
         if (depthFormat == VK_FORMAT_UNDEFINED) throw std::runtime_error("No compatible depth attachment format");
+        const auto imageSupport = [&](VkFormat format, VkImageUsageFlags usage) {
+            VkImageFormatProperties info{};
+            check(vkGetPhysicalDeviceImageFormatProperties(physical, format, VK_IMAGE_TYPE_2D,
+                      VK_IMAGE_TILING_OPTIMAL, usage, 0, &info), "vkGetPhysicalDeviceImageFormatProperties");
+            return info;
+        };
+        const auto color = imageSupport(sceneFormat, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT);
+        const auto single = imageSupport(sceneFormat, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+            VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT);
+        const auto depth = imageSupport(depthFormat, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
+        sampleMask = properties.limits.framebufferColorSampleCounts &
+            properties.limits.framebufferDepthSampleCounts & color.sampleCounts & depth.sampleCounts & 15u;
+        if (!(sampleMask & 1u) || !(single.sampleCounts & VK_SAMPLE_COUNT_1_BIT))
+            throw std::runtime_error("Scene attachments do not support single sampling");
+        VkFormatProperties format{};
+        vkGetPhysicalDeviceFormatProperties(physical, sceneFormat, &format);
+        if (!(format.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT))
+            throw std::runtime_error("Scene format does not support linear sampling");
+        maximumViewport = std::min({properties.limits.maxImageDimension2D,
+            properties.limits.maxFramebufferWidth, properties.limits.maxFramebufferHeight,
+            color.maxExtent.width, color.maxExtent.height, single.maxExtent.width, single.maxExtent.height,
+            depth.maxExtent.width, depth.maxExtent.height, 8192u});
+        std::cout << "Supported MSAA mask: " << sampleMask << '\n';
     }
 
     void createDevice() {
@@ -471,41 +525,52 @@ struct VulkanRenderer::Impl {
         return true;
     }
 
-    void createScenePass() {
-        std::array<VkAttachmentDescription, 2> attachments{};
+    void createScenePass(ScenePipeline& target) {
+        const bool multisampled = target.samples != VK_SAMPLE_COUNT_1_BIT;
+        std::array<VkAttachmentDescription, 3> attachments{};
         attachments[0].format = sceneFormat;
-        attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
+        attachments[0].samples = target.samples;
         attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        attachments[0].storeOp = multisampled ? VK_ATTACHMENT_STORE_OP_DONT_CARE : VK_ATTACHMENT_STORE_OP_STORE;
         attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
         attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
         attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        attachments[0].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        attachments[0].finalLayout = multisampled ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+                                                 : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         attachments[1].format = depthFormat;
-        attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
+        attachments[1].samples = target.samples;
         attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
         attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
         attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
         attachments[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        attachments[2] = attachments[0];
+        attachments[2].samples = VK_SAMPLE_COUNT_1_BIT;
+        attachments[2].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        attachments[2].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        attachments[2].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         VkAttachmentReference color{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL},
-            depth{1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+            depth{1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL},
+            resolve{2, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
         VkSubpassDescription subpass{};
         subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
         subpass.colorAttachmentCount = 1;
         subpass.pColorAttachments = &color;
         subpass.pDepthStencilAttachment = &depth;
+        subpass.pResolveAttachments = multisampled ? &resolve : nullptr;
         std::array<VkSubpassDependency, 2> dependencies{};
         dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
         dependencies[0].dstSubpass = 0;
-        dependencies[0].srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
+        dependencies[0].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
+                                       VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
                                        VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
                                        VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
         dependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
                                        VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
                                        VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-        dependencies[0].srcAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        dependencies[0].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT |
+                                        VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
         dependencies[0].dstAccessMask =
             VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
         // The sampled scene is drawn at a different offset/scale in ImGui.
@@ -519,13 +584,52 @@ struct VulkanRenderer::Impl {
         dependencies[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
         dependencies[1].dependencyFlags = 0;
         VkRenderPassCreateInfo info{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
-        info.attachmentCount = 2;
+        info.attachmentCount = multisampled ? 3u : 2u;
         info.pAttachments = attachments.data();
         info.subpassCount = 1;
         info.pSubpasses = &subpass;
         info.dependencyCount = 2;
         info.pDependencies = dependencies.data();
-        check(vkCreateRenderPass(device, &info, nullptr, &scenePass), "vkCreateRenderPass(scene)");
+        check(vkCreateRenderPass(device, &info, nullptr, &target.pass), "vkCreateRenderPass(scene)");
+    }
+
+    void createPostPass() {
+        VkAttachmentDescription color{};
+        color.format = sceneFormat;
+        color.samples = VK_SAMPLE_COUNT_1_BIT;
+        color.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        color.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        color.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        color.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        color.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        VkAttachmentReference output{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+        VkSubpassDescription subpass{};
+        subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        subpass.colorAttachmentCount = 1;
+        subpass.pColorAttachments = &output;
+        std::array<VkSubpassDependency, 2> dependencies{};
+        dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+        dependencies[0].dstSubpass = 0;
+        dependencies[0].srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        dependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dependencies[0].srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        dependencies[1].srcSubpass = 0;
+        dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+        dependencies[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dependencies[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        dependencies[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        dependencies[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        // Global scopes: FXAA reads neighboring texels and ImGui scales the result.
+        VkRenderPassCreateInfo info{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+        info.attachmentCount = 1;
+        info.pAttachments = &color;
+        info.subpassCount = 1;
+        info.pSubpasses = &subpass;
+        info.dependencyCount = static_cast<std::uint32_t>(dependencies.size());
+        info.pDependencies = dependencies.data();
+        check(vkCreateRenderPass(device, &info, nullptr, &postPass), "vkCreateRenderPass(FXAA)");
     }
 
     void createDescriptors() {
@@ -585,11 +689,28 @@ struct VulkanRenderer::Impl {
         info.maxLod = 0;
         info.maxAnisotropy = 1;
         check(vkCreateSampler(device, &info, nullptr, &sampler), "vkCreateSampler");
+        info.addressModeU = info.addressModeV = info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        check(vkCreateSampler(device, &info, nullptr, &viewportSampler), "vkCreateSampler(viewport)");
+
+        const std::array layouts{sceneLayout, materialLayout};
+        VkPushConstantRange push{VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(MaterialPush)};
+        VkPipelineLayoutCreateInfo pipelineInfo{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+        pipelineInfo.setLayoutCount = static_cast<std::uint32_t>(layouts.size());
+        pipelineInfo.pSetLayouts = layouts.data();
+        pipelineInfo.pushConstantRangeCount = 1;
+        pipelineInfo.pPushConstantRanges = &push;
+        check(vkCreatePipelineLayout(device, &pipelineInfo, nullptr, &pipelineLayout), "vkCreatePipelineLayout(scene)");
+        push.size = sizeof(glm::vec2);
+        pipelineInfo.setLayoutCount = 1;
+        pipelineInfo.pSetLayouts = &materialLayout;
+        check(vkCreatePipelineLayout(device, &pipelineInfo, nullptr, &postLayout), "vkCreatePipelineLayout(FXAA)");
     }
 
-    void createPipeline(const std::filesystem::path& directory) {
-        const auto vertexCode = readShader(directory / "model.vert.spv"),
-                   fragmentCode = readShader(directory / "model.frag.spv");
+    VkPipeline createPipeline(VkRenderPass renderPass, VkPipelineLayout layout, VkSampleCountFlagBits samples,
+                              bool scene, const char* vertexName, const char* fragmentName) {
+        const auto vertexCode = readShader(shaderDirectory / vertexName),
+                   fragmentCode = readShader(shaderDirectory / fragmentName);
+        VkPipeline result{};
         VkShaderModule vertex{}, fragment{};
         auto create = [&](const std::vector<std::uint32_t>& code, VkShaderModule& output) {
             VkShaderModuleCreateInfo info{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
@@ -615,26 +736,26 @@ struct VulkanRenderer::Impl {
                  {1, 0, VK_FORMAT_R32G32B32_SFLOAT, static_cast<std::uint32_t>(offsetof(Vertex, normal))},
                  {2, 0, VK_FORMAT_R32G32_SFLOAT, static_cast<std::uint32_t>(offsetof(Vertex, uv))}}};
             VkPipelineVertexInputStateCreateInfo input{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
-            input.vertexBindingDescriptionCount = 1;
+            input.vertexBindingDescriptionCount = scene ? 1u : 0u;
             input.pVertexBindingDescriptions = &binding;
-            input.vertexAttributeDescriptionCount = 3;
+            input.vertexAttributeDescriptionCount = scene ? 3u : 0u;
             input.pVertexAttributeDescriptions = attributes.data();
             VkPipelineInputAssemblyStateCreateInfo assembly{
                 VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
             assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-            VkPipelineViewportStateCreateInfo viewport{VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
-            viewport.viewportCount = 1;
-            viewport.scissorCount = 1;
+            VkPipelineViewportStateCreateInfo viewportState{VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
+            viewportState.viewportCount = 1;
+            viewportState.scissorCount = 1;
             VkPipelineRasterizationStateCreateInfo raster{VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
             raster.polygonMode = VK_POLYGON_MODE_FILL;
             raster.cullMode = VK_CULL_MODE_NONE;
             raster.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
             raster.lineWidth = 1;
             VkPipelineMultisampleStateCreateInfo multisample{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
-            multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+            multisample.rasterizationSamples = samples;
             VkPipelineDepthStencilStateCreateInfo depth{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
-            depth.depthTestEnable = VK_TRUE;
-            depth.depthWriteEnable = VK_TRUE;
+            depth.depthTestEnable = scene ? VK_TRUE : VK_FALSE;
+            depth.depthWriteEnable = scene ? VK_TRUE : VK_FALSE;
             depth.depthCompareOp = VK_COMPARE_OP_LESS;
             VkPipelineColorBlendAttachmentState attachment{};
             attachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT |
@@ -646,47 +767,58 @@ struct VulkanRenderer::Impl {
             VkPipelineDynamicStateCreateInfo dynamic{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
             dynamic.dynamicStateCount = 2;
             dynamic.pDynamicStates = dynamicStates.data();
-            const std::array layouts{sceneLayout, materialLayout};
-            VkPushConstantRange push{VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(MaterialPush)};
-            VkPipelineLayoutCreateInfo layout{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
-            layout.setLayoutCount = 2;
-            layout.pSetLayouts = layouts.data();
-            layout.pushConstantRangeCount = 1;
-            layout.pPushConstantRanges = &push;
-            check(vkCreatePipelineLayout(device, &layout, nullptr, &pipelineLayout), "vkCreatePipelineLayout");
             VkGraphicsPipelineCreateInfo info{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
             info.stageCount = 2;
             info.pStages = stages.data();
             info.pVertexInputState = &input;
             info.pInputAssemblyState = &assembly;
-            info.pViewportState = &viewport;
+            info.pViewportState = &viewportState;
             info.pRasterizationState = &raster;
             info.pMultisampleState = &multisample;
             info.pDepthStencilState = &depth;
             info.pColorBlendState = &blend;
             info.pDynamicState = &dynamic;
-            info.layout = pipelineLayout;
-            info.renderPass = scenePass;
-            check(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &info, nullptr, &pipeline),
+            info.layout = layout;
+            info.renderPass = renderPass;
+            check(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &info, nullptr, &result),
                   "vkCreateGraphicsPipelines");
         } catch (...) {
+            if (result) vkDestroyPipeline(device, result, nullptr);
             if (fragment) vkDestroyShaderModule(device, fragment, nullptr);
             vkDestroyShaderModule(device, vertex, nullptr);
             throw;
         }
         vkDestroyShaderModule(device, fragment, nullptr);
         vkDestroyShaderModule(device, vertex, nullptr);
+        return result;
+    }
+
+    ScenePipeline& scenePipeline(std::uint32_t samples) {
+        auto& cached = scenePipelines[std::countr_zero(samples)];
+        if (!cached) {
+            auto candidate = std::make_unique<ScenePipeline>();
+            candidate->device = device;
+            candidate->samples = static_cast<VkSampleCountFlagBits>(samples);
+            createScenePass(*candidate);
+            candidate->pipeline = createPipeline(candidate->pass, pipelineLayout, candidate->samples,
+                true, "model.vert.spv", "model.frag.spv");
+            cached = std::move(candidate);
+        }
+        return *cached;
     }
 
     void initialize(GLFWwindow* target, const std::filesystem::path& shaders, bool requestedValidation) {
         window = target;
+        shaderDirectory = shaders;
         createInstance(requestedValidation);
         selectDevice();
         createDevice();
         createSwapchain();
-        createScenePass();
         createDescriptors();
-        createPipeline(shaders);
+        scenePipeline(1);
+        createPostPass();
+        postPipeline = createPipeline(postPass, postLayout, VK_SAMPLE_COUNT_1_BIT,
+            false, "fullscreen.vert.spv", "fxaa.frag.spv");
         if (!ImGui_ImplGlfw_InitForVulkan(window, true)) throw std::runtime_error("ImGui GLFW initialization failed");
         glfwBackend = true;
         ImGui_ImplVulkan_InitInfo info{};
@@ -716,44 +848,98 @@ struct VulkanRenderer::Impl {
     }
 
     void destroyViewport() noexcept {
-        if (viewportDescriptor && imguiBackend) ImGui_ImplVulkan_RemoveTexture(viewportDescriptor);
-        viewportDescriptor = VK_NULL_HANDLE;
-        if (viewportFrame) vkDestroyFramebuffer(device, viewportFrame, nullptr);
-        viewportFrame = VK_NULL_HANDLE;
-        viewportColor.reset();
-        viewportDepth.reset();
-        viewportWidth = viewportHeight = 0;
+        viewport.reset();
         sceneRendered = false;
     }
 
-    void resizeViewport(std::uint32_t width, std::uint32_t height) {
-        const auto maximum = std::min({properties.limits.maxImageDimension2D, properties.limits.maxFramebufferWidth,
-                                       properties.limits.maxFramebufferHeight, 8192u});
-        width = std::clamp(width, 1u, maximum);
-        height = std::clamp(height, 1u, maximum);
-        if (width == viewportWidth && height == viewportHeight) return;
-        check(vkDeviceWaitIdle(device), "vkDeviceWaitIdle(viewport)");
-        destroyViewport();
-        viewportColor = resources.image(width, height, sceneFormat,
+    std::unique_ptr<ViewportTargets> createViewport(std::uint32_t width, std::uint32_t height,
+                                                   const AntialiasingSettings& settings) {
+        auto& scene = scenePipeline(settings.msaaSamples);
+        auto candidate = std::make_unique<ViewportTargets>();
+        candidate->device = device;
+        candidate->uiPool = uiPool;
+        candidate->width = width;
+        candidate->height = height;
+        candidate->color = resources.image(width, height, sceneFormat,
                                         VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
                                             VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
                                         VK_IMAGE_ASPECT_COLOR_BIT);
-        viewportDepth = resources.image(width, height, depthFormat, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-                                        VK_IMAGE_ASPECT_DEPTH_BIT);
-        const std::array attachments{viewportColor.view, viewportDepth.view};
+        candidate->depth = resources.image(width, height, depthFormat, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+                                        VK_IMAGE_ASPECT_DEPTH_BIT, scene.samples);
+        const bool multisampled = settings.msaaSamples > 1;
+        if (multisampled)
+            candidate->multisample = resources.image(width, height, sceneFormat,
+                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_IMAGE_ASPECT_COLOR_BIT, scene.samples);
+        const std::array attachments{multisampled ? candidate->multisample.view : candidate->color.view,
+                                    candidate->depth.view, candidate->color.view};
         VkFramebufferCreateInfo frame{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
-        frame.renderPass = scenePass;
-        frame.attachmentCount = 2;
+        frame.renderPass = scene.pass;
+        frame.attachmentCount = multisampled ? 3u : 2u;
         frame.pAttachments = attachments.data();
         frame.width = width;
         frame.height = height;
         frame.layers = 1;
-        check(vkCreateFramebuffer(device, &frame, nullptr, &viewportFrame), "vkCreateFramebuffer(viewport)");
-        viewportDescriptor =
-            ImGui_ImplVulkan_AddTexture(sampler, viewportColor.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        if (!viewportDescriptor) throw std::runtime_error("Cannot allocate ImGui viewport descriptor");
-        viewportWidth = width;
-        viewportHeight = height;
+        check(vkCreateFramebuffer(device, &frame, nullptr, &candidate->sceneFrame), "vkCreateFramebuffer(viewport)");
+        if (settings.fxaa) {
+            candidate->filtered = resources.image(width, height, sceneFormat,
+                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                VK_IMAGE_ASPECT_COLOR_BIT);
+            frame.renderPass = postPass;
+            frame.attachmentCount = 1;
+            frame.pAttachments = &candidate->filtered.view;
+            check(vkCreateFramebuffer(device, &frame, nullptr, &candidate->postFrame), "vkCreateFramebuffer(FXAA)");
+            VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1};
+            VkDescriptorPoolCreateInfo pool{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+            pool.maxSets = 1;
+            pool.poolSizeCount = 1;
+            pool.pPoolSizes = &size;
+            check(vkCreateDescriptorPool(device, &pool, nullptr, &candidate->postPool), "vkCreateDescriptorPool(FXAA)");
+            VkDescriptorSetAllocateInfo allocate{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+            allocate.descriptorPool = candidate->postPool;
+            allocate.descriptorSetCount = 1;
+            allocate.pSetLayouts = &materialLayout;
+            check(vkAllocateDescriptorSets(device, &allocate, &candidate->postDescriptor), "vkAllocateDescriptorSets(FXAA)");
+            VkDescriptorImageInfo image{viewportSampler, candidate->color.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+            VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+            write.dstSet = candidate->postDescriptor;
+            write.dstBinding = 0;
+            write.descriptorCount = 1;
+            write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            write.pImageInfo = &image;
+            vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+        }
+        candidate->descriptor = ImGui_ImplVulkan_AddTexture(viewportSampler, candidate->output().view,
+                                                           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        if (!candidate->descriptor) throw std::runtime_error("Cannot allocate ImGui viewport descriptor");
+        return candidate;
+    }
+
+    void resizeViewport(std::uint32_t width, std::uint32_t height) {
+        width = std::clamp(width, 1u, maximumViewport);
+        height = std::clamp(height, 1u, maximumViewport);
+        if (viewport && width == viewport->width && height == viewport->height) return;
+        check(vkDeviceWaitIdle(device), "vkDeviceWaitIdle(viewport)");
+        auto replacement = createViewport(width, height, aa);
+        viewport.swap(replacement);
+        sceneRendered = false;
+    }
+
+    void setAntialiasing(const AntialiasingSettings& requested) {
+        if (requested.msaaSamples != 1 && requested.msaaSamples != 2 &&
+            requested.msaaSamples != 4 && requested.msaaSamples != 8)
+            throw std::invalid_argument("MSAA sample count must be 1, 2, 4 or 8");
+        AntialiasingSettings effective{1, requested.fxaa};
+        for (const auto samples : {8u, 4u, 2u, 1u})
+            if (samples <= requested.msaaSamples && (sampleMask & samples)) {
+                effective.msaaSamples = samples;
+                break;
+            }
+        if (effective == aa) return;
+        check(vkDeviceWaitIdle(device), "vkDeviceWaitIdle(antialiasing)");
+        auto replacement = createViewport(viewport->width, viewport->height, effective);
+        viewport.swap(replacement);
+        aa = effective;
+        sceneRendered = false;
     }
 
     void uploadModel(const ModelData& source) {
@@ -814,6 +1000,8 @@ struct VulkanRenderer::Impl {
     }
 
     void drawScene(const RenderSettings& settings) {
+        const auto viewportWidth = viewport->width, viewportHeight = viewport->height;
+        const auto& scene = scenePipeline(aa.msaaSamples);
         SceneUniform uniform;
         uniform.viewProjection = settings.viewProjection;
         uniform.model = settings.model;
@@ -826,17 +1014,17 @@ struct VulkanRenderer::Impl {
         clears[0].color = {{settings.background.r, settings.background.g, settings.background.b, 1}};
         clears[1].depthStencil = {1, 0};
         VkRenderPassBeginInfo begin{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
-        begin.renderPass = scenePass;
-        begin.framebuffer = viewportFrame;
+        begin.renderPass = scene.pass;
+        begin.framebuffer = viewport->sceneFrame;
         begin.renderArea = {{0, 0}, {viewportWidth, viewportHeight}};
         begin.clearValueCount = 2;
         begin.pClearValues = clears.data();
         vkCmdBeginRenderPass(command, &begin, VK_SUBPASS_CONTENTS_INLINE);
-        VkViewport viewport{0, 0, static_cast<float>(viewportWidth), static_cast<float>(viewportHeight), 0, 1};
+        VkViewport viewportArea{0, 0, static_cast<float>(viewportWidth), static_cast<float>(viewportHeight), 0, 1};
         VkRect2D scissor{{0, 0}, {viewportWidth, viewportHeight}};
-        vkCmdSetViewport(command, 0, 1, &viewport);
+        vkCmdSetViewport(command, 0, 1, &viewportArea);
         vkCmdSetScissor(command, 0, 1, &scissor);
-        vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+        vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS, scene.pipeline);
         vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &sceneDescriptor, 0,
                                 nullptr);
         if (model)
@@ -853,6 +1041,27 @@ struct VulkanRenderer::Impl {
             }
         vkCmdEndRenderPass(command);
         sceneRendered = true;
+    }
+
+    void drawFxaa() {
+        if (!aa.fxaa) return;
+        VkRenderPassBeginInfo pass{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+        pass.renderPass = postPass;
+        pass.framebuffer = viewport->postFrame;
+        pass.renderArea = {{0, 0}, {viewport->width, viewport->height}};
+        vkCmdBeginRenderPass(command, &pass, VK_SUBPASS_CONTENTS_INLINE);
+        VkViewport target{0, 0, static_cast<float>(viewport->width), static_cast<float>(viewport->height), 0, 1};
+        VkRect2D scissor{{0, 0}, {viewport->width, viewport->height}};
+        vkCmdSetViewport(command, 0, 1, &target);
+        vkCmdSetScissor(command, 0, 1, &scissor);
+        vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS, postPipeline);
+        vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS, postLayout, 0, 1,
+                                &viewport->postDescriptor, 0, nullptr);
+        const glm::vec2 reciprocal{1.0f / static_cast<float>(viewport->width),
+                                   1.0f / static_cast<float>(viewport->height)};
+        vkCmdPushConstants(command, postLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(reciprocal), &reciprocal);
+        vkCmdDraw(command, 3, 1, 0, 0);
+        vkCmdEndRenderPass(command);
     }
 
     void drawFrame(RenderSettings& settings, const std::function<void()>& ui) {
@@ -876,6 +1085,7 @@ struct VulkanRenderer::Impl {
         begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         check(vkBeginCommandBuffer(command, &begin), "vkBeginCommandBuffer(frame)");
         drawScene(settings);
+        drawFxaa();
         VkClearValue clear{};
         clear.color = {{0.02f, 0.025f, 0.035f, 1}};
         VkRenderPassBeginInfo pass{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
@@ -918,6 +1128,8 @@ struct VulkanRenderer::Impl {
 
     void captureViewport(const std::filesystem::path& path) {
         if (!sceneRendered) throw std::runtime_error("Cannot capture before the first rendered scene");
+        const auto viewportWidth = viewport->width, viewportHeight = viewport->height;
+        const auto& viewportColor = viewport->output();
         check(vkDeviceWaitIdle(device), "vkDeviceWaitIdle(capture)");
         const auto bytes = static_cast<VkDeviceSize>(viewportWidth) * viewportHeight * 4;
         auto staging =
@@ -982,14 +1194,17 @@ struct VulkanRenderer::Impl {
         if (device) {
             uniformBuffer.reset();
             destroySwapchain();
-            if (pipeline) vkDestroyPipeline(device, pipeline, nullptr);
+            for (auto& scene : scenePipelines) scene.reset();
+            if (postPipeline) vkDestroyPipeline(device, postPipeline, nullptr);
+            if (postLayout) vkDestroyPipelineLayout(device, postLayout, nullptr);
             if (pipelineLayout) vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
             if (uniformPool) vkDestroyDescriptorPool(device, uniformPool, nullptr);
             if (uiPool) vkDestroyDescriptorPool(device, uiPool, nullptr);
             if (sceneLayout) vkDestroyDescriptorSetLayout(device, sceneLayout, nullptr);
             if (materialLayout) vkDestroyDescriptorSetLayout(device, materialLayout, nullptr);
             if (sampler) vkDestroySampler(device, sampler, nullptr);
-            if (scenePass) vkDestroyRenderPass(device, scenePass, nullptr);
+            if (viewportSampler) vkDestroySampler(device, viewportSampler, nullptr);
+            if (postPass) vkDestroyRenderPass(device, postPass, nullptr);
             if (presentPass) vkDestroyRenderPass(device, presentPass, nullptr);
             if (frameFence) vkDestroyFence(device, frameFence, nullptr);
             if (acquired) vkDestroySemaphore(device, acquired, nullptr);
@@ -1016,10 +1231,14 @@ VulkanRenderer::~VulkanRenderer() = default;
 
 void VulkanRenderer::uploadModel(const ModelData& model) { impl_->uploadModel(model); }
 
+void VulkanRenderer::setAntialiasing(const AntialiasingSettings& settings) { impl_->setAntialiasing(settings); }
+AntialiasingSettings VulkanRenderer::antialiasing() const { return impl_->aa; }
+std::uint32_t VulkanRenderer::supportedMsaaSamples() const { return impl_->sampleMask; }
+
 void VulkanRenderer::resizeViewport(std::uint32_t width, std::uint32_t height) { impl_->resizeViewport(width, height); }
 
 ImTextureID VulkanRenderer::viewportTexture() const {
-    return static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(impl_->viewportDescriptor));
+    return static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(impl_->viewport->descriptor));
 }
 
 void VulkanRenderer::drawFrame(RenderSettings& settings, const std::function<void()>& ui) {

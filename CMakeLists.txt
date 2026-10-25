@@ -58,7 +58,7 @@ endif()
 aeg_project_options(aeg_editor)
 
 set(aeg_shader_outputs)
-foreach(shader model.vert model.frag)
+foreach(shader model.vert model.frag fullscreen.vert fxaa.frag)
     set(output "${CMAKE_BINARY_DIR}/compiled-shaders/${shader}.spv")
     add_custom_command(OUTPUT "${output}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/compiled-shaders"
@@ -97,6 +97,13 @@ if(BUILD_TESTING)
     add_test(NAME aeg_core_tests COMMAND aeg_core_tests)
     set_tests_properties(aeg_core_tests PROPERTIES WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}" LABELS cpu)
     if(AEG_ENABLE_GPU_TESTS)
+        add_executable(aeg_antialiasing_test tests/Antialiasing.cpp src/render/VulkanRenderer.cpp)
+        target_link_libraries(aeg_antialiasing_test PRIVATE aeg_core aeg_imgui Vulkan::Vulkan glfw)
+        aeg_project_options(aeg_antialiasing_test)
+        add_dependencies(aeg_antialiasing_test aeg_resources)
+        add_test(NAME aeg_antialiasing COMMAND aeg_antialiasing_test
+            "$<TARGET_FILE_DIR:aeg_editor>" "${CMAKE_BINARY_DIR}/antialiasing")
+        set_tests_properties(aeg_antialiasing PROPERTIES LABELS gpu TIMEOUT 90)
         add_executable(aeg_render_check tests/RenderSmoke.cpp)
         aeg_project_options(aeg_render_check)
         add_executable(aeg_backend_failure_test tests/BackendFailure.cpp src/render/VulkanRenderer.cpp)

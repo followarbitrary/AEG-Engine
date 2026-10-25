@@ -10,6 +10,11 @@
 
 struct GLFWwindow;
 namespace aeg {
+struct AntialiasingSettings {
+    std::uint32_t msaaSamples{1};
+    bool fxaa{false};
+    bool operator==(const AntialiasingSettings&) const = default;
+};
 struct RenderSettings {
     glm::mat4 model{1};
     glm::mat4 viewProjection{1};
@@ -25,6 +30,12 @@ public:
     VulkanRenderer(const VulkanRenderer&) = delete;
     VulkanRenderer& operator=(const VulkanRenderer&) = delete;
     void uploadModel(const ModelData& model);
+    // Set before recording any ImGui::Image of this viewport. Valid sample
+    // requests are 1/2/4/8; unsupported counts fall back to the next lower one.
+    void setAntialiasing(const AntialiasingSettings& settings);
+    [[nodiscard]] AntialiasingSettings antialiasing() const;
+    // Bitmask of supported sample counts (1 | 2 | 4 | 8).
+    [[nodiscard]] std::uint32_t supportedMsaaSamples() const;
     void resizeViewport(std::uint32_t width, std::uint32_t height);
     [[nodiscard]] ImTextureID viewportTexture() const;
     void drawFrame(RenderSettings& settings, const std::function<void()>& buildUi);

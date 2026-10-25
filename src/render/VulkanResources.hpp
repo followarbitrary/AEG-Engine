@@ -134,7 +134,7 @@ struct DeviceResources {
         return result;
     }
     Image image(std::uint32_t width, std::uint32_t height, VkFormat format, VkImageUsageFlags usage,
-                VkImageAspectFlags aspect) const {
+                VkImageAspectFlags aspect, VkSampleCountFlagBits samples = VK_SAMPLE_COUNT_1_BIT) const {
         Image result;
         result.device = device;
         VkImageCreateInfo info{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
@@ -146,7 +146,7 @@ struct DeviceResources {
         info.tiling = VK_IMAGE_TILING_OPTIMAL;
         info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         info.usage = usage;
-        info.samples = VK_SAMPLE_COUNT_1_BIT;
+        info.samples = samples;
         info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
         check(vkCreateImage(device, &info, nullptr, &result.handle), "vkCreateImage");
         VkMemoryRequirements requirements{};

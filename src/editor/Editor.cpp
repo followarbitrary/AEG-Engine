@@ -146,6 +146,17 @@ int runEditor(const EditorOptions& options) {
 
     // This scope makes backend teardown precede the ImGui context and native window.
     VulkanRenderer renderer(lifetime.window, options.resourceDirectory / "shaders", options.validation);
+    renderer.setAntialiasing({options.msaaSamples, options.fxaa});
+    auto antialiasing = renderer.antialiasing();
+    const auto supportedMsaa = renderer.supportedMsaaSamples();
+    std::string antialiasingNotice;
+    if (antialiasing.msaaSamples != options.msaaSamples) {
+        antialiasingNotice = "请求 MSAA " + std::to_string(options.msaaSamples) + "x，当前设备已降级为 " +
+                             std::to_string(antialiasing.msaaSamples) + "x。";
+        std::cerr << antialiasingNotice << '\n';
+    }
+    std::cout << "Antialiasing: MSAA " << antialiasing.msaaSamples << "x | FXAA "
+              << (antialiasing.fxaa ? "on" : "off") << '\n';
     std::cout << "GPU: " << renderer.deviceName() << '\n';
     ModelData model =
         loadModel(options.initialModel.empty() ? options.resourceDirectory / "assets" / "models" / "demo.obj"
@@ -296,6 +307,7 @@ int runEditor(const EditorOptions& options) {
             }
             ImGui::End();
 
+            bool antialiasingChanged = false;
             if (ImGui::Begin(inspectorWindow)) {
                 if (ImGui::CollapsingHeader("变换###Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
                     ImGui::DragFloat3("位置###Position", &transform.translation.x, 0.02f);
@@ -324,6 +336,27 @@ int runEditor(const EditorOptions& options) {
                         settings.lightDirection = {0, -1, 0};
                     ImGui::ColorEdit3("背景###Background", &settings.background.x);
                 }
+                if (ImGui::CollapsingHeader("抗锯齿###Antialiasing", ImGuiTreeNodeFlags_DefaultOpen)) {
+                    constexpr std::array<std::uint32_t, 4> sampleCounts{1, 2, 4, 8};
+                    constexpr std::array<const char*, 4> sampleLabels{"关闭 (Off)", "2x", "4x", "8x"};
+                    const auto selected = std::find(sampleCounts.begin(), sampleCounts.end(), antialiasing.msaaSamples);
+                    const auto selectedIndex = static_cast<std::size_t>(selected - sampleCounts.begin());
+                    if (ImGui::BeginCombo("MSAA###MSAA", sampleLabels[selectedIndex])) {
+                        for (std::size_t i = 0; i < sampleCounts.size(); ++i) {
+                            if ((supportedMsaa & sampleCounts[i]) == 0) continue;
+                            const bool active = antialiasing.msaaSamples == sampleCounts[i];
+                            if (ImGui::Selectable(sampleLabels[i], active) && !active) {
+                                antialiasing.msaaSamples = sampleCounts[i];
+                                antialiasingChanged = true;
+                            }
+                            if (active) ImGui::SetItemDefaultFocus();
+                        }
+                        ImGui::EndCombo();
+                    }
+                    antialiasingChanged |= ImGui::Checkbox("FXAA 后处理###FXAA", &antialiasing.fxaa);
+                    ImGui::Text("有效采样数：%u", renderer.antialiasing().msaaSamples);
+                    if (!antialiasingNotice.empty()) ImGui::TextWrapped("%s", antialiasingNotice.c_str());
+                }
                 ImGui::Spacing();
                 ImGui::TextDisabled("渲染器");
                 ImGui::TextWrapped("Vulkan | %s", renderer.deviceName().c_str());
@@ -331,6 +364,19 @@ int runEditor(const EditorOptions& options) {
                 ImGui::Text("视口：%u x %u", viewportWidth, viewportHeight);
             }
             ImGui::End();
+
+            // Changing AA can replace the viewport descriptor. Apply it before Image
+            // records its texture ID, never after this callback has recorded the image.
+            if (antialiasingChanged) {
+                try {
+                    renderer.setAntialiasing(antialiasing);
+                    antialiasingNotice.clear();
+                } catch (const std::exception& error) {
+                    antialiasingNotice = std::string("抗锯齿设置失败，已保留当前设置：") + error.what();
+                    std::cerr << antialiasingNotice << '\n';
+                }
+                antialiasing = renderer.antialiasing();
+            }
 
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
             if (ImGui::Begin(viewportWindow, nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
