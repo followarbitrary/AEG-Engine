@@ -50,7 +50,7 @@ target_include_directories(aeg_core SYSTEM PRIVATE "${stb_SOURCE_DIR}")
 target_link_libraries(aeg_core PUBLIC glm::glm PRIVATE assimp::assimp)
 aeg_project_options(aeg_core)
 
-add_executable(aeg_editor src/main.cpp src/editor/Editor.cpp src/render/VulkanRenderer.cpp)
+add_executable(aeg_editor src/main.cpp src/editor/Editor.cpp src/editor/EditorFont.cpp src/render/VulkanRenderer.cpp)
 target_link_libraries(aeg_editor PRIVATE aeg_core aeg_imgui Vulkan::Vulkan glfw)
 if(WIN32)
     target_link_libraries(aeg_editor PRIVATE shell32)
@@ -78,6 +78,16 @@ add_custom_target(aeg_resources ALL
 add_dependencies(aeg_editor aeg_resources)
 
 if(BUILD_TESTING)
+    add_executable(aeg_editor_font_tests tests/EditorFontTests.cpp src/editor/EditorFont.cpp)
+    target_include_directories(aeg_editor_font_tests PRIVATE include)
+    target_link_libraries(aeg_editor_font_tests PRIVATE aeg_imgui)
+    if(MINGW)
+        # Match the editor's static GCC/C++ runtimes for this standalone test.
+        target_link_options(aeg_editor_font_tests PRIVATE -static-libgcc -static-libstdc++)
+    endif()
+    aeg_project_options(aeg_editor_font_tests)
+    add_test(NAME aeg_editor_font_tests COMMAND aeg_editor_font_tests)
+    set_tests_properties(aeg_editor_font_tests PROPERTIES LABELS cpu TIMEOUT 60)
     add_executable(aeg_core_tests tests/CoreTests.cpp)
     target_link_libraries(aeg_core_tests PRIVATE aeg_core)
     target_compile_definitions(aeg_core_tests PRIVATE

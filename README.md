@@ -55,18 +55,33 @@ ctest --preset release
 .\build\debug\bin\aeg_editor.exe
 .\build\debug\bin\aeg_editor.exe --model 'D:\Models\example.glb'
 .\build\debug\bin\aeg_editor.exe --model 'D:\Models\character\model.pmx'
+.\build\debug\bin\aeg_editor.exe --font 'D:\Fonts\NotoSansSC-Regular.ttf'
 .\build\debug\bin\aeg_editor.exe --frames 12 --capture '.\build\viewport.ppm'
 .\build\debug\bin\aeg_editor.exe --no-validation
 ```
 
-`--model PATH` 选择 OBJ、glTF、GLB 或 PMX；`--frames N` 在指定帧数后退出；`--capture PATH` 导出场景视口的 PPM 图像；`--hidden` 使用隐藏窗口，适合配合 `--frames` 自动验证；`--no-validation` 关闭 Vulkan 验证层。默认尝试启用验证层，未安装时仍可启动。参数缺失或未知参数会报告错误。
+`--model PATH` 选择 OBJ、glTF、GLB 或 PMX；`--font PATH` 指定支持中文的 TTF、OTF 或 TTC 字体；`--frames N` 在指定帧数后退出；`--capture PATH` 导出场景视口的 PPM 图像；`--hidden` 使用隐藏窗口，适合配合 `--frames` 自动验证；`--no-validation` 关闭 Vulkan 验证层。默认尝试启用验证层，未安装时仍可启动。参数缺失或未知参数会报告错误。
 
 ## 使用方法
 
 - **导入**：在界面的模型路径栏输入文件路径并点击导入，或把模型文件拖入窗口。模型附带的相对纹理路径会相对模型文件解析。导入失败会保留当前模型并显示错误。
-- **观察**：在场景视口内拖动鼠标旋转相机，水平拖动时可见模型表面跟随鼠标方向；使用中键拖动平移，滚轮缩放；点击“Frame Model”或按 `F` 重新聚焦模型。具体拖动按键以界面底部提示为准。
+- **观察**：在场景视口内拖动鼠标旋转相机，水平拖动时可见模型表面跟随鼠标方向；使用中键拖动平移，滚轮缩放；点击“聚焦模型”或按 `F` 重新聚焦模型。具体拖动按键以界面底部提示为准。
 - **调整**：在属性面板修改模型位置、旋转、缩放，以及光照方向、环境光、背景色等；可查看网格、顶点和三角形数量。
 - **布局**：拖动 ImGui 面板标题可重新停靠；窗口与视口可调整尺寸。
+
+## 中文界面与字体
+
+编辑器面板、操作提示、状态和命令行帮助使用简体中文。模型名、网格名与路径按 UTF-8 显示，路径栏支持中文文本输入和粘贴。MSVC 与 MinGW 均启用 ImGui 的 Win32 IME 集成。
+
+字体按以下顺序选择，路径可以包含中文和空格：
+
+1. `--font PATH` 显式指定的字体。
+2. 程序旁 `assets/fonts/` 中的 `NotoSansSC-Regular.ttf`、`NotoSansCJKsc-Regular.otf`、`SourceHanSansSC-Regular.otf`。
+3. Windows 字体目录中的微软雅黑、微软正黑体、黑体或宋体。
+
+默认不需要手动配置；没有可用中文字体时，程序会提示使用 `--font`。显式字体缺失、格式无效或不含中文字符时会报告错误。仓库不复制或分发 Windows 系统字体；如随程序附带其他字体，请遵守该字体的授权。
+
+当前字库范围包含基本拉丁文、中日韩标点、假名、基本汉字及 CJK 扩展 A；实际字形取决于所选字体，不覆盖所有 Unicode 扩展区。已在真实窗口验证中文路径输入、复制粘贴、导入及名称显示；当前测试环境未验证拼音输入法的组合文本和候选窗。
 
 ## 范围与限制
 
@@ -76,11 +91,11 @@ PMX 支持 UTF-8 / UTF-16LE、多个材质分组、基础 UV 贴图和中文相�
 
 本版本主要面向不透明材质与基本裁切材质；没有完整 PBR、混合透明、骨骼动画、变形动画、物理、脚本、场景保存或生产级大模型流式加载。模型资产仍由使用者提供并遵守其授权；仓库演示模型可直接离线使用。
 
-glTF 的 OPAQUE 会忽略 alpha，MASK 使用模型指定的 cutoff（默认 0.5）；BLEND 暂按不透明显示并给出导入提示。glTF 外部缓冲和纹理的 URI 支持百分号编码、空格与 UTF-8 名称。界面目前使用英文和 ImGui 默认字体；中文路径可以导入，但中文名称的显示可能出现缺字。
+glTF 的 OPAQUE 会忽略 alpha，MASK 使用模型指定的 cutoff（默认 0.5）；BLEND 暂按不透明显示并给出导入提示。glTF 外部缓冲和纹理的 URI 支持百分号编码、空格与 UTF-8 名称。
 
 ## 已验证的里程碑
 
-2026-10-25 在本机 MSVC 19.51 / RTX 5070 / Vulkan SDK 1.4.357.0 上完成 Debug、Release 编译。完整 CTest **15/15 通过**，包含一个具有 **33 项 CPU 用例**的目标及 **14 项真实 GPU 测试**。CPU 回归覆盖左右拖动时模型表面的投影运动方向，以及 PMX 编码、坐标/绕序、UV、材质、中文路径、透明裁切和错误输入；GPU 测试另检查 PMX 场景确实可见。
+2026-10-25 在本机 MSVC 19.51 / RTX 5070 / Vulkan SDK 1.4.357.0 上完成 Debug、Release 编译。完整 CTest **16/16 通过**，包含两个具有 **33 项模型/相机用例及 8 项字体用例**的 CPU 目标，以及 **14 项真实 GPU 测试**。MinGW 构建和两个 CPU 目标也通过验证。CPU 回归覆盖左右拖动时模型表面的投影运动方向，以及 PMX 编码、坐标/绕序、UV、材质、中文路径、透明裁切和错误输入；字体回归检查中文实际字形、Unicode 字体路径、字体数据所有权和无效字体诊断；GPU 测试另检查 PMX 场景确实可见。
 
 GPU 测试检查场景截图确实包含模型，覆盖 OPAQUE/MASK 材质、含空格及中文资源 URI、窗口与视口反复缩放、导入替换失败后画面保持不变，以及 ImGui 初始化失败时的资源回收。测试同时检查 Vulkan 同步验证及退出阶段的错误输出。测试使用隐藏窗口；`-GpuTests` 仍需要可用的 Windows 桌面和 Vulkan 驱动。
 
@@ -93,7 +108,7 @@ GPU 测试检查场景截图确实包含模型，覆盖 OPAQUE/MASK 材质、含
 | `src/render/` | Vulkan 设备、资源、离屏视口、呈现与截图 |
 | `src/editor/`、`src/main.cpp` / `aeg_editor` | 界面、交互、文件导入、命令行 |
 | `shaders/`、`assets/` | GLSL 与离线演示资源 |
-| `tests/` / `aeg_core_tests` | CPU 导入和相机回归测试；可选 GPU 截图验证 |
+| `tests/` / `aeg_core_tests`、`aeg_editor_font_tests` | CPU 导入、相机和中文字体回归测试；可选 GPU 截图验证 |
 
 固定依赖版本及 SHA256 校验在 `cmake/Dependencies.cmake`：
 

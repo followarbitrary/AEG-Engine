@@ -1,4 +1,5 @@
 #include <aeg/Editor.hpp>
+#include <aeg/EditorFont.hpp>
 #include <aeg/Model.hpp>
 #include <aeg/OrbitCamera.hpp>
 #include <aeg/VulkanRenderer.hpp>
@@ -23,6 +24,11 @@
 
 namespace aeg {
 namespace {
+constexpr const char* sceneWindow = "场景###Scene";
+constexpr const char* importWindow = "导入###Import";
+constexpr const char* inspectorWindow = "属性###Inspector";
+constexpr const char* viewportWindow = "视口###Viewport";
+
 std::string pathText(const std::filesystem::path& path) {
     const auto value = path.u8string();
     return {reinterpret_cast<const char*>(value.data()), value.size()};
@@ -108,12 +114,12 @@ void dockLayout(ImGuiID dockId) {
     ImGui::DockBuilderSetNodeSize(dockId, ImGui::GetMainViewport()->WorkSize);
     auto center = dockId;
     const auto inspector = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.25f, nullptr, &center);
-    auto left = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.23f, nullptr, &center);
+    auto left = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.27f, nullptr, &center);
     const auto assets = ImGui::DockBuilderSplitNode(left, ImGuiDir_Down, 0.57f, nullptr, &left);
-    ImGui::DockBuilderDockWindow("Viewport", center);
-    ImGui::DockBuilderDockWindow("Scene", left);
-    ImGui::DockBuilderDockWindow("Import", assets);
-    ImGui::DockBuilderDockWindow("Inspector", inspector);
+    ImGui::DockBuilderDockWindow(viewportWindow, center);
+    ImGui::DockBuilderDockWindow(sceneWindow, left);
+    ImGui::DockBuilderDockWindow(importWindow, assets);
+    ImGui::DockBuilderDockWindow(inspectorWindow, inspector);
     ImGui::DockBuilderFinish(dockId);
 }
 }
@@ -121,20 +127,22 @@ void dockLayout(ImGuiID dockId) {
 int runEditor(const EditorOptions& options) {
     WindowLifetime lifetime;
     glfwSetErrorCallback([](int code, const char* text) { std::cerr << "GLFW " << code << ": " << text << '\n'; });
-    if (!glfwInit()) throw std::runtime_error("GLFW initialization failed.");
+    if (!glfwInit()) throw std::runtime_error("GLFW 初始化失败。");
     lifetime.initialized = true;
-    if (!glfwVulkanSupported()) throw std::runtime_error("No Vulkan loader or compatible driver was found.");
+    if (!glfwVulkanSupported()) throw std::runtime_error("未找到 Vulkan 加载器或兼容的驱动程序。");
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_VISIBLE, options.hidden ? GLFW_FALSE : GLFW_TRUE);
     glfwWindowHint(GLFW_FOCUSED, options.hidden ? GLFW_FALSE : GLFW_TRUE);
-    lifetime.window = glfwCreateWindow(1280, 800, "AEG Engine | Model Studio", nullptr, nullptr);
-    if (!lifetime.window) throw std::runtime_error("Cannot create the editor window.");
+    lifetime.window = glfwCreateWindow(1280, 800, "AEG Engine | 模型工作室", nullptr, nullptr);
+    if (!lifetime.window) throw std::runtime_error("无法创建编辑器窗口。");
     IMGUI_CHECKVERSION();
     lifetime.context = ImGui::CreateContext();
     auto& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable | ImGuiConfigFlags_NavEnableKeyboard;
     io.IniFilename = nullptr;
     configureStyle();
+    const auto font = configureEditorFont(options.resourceDirectory, options.fontPath);
+    std::cout << "Font: " << pathText(font.source) << '\n';
 
     // This scope makes backend teardown precede the ImGui context and native window.
     VulkanRenderer renderer(lifetime.window, options.resourceDirectory / "shaders", options.validation);
@@ -168,7 +176,7 @@ int runEditor(const EditorOptions& options) {
     std::array<bool, 3> viewportDrag{};
     std::uint32_t frames = 0;
     std::uint32_t viewportWidth = 1, viewportHeight = 1;
-    std::string status = "Ready. Drop a model anywhere to import.";
+    std::string status = "就绪。将模型拖入窗口即可导入。";
     double previousTime = glfwGetTime();
 
     while (!glfwWindowShouldClose(lifetime.window) && (options.frameLimit == 0 || frames < options.frameLimit)) {
@@ -190,15 +198,15 @@ int runEditor(const EditorOptions& options) {
                 transform = {};
                 camera.fit(model.bounds);
                 imports.error.clear();
-                status = "Loaded " + model.name;
+                status = "已加载：" + model.name;
                 const auto text = pathText(path);
                 std::snprintf(importPath.data(), importPath.size(), "%s", text.c_str());
                 std::cout << "Model: " << text << " (" << model.vertexCount() << " vertices, " << model.triangleCount()
                           << " triangles)\n";
             } catch (const std::exception& error) {
                 imports.error = error.what();
-                status = "Import failed. The current model is retained.";
-                std::cerr << "Import error: " << error.what() << '\n';
+                status = "导入失败，已保留当前模型。";
+                std::cerr << "导入错误：" << error.what() << '\n';
             }
         }
         const double now = glfwGetTime();
@@ -213,14 +221,14 @@ int runEditor(const EditorOptions& options) {
             ImGui::SetNextWindowSize(viewport->WorkSize);
             ImGui::SetNextWindowViewport(viewport->ID);
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-            ImGui::Begin("AEG Workspace", nullptr,
+            ImGui::Begin("AEG 工作区###AEG Workspace", nullptr,
                          ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
                              ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus |
                              ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoDocking);
             ImGui::PopStyleVar();
             if (ImGui::BeginMenuBar()) {
                 ImGui::TextColored({0.40f, 0.79f, 0.95f, 1}, "AEG");
-                ImGui::TextUnformatted(" / MODEL STUDIO");
+                ImGui::TextUnformatted(" / 模型工作室");
                 ImGui::Separator();
                 ImGui::Text("%.0f FPS  |  %.2f ms", io.Framerate, io.Framerate > 0 ? 1000.0f / io.Framerate : 0.0f);
                 ImGui::Separator();
@@ -232,26 +240,26 @@ int runEditor(const EditorOptions& options) {
             ImGui::DockSpace(dockId);
             ImGui::End();
 
-            if (ImGui::Begin("Scene")) {
-                ImGui::TextDisabled("ACTIVE MODEL");
+            if (ImGui::Begin(sceneWindow)) {
+                ImGui::TextDisabled("当前模型");
                 ImGui::Selectable(model.name.c_str(), true);
                 ImGui::Separator();
-                ImGui::Text("%zu meshes", model.meshes.size());
-                ImGui::Text("%zu materials", model.materials.size());
-                ImGui::Text("%zu vertices", model.vertexCount());
-                ImGui::Text("%zu triangles", model.triangleCount());
-                if (ImGui::Button("Frame model", {-1, 0})) frameRequested = true;
+                ImGui::Text("网格：%zu", model.meshes.size());
+                ImGui::Text("材质：%zu", model.materials.size());
+                ImGui::Text("顶点：%zu", model.vertexCount());
+                ImGui::Text("三角形：%zu", model.triangleCount());
+                if (ImGui::Button("聚焦模型###Frame model", {-1, 0})) frameRequested = true;
                 ImGui::Spacing();
-                ImGui::TextDisabled("MESHES");
+                ImGui::TextDisabled("网格列表");
                 if (ImGui::BeginTable("MeshList", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
-                    ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
-                    ImGui::TableSetupColumn("Triangles", ImGuiTableColumnFlags_WidthFixed, 72);
+                    ImGui::TableSetupColumn("名称", ImGuiTableColumnFlags_WidthStretch);
+                    ImGui::TableSetupColumn("三角形", ImGuiTableColumnFlags_WidthFixed, 72);
                     ImGui::TableHeadersRow();
                     for (std::size_t i = 0; i < model.meshes.size(); ++i) {
                         const auto& mesh = model.meshes[i];
                         ImGui::TableNextRow();
                         ImGui::TableNextColumn();
-                        ImGui::TextUnformatted(mesh.name.empty() ? "Mesh" : mesh.name.c_str());
+                        ImGui::TextUnformatted(mesh.name.empty() ? "网格" : mesh.name.c_str());
                         ImGui::TableNextColumn();
                         ImGui::Text("%zu", mesh.indices.size() / 3);
                     }
@@ -260,38 +268,39 @@ int runEditor(const EditorOptions& options) {
             }
             ImGui::End();
 
-            if (ImGui::Begin("Import")) {
-                ImGui::TextDisabled("MODEL LIBRARY");
-                ImGui::TextWrapped("Open an OBJ, glTF, GLB or PMX file, or drop one onto the window.");
+            if (ImGui::Begin(importWindow)) {
+                ImGui::TextDisabled("模型库");
+                ImGui::TextWrapped("打开 OBJ、glTF、GLB 或 PMX 文件，也可将文件拖入窗口。");
                 ImGui::SetNextItemWidth(-1);
-                const bool enter = ImGui::InputTextWithHint("##ModelPath", "Model file path", importPath.data(),
+                const bool enter = ImGui::InputTextWithHint("##ModelPath", "模型文件路径", importPath.data(),
                                                             importPath.size(), ImGuiInputTextFlags_EnterReturnsTrue);
-                if (ImGui::Button("Import model", {-1, 0}) || enter) {
+                if (ImGui::Button("导入模型###Import model", {-1, 0}) || enter) {
                     if (importPath[0])
                         imports.paths.push_back(pathFromText(importPath.data()));
                     else
-                        imports.error = "Enter a model file path first.";
+                        imports.error = "请先输入模型文件路径。";
                 }
                 ImGui::Separator();
                 ImGui::TextWrapped("%s", status.c_str());
                 if (!imports.error.empty()) {
                     ImGui::PushStyleColor(ImGuiCol_Text, {1, 0.49f, 0.43f, 1});
+                    ImGui::TextUnformatted("导入错误");
                     ImGui::TextWrapped("%s", imports.error.c_str());
                     ImGui::PopStyleColor();
                 }
-                if (!model.warnings.empty() && ImGui::CollapsingHeader("Import notices"))
+                if (!model.warnings.empty() && ImGui::CollapsingHeader("导入提示###Import notices"))
                     for (const auto& warning : model.warnings) ImGui::TextWrapped("%s", warning.c_str());
                 ImGui::Spacing();
-                ImGui::TextDisabled("VIEWPORT CONTROLS");
-                ImGui::TextWrapped("Left / right drag: orbit\nMiddle drag: pan\nWheel: zoom\nF: frame model");
+                ImGui::TextDisabled("视口操作");
+                ImGui::TextWrapped("左键 / 右键拖动：环绕\n中键拖动：平移\n滚轮：缩放\nF：聚焦模型");
             }
             ImGui::End();
 
-            if (ImGui::Begin("Inspector")) {
-                if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
-                    ImGui::DragFloat3("Position", &transform.translation.x, 0.02f);
-                    ImGui::DragFloat3("Rotation", &transform.rotation.x, 0.5f);
-                    ImGui::DragFloat3("Scale", &transform.scale.x, 0.01f, -1000, 1000);
+            if (ImGui::Begin(inspectorWindow)) {
+                if (ImGui::CollapsingHeader("变换###Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
+                    ImGui::DragFloat3("位置###Position", &transform.translation.x, 0.02f);
+                    ImGui::DragFloat3("旋转###Rotation", &transform.rotation.x, 0.5f);
+                    ImGui::DragFloat3("缩放###Scale", &transform.scale.x, 0.01f, -1000, 1000);
                     for (int axis = 0; axis < 3; ++axis) {
                         if (!std::isfinite(transform.translation[axis])) transform.translation[axis] = 0;
                         if (!std::isfinite(transform.rotation[axis])) transform.rotation[axis] = 0;
@@ -299,32 +308,32 @@ int runEditor(const EditorOptions& options) {
                         if (std::abs(transform.scale[axis]) < 0.001f)
                             transform.scale[axis] = std::signbit(transform.scale[axis]) ? -0.001f : 0.001f;
                     }
-                    ImGui::Checkbox("Auto rotate", &autoRotate);
-                    if (ImGui::Button("Reset transform")) {
+                    ImGui::Checkbox("自动旋转###Auto rotate", &autoRotate);
+                    if (ImGui::Button("重置变换###Reset transform")) {
                         transform = {};
                         frameRequested = true;
                     }
                 }
-                if (ImGui::CollapsingHeader("Lighting", ImGuiTreeNodeFlags_DefaultOpen)) {
-                    ImGui::Checkbox("Unlit materials", &settings.unlit);
-                    ImGui::SliderFloat("Ambient", &settings.ambient, 0, 1, "%.2f");
-                    ImGui::TextUnformatted("Light direction");
+                if (ImGui::CollapsingHeader("光照###Lighting", ImGuiTreeNodeFlags_DefaultOpen)) {
+                    ImGui::Checkbox("无光照材质###Unlit materials", &settings.unlit);
+                    ImGui::SliderFloat("环境光###Ambient", &settings.ambient, 0, 1, "%.2f");
+                    ImGui::TextUnformatted("光照方向");
                     ImGui::SetNextItemWidth(-1);
                     ImGui::SliderFloat3("##LightDirection", &settings.lightDirection.x, -1, 1, "%.2f");
                     if (glm::dot(settings.lightDirection, settings.lightDirection) < 0.0001f)
                         settings.lightDirection = {0, -1, 0};
-                    ImGui::ColorEdit3("Background", &settings.background.x);
+                    ImGui::ColorEdit3("背景###Background", &settings.background.x);
                 }
                 ImGui::Spacing();
-                ImGui::TextDisabled("RENDERER");
+                ImGui::TextDisabled("渲染器");
                 ImGui::TextWrapped("Vulkan | %s", renderer.deviceName().c_str());
-                ImGui::Text("Validation errors: %u", renderer.validationErrorCount());
-                ImGui::Text("Viewport: %u x %u", viewportWidth, viewportHeight);
+                ImGui::Text("验证错误：%u", renderer.validationErrorCount());
+                ImGui::Text("视口：%u x %u", viewportWidth, viewportHeight);
             }
             ImGui::End();
 
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-            if (ImGui::Begin("Viewport", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
+            if (ImGui::Begin(viewportWindow, nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
                 const auto available = ImGui::GetContentRegionAvail();
                 if (available.x >= 1 && available.y >= 1) {
                     viewportWidth = static_cast<std::uint32_t>(
@@ -374,7 +383,7 @@ int runEditor(const EditorOptions& options) {
     }
     renderer.waitIdle();
     if (!options.capturePath.empty()) {
-        if (!sceneRendered) throw std::runtime_error("Cannot capture: the viewport has not rendered a scene.");
+        if (!sceneRendered) throw std::runtime_error("无法截图：视口尚未渲染场景。");
         renderer.captureViewport(options.capturePath);
         std::cout << "Capture: " << pathText(options.capturePath) << '\n';
     }
