@@ -98,13 +98,14 @@ std::vector<std::string> arguments([[maybe_unused]] int argc, [[maybe_unused]] c
 void printHelp() {
     std::cout << "AEG Engine - Vulkan 模型查看器\n"
                  "用法：aeg_editor [--model PATH] [--font PATH] [--frames N] [--capture PATH] "
-                 "[--msaa 1|2|4|8] [--fxaa] [--no-validation] [--hidden]\n"
+                 "[--msaa 1|2|4|8] [--fxaa] [--taa] [--no-validation] [--hidden]\n"
                  "  --model PATH       打开 OBJ、glTF、GLB 或 PMX 模型\n"
                  "  --font PATH        指定支持中文的 TTF、OTF 或 TTC 字体\n"
                  "  --frames N         渲染 N 帧后退出（正整数）\n"
                  "  --capture PATH     将最后一帧视口导出为 PPM 图像\n"
                  "  --msaa 1|2|4|8     设置场景多重采样，1 为关闭（默认）；不支持时向下降级\n"
-                 "  --fxaa             启用场景 FXAA 后处理，可与 MSAA 同时使用\n"
+                 "  --fxaa             启用场景 FXAA 后处理，可与 MSAA 或 TAA 同时使用\n"
+                 "  --taa              启用时域抗锯齿，替代 MSAA（有效采样数为 1）\n"
                  "  --no-validation    关闭 Vulkan 验证层\n"
                  "  --hidden           使用隐藏窗口渲染，不抢占焦点\n"
                  "  --help             显示此帮助\n"
@@ -135,6 +136,10 @@ int main(int argc, char** argv) {
             }
             if (arg == "--fxaa") {
                 options.fxaa = true;
+                continue;
+            }
+            if (arg == "--taa") {
+                options.taa = true;
                 continue;
             }
             if (arg != "--model" && arg != "--font" && arg != "--frames" && arg != "--capture" && arg != "--msaa")

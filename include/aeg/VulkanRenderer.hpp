@@ -13,6 +13,7 @@ namespace aeg {
 struct AntialiasingSettings {
     std::uint32_t msaaSamples{1};
     bool fxaa{false};
+    bool taa{false};
     bool operator==(const AntialiasingSettings&) const = default;
 };
 struct RenderSettings {
@@ -32,10 +33,15 @@ public:
     void uploadModel(const ModelData& model);
     // Set before recording any ImGui::Image of this viewport. Valid sample
     // requests are 1/2/4/8; unsupported counts fall back to the next lower one.
+    // TAA uses 1x sampling in place of MSAA; FXAA may follow either path.
     void setAntialiasing(const AntialiasingSettings& settings);
     [[nodiscard]] AntialiasingSettings antialiasing() const;
     // Bitmask of supported sample counts (1 | 2 | 4 | 8).
     [[nodiscard]] std::uint32_t supportedMsaaSamples() const;
+    [[nodiscard]] bool supportsTemporalAA() const;
+    // Discard future temporal reuse after a camera cut; displayed pixels remain valid.
+    void resetTemporalHistory();
+    [[nodiscard]] std::uint32_t temporalFrameCount() const;
     void resizeViewport(std::uint32_t width, std::uint32_t height);
     [[nodiscard]] ImTextureID viewportTexture() const;
     void drawFrame(RenderSettings& settings, const std::function<void()>& buildUi);

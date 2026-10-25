@@ -11,6 +11,7 @@ struct EditorOptions {
     std::uint32_t frameLimit{0};
     std::uint32_t msaaSamples{1};
     bool fxaa{false};
+    bool taa{false};
     bool validation{true};
     bool hidden{false};
 };

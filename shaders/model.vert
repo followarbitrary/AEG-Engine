@@ -7,12 +7,27 @@ layout(set = 0, binding = 0) uniform Scene {
     mat4 model;
     vec4 lightDirection;
     vec4 parameters;
+#ifdef AEG_TAA
+    mat4 previousViewProjection;
+    mat4 previousModel;
+    mat4 currentViewProjection;
+    vec4 temporalInfo;
+#endif
 }
 scene;
 layout(location = 0) out vec3 normal;
 layout(location = 1) out vec2 uv;
+#ifdef AEG_TAA
+layout(location = 2) out vec4 currentClip;
+layout(location = 3) out vec4 previousClip;
+#endif
 void main() {
     gl_Position = scene.viewProjection * scene.model * vec4(inPosition, 1.0);
     normal = transpose(inverse(mat3(scene.model))) * inNormal;
     uv = inUV;
+#ifdef AEG_TAA
+    // Rasterization is jittered, while motion tracks the unjittered surface.
+    currentClip = scene.currentViewProjection * scene.model * vec4(inPosition, 1.0);
+    previousClip = scene.previousViewProjection * scene.previousModel * vec4(inPosition, 1.0);
+#endif
 }

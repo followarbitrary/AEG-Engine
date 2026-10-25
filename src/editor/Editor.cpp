@@ -146,17 +146,21 @@ int runEditor(const EditorOptions& options) {
 
     // This scope makes backend teardown precede the ImGui context and native window.
     VulkanRenderer renderer(lifetime.window, options.resourceDirectory / "shaders", options.validation);
-    renderer.setAntialiasing({options.msaaSamples, options.fxaa});
+    renderer.setAntialiasing({options.msaaSamples, options.fxaa, options.taa});
     auto antialiasing = renderer.antialiasing();
     const auto supportedMsaa = renderer.supportedMsaaSamples();
+    const bool supportedTaa = renderer.supportsTemporalAA();
     std::string antialiasingNotice;
     if (antialiasing.msaaSamples != options.msaaSamples) {
-        antialiasingNotice = "请求 MSAA " + std::to_string(options.msaaSamples) + "x，当前设备已降级为 " +
-                             std::to_string(antialiasing.msaaSamples) + "x。";
+        if (antialiasing.taa)
+            antialiasingNotice = "TAA 替代 MSAA，有效采样数为 1。";
+        else
+            antialiasingNotice = "请求 MSAA " + std::to_string(options.msaaSamples) + "x，当前设备已降级为 " +
+                                 std::to_string(antialiasing.msaaSamples) + "x。";
         std::cerr << antialiasingNotice << '\n';
     }
     std::cout << "Antialiasing: MSAA " << antialiasing.msaaSamples << "x | FXAA "
-              << (antialiasing.fxaa ? "on" : "off") << '\n';
+              << (antialiasing.fxaa ? "on" : "off") << " | TAA " << (antialiasing.taa ? "on" : "off") << '\n';
     std::cout << "GPU: " << renderer.deviceName() << '\n';
     ModelData model =
         loadModel(options.initialModel.empty() ? options.resourceDirectory / "assets" / "models" / "demo.obj"
@@ -166,6 +170,7 @@ int runEditor(const EditorOptions& options) {
               << model.triangleCount() << " triangles)\n";
     OrbitCamera camera;
     camera.fit(model.bounds);
+    renderer.resetTemporalHistory();
     Transform transform;
     RenderSettings settings;
     ImportQueue imports;
@@ -208,6 +213,7 @@ int runEditor(const EditorOptions& options) {
                 model = std::move(candidate);
                 transform = {};
                 camera.fit(model.bounds);
+                renderer.resetTemporalHistory();
                 imports.error.clear();
                 status = "已加载：" + model.name;
                 const auto text = pathText(path);
@@ -323,6 +329,7 @@ int runEditor(const EditorOptions& options) {
                     ImGui::Checkbox("自动旋转###Auto rotate", &autoRotate);
                     if (ImGui::Button("重置变换###Reset transform")) {
                         transform = {};
+                        renderer.resetTemporalHistory();
                         frameRequested = true;
                     }
                 }
@@ -337,10 +344,15 @@ int runEditor(const EditorOptions& options) {
                     ImGui::ColorEdit3("背景###Background", &settings.background.x);
                 }
                 if (ImGui::CollapsingHeader("抗锯齿###Antialiasing", ImGuiTreeNodeFlags_DefaultOpen)) {
+                    ImGui::BeginDisabled(!supportedTaa);
+                    antialiasingChanged |= ImGui::Checkbox("TAA 时域抗锯齿###TAA", &antialiasing.taa);
+                    ImGui::EndDisabled();
+                    if (!supportedTaa) ImGui::TextWrapped("当前设备不支持 TAA 所需的纹理格式。可使用 MSAA 或 FXAA。");
                     constexpr std::array<std::uint32_t, 4> sampleCounts{1, 2, 4, 8};
                     constexpr std::array<const char*, 4> sampleLabels{"关闭 (Off)", "2x", "4x", "8x"};
                     const auto selected = std::find(sampleCounts.begin(), sampleCounts.end(), antialiasing.msaaSamples);
                     const auto selectedIndex = static_cast<std::size_t>(selected - sampleCounts.begin());
+                    ImGui::BeginDisabled(antialiasing.taa);
                     if (ImGui::BeginCombo("MSAA###MSAA", sampleLabels[selectedIndex])) {
                         for (std::size_t i = 0; i < sampleCounts.size(); ++i) {
                             if ((supportedMsaa & sampleCounts[i]) == 0) continue;
@@ -353,8 +365,14 @@ int runEditor(const EditorOptions& options) {
                         }
                         ImGui::EndCombo();
                     }
+                    ImGui::EndDisabled();
+                    if (antialiasing.taa) ImGui::TextUnformatted("TAA 替代 MSAA，有效采样数为 1。");
                     antialiasingChanged |= ImGui::Checkbox("FXAA 后处理###FXAA", &antialiasing.fxaa);
                     ImGui::Text("有效采样数：%u", renderer.antialiasing().msaaSamples);
+                    if (antialiasing.taa) {
+                        ImGui::Text("当前历史帧数：%u", renderer.temporalFrameCount());
+                        if (ImGui::Button("重置历史###Reset temporal history")) renderer.resetTemporalHistory();
+                    }
                     if (!antialiasingNotice.empty()) ImGui::TextWrapped("%s", antialiasingNotice.c_str());
                 }
                 ImGui::Spacing();
@@ -419,6 +437,7 @@ int runEditor(const EditorOptions& options) {
             settings.model = transform.matrix();
             if (frameRequested) {
                 camera.fit(transformedBounds(model.bounds, settings.model));
+                renderer.resetTemporalHistory();
                 frameRequested = false;
             }
             settings.viewProjection =

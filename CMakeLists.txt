@@ -58,13 +58,23 @@ endif()
 aeg_project_options(aeg_editor)
 
 set(aeg_shader_outputs)
-foreach(shader model.vert model.frag fullscreen.vert fxaa.frag)
+foreach(shader model.vert model.frag fullscreen.vert fxaa.frag taa.frag)
     set(output "${CMAKE_BINARY_DIR}/compiled-shaders/${shader}.spv")
     add_custom_command(OUTPUT "${output}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/compiled-shaders"
         COMMAND Vulkan::glslc --target-env=vulkan1.2 "${PROJECT_SOURCE_DIR}/shaders/${shader}" -o "${output}"
         DEPENDS "${PROJECT_SOURCE_DIR}/shaders/${shader}"
         COMMENT "Compiling ${shader} to SPIR-V" VERBATIM)
+    list(APPEND aeg_shader_outputs "${output}")
+endforeach()
+foreach(stage vert frag)
+    set(output "${CMAKE_BINARY_DIR}/compiled-shaders/model_taa.${stage}.spv")
+    add_custom_command(OUTPUT "${output}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/compiled-shaders"
+        COMMAND Vulkan::glslc --target-env=vulkan1.2 -DAEG_TAA=1
+            "${PROJECT_SOURCE_DIR}/shaders/model.${stage}" -o "${output}"
+        DEPENDS "${PROJECT_SOURCE_DIR}/shaders/model.${stage}"
+        COMMENT "Compiling temporal model.${stage} to SPIR-V" VERBATIM)
     list(APPEND aeg_shader_outputs "${output}")
 endforeach()
 add_custom_target(aeg_shaders DEPENDS ${aeg_shader_outputs})
@@ -97,6 +107,13 @@ if(BUILD_TESTING)
     add_test(NAME aeg_core_tests COMMAND aeg_core_tests)
     set_tests_properties(aeg_core_tests PROPERTIES WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}" LABELS cpu)
     if(AEG_ENABLE_GPU_TESTS)
+        add_executable(aeg_temporal_aa_test tests/TemporalAA.cpp src/render/VulkanRenderer.cpp)
+        target_link_libraries(aeg_temporal_aa_test PRIVATE aeg_core aeg_imgui Vulkan::Vulkan glfw)
+        aeg_project_options(aeg_temporal_aa_test)
+        add_dependencies(aeg_temporal_aa_test aeg_resources)
+        add_test(NAME aeg_temporal_aa COMMAND aeg_temporal_aa_test
+            "$<TARGET_FILE_DIR:aeg_editor>" "${CMAKE_BINARY_DIR}/temporal-aa")
+        set_tests_properties(aeg_temporal_aa PROPERTIES LABELS gpu TIMEOUT 90)
         add_executable(aeg_antialiasing_test tests/Antialiasing.cpp src/render/VulkanRenderer.cpp)
         target_link_libraries(aeg_antialiasing_test PRIVATE aeg_core aeg_imgui Vulkan::Vulkan glfw)
         aeg_project_options(aeg_antialiasing_test)
