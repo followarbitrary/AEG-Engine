@@ -1,0 +1,3 @@
+newmtl Literal
+Kd 1 1 1
+map_Kd literal%20texture.png

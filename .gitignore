@@ -1,0 +1,11 @@
+/build/
+/out/
+/cmake-build-*/
+/cmake-build-*/
+/.vs/
+/.superpowers/
+CMakeUserPresets.json
+imgui.ini
+*.ppm
+*.log
+/docs/

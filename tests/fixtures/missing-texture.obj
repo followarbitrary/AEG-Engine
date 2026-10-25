@@ -1,0 +1,7 @@
+mtllib missing-texture.mtl
+o Fallback
+v 0 0 0
+v 1 0 0
+v 0 1 0
+usemtl Missing
+f 1 2 3

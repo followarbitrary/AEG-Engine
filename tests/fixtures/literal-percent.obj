@@ -1,0 +1,7 @@
+mtllib literal-percent.mtl
+o LiteralPercent
+v 0 0 0
+v 1 0 0
+v 0 1 0
+usemtl Literal
+f 1 2 3

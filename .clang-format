@@ -1,0 +1,25 @@
+BasedOnStyle: LLVM
+Language: Cpp
+Standard: Latest
+
+IndentWidth: 4
+ContinuationIndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 120
+
+BreakBeforeBraces: Attach
+NamespaceIndentation: None
+AccessModifierOffset: -4
+DerivePointerAlignment: false
+PointerAlignment: Left
+ReferenceAlignment: Left
+
+AllowShortFunctionsOnASingleLine: All
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortLoopsOnASingleLine: true
+FixNamespaceComments: false
+
+# Preserve include order: Windows headers can depend on earlier includes.
+SortIncludes: false
+IncludeBlocks: Preserve
