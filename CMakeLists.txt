@@ -36,6 +36,9 @@ function(aeg_project_options target)
         target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
     endif()
     get_target_property(target_type ${target} TYPE)
+    if(MINGW AND target_type STREQUAL "EXECUTABLE")
+        target_link_options(${target} PRIVATE -static-libgcc -static-libstdc++)
+    endif()
     if(MINGW AND target_type STREQUAL "EXECUTABLE" AND AEG_MINGW_PTHREAD_DLL)
         add_custom_command(TARGET ${target} POST_BUILD
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different
@@ -44,126 +47,13 @@ function(aeg_project_options target)
     endif()
 endfunction()
 
-add_library(aeg_core STATIC src/assets/Model.cpp src/core/OrbitCamera.cpp)
-target_include_directories(aeg_core PUBLIC include)
-target_include_directories(aeg_core SYSTEM PRIVATE "${stb_SOURCE_DIR}")
-target_link_libraries(aeg_core PUBLIC glm::glm PRIVATE assimp::assimp)
-aeg_project_options(aeg_core)
-
-add_executable(aeg_editor src/main.cpp src/editor/Editor.cpp src/editor/EditorFont.cpp src/render/VulkanRenderer.cpp)
-target_link_libraries(aeg_editor PRIVATE aeg_core aeg_imgui Vulkan::Vulkan glfw)
-if(WIN32)
-    target_link_libraries(aeg_editor PRIVATE shell32)
-endif()
-aeg_project_options(aeg_editor)
-
-set(aeg_shader_outputs)
-foreach(shader model.vert model.frag fullscreen.vert fxaa.frag taa.frag)
-    set(output "${CMAKE_BINARY_DIR}/compiled-shaders/${shader}.spv")
-    add_custom_command(OUTPUT "${output}"
-        COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/compiled-shaders"
-        COMMAND Vulkan::glslc --target-env=vulkan1.2 "${PROJECT_SOURCE_DIR}/shaders/${shader}" -o "${output}"
-        DEPENDS "${PROJECT_SOURCE_DIR}/shaders/${shader}"
-        COMMENT "Compiling ${shader} to SPIR-V" VERBATIM)
-    list(APPEND aeg_shader_outputs "${output}")
-endforeach()
-foreach(stage vert frag)
-    set(output "${CMAKE_BINARY_DIR}/compiled-shaders/model_taa.${stage}.spv")
-    add_custom_command(OUTPUT "${output}"
-        COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/compiled-shaders"
-        COMMAND Vulkan::glslc --target-env=vulkan1.2 -DAEG_TAA=1
-            "${PROJECT_SOURCE_DIR}/shaders/model.${stage}" -o "${output}"
-        DEPENDS "${PROJECT_SOURCE_DIR}/shaders/model.${stage}"
-        COMMENT "Compiling temporal model.${stage} to SPIR-V" VERBATIM)
-    list(APPEND aeg_shader_outputs "${output}")
-endforeach()
-add_custom_target(aeg_shaders DEPENDS ${aeg_shader_outputs})
-add_dependencies(aeg_editor aeg_shaders)
-# An always-run copy target also refreshes assets when no C++ file changes.
-add_custom_target(aeg_resources ALL
-    COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:aeg_editor>/shaders"
-    COMMAND "${CMAKE_COMMAND}" -E copy_if_different ${aeg_shader_outputs} "$<TARGET_FILE_DIR:aeg_editor>/shaders"
-    COMMAND "${CMAKE_COMMAND}" -E copy_directory "${PROJECT_SOURCE_DIR}/assets" "$<TARGET_FILE_DIR:aeg_editor>/assets"
-    DEPENDS aeg_shaders VERBATIM)
-add_dependencies(aeg_editor aeg_resources)
+add_subdirectory(engine/foundation)
+add_subdirectory(engine/camera)
+add_subdirectory(engine/assets)
+add_subdirectory(engine/render)
+add_subdirectory(editor)
+add_subdirectory(apps/editor)
 
 if(BUILD_TESTING)
-    add_executable(aeg_editor_font_tests tests/EditorFontTests.cpp src/editor/EditorFont.cpp)
-    target_include_directories(aeg_editor_font_tests PRIVATE include)
-    target_link_libraries(aeg_editor_font_tests PRIVATE aeg_imgui)
-    if(MINGW)
-        # Match the editor's static GCC/C++ runtimes for this standalone test.
-        target_link_options(aeg_editor_font_tests PRIVATE -static-libgcc -static-libstdc++)
-    endif()
-    aeg_project_options(aeg_editor_font_tests)
-    add_test(NAME aeg_editor_font_tests COMMAND aeg_editor_font_tests)
-    set_tests_properties(aeg_editor_font_tests PROPERTIES LABELS cpu TIMEOUT 60)
-    add_executable(aeg_core_tests tests/CoreTests.cpp)
-    target_link_libraries(aeg_core_tests PRIVATE aeg_core)
-    target_compile_definitions(aeg_core_tests PRIVATE
-        AEG_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
-        AEG_TEST_FIXTURES="${PROJECT_SOURCE_DIR}/tests/fixtures")
-    aeg_project_options(aeg_core_tests)
-    add_test(NAME aeg_core_tests COMMAND aeg_core_tests)
-    set_tests_properties(aeg_core_tests PROPERTIES WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}" LABELS cpu)
-    if(AEG_ENABLE_GPU_TESTS)
-        add_executable(aeg_temporal_aa_test tests/TemporalAA.cpp src/render/VulkanRenderer.cpp)
-        target_link_libraries(aeg_temporal_aa_test PRIVATE aeg_core aeg_imgui Vulkan::Vulkan glfw)
-        aeg_project_options(aeg_temporal_aa_test)
-        add_dependencies(aeg_temporal_aa_test aeg_resources)
-        add_test(NAME aeg_temporal_aa COMMAND aeg_temporal_aa_test
-            "$<TARGET_FILE_DIR:aeg_editor>" "${CMAKE_BINARY_DIR}/temporal-aa")
-        set_tests_properties(aeg_temporal_aa PROPERTIES LABELS gpu TIMEOUT 90)
-        add_executable(aeg_antialiasing_test tests/Antialiasing.cpp src/render/VulkanRenderer.cpp)
-        target_link_libraries(aeg_antialiasing_test PRIVATE aeg_core aeg_imgui Vulkan::Vulkan glfw)
-        aeg_project_options(aeg_antialiasing_test)
-        add_dependencies(aeg_antialiasing_test aeg_resources)
-        add_test(NAME aeg_antialiasing COMMAND aeg_antialiasing_test
-            "$<TARGET_FILE_DIR:aeg_editor>" "${CMAKE_BINARY_DIR}/antialiasing")
-        set_tests_properties(aeg_antialiasing PROPERTIES LABELS gpu TIMEOUT 90)
-        add_executable(aeg_render_check tests/RenderSmoke.cpp)
-        aeg_project_options(aeg_render_check)
-        add_executable(aeg_backend_failure_test tests/BackendFailure.cpp src/render/VulkanRenderer.cpp)
-        target_link_libraries(aeg_backend_failure_test PRIVATE aeg_core aeg_imgui Vulkan::Vulkan glfw)
-        aeg_project_options(aeg_backend_failure_test)
-        add_dependencies(aeg_backend_failure_test aeg_resources)
-        add_test(NAME aeg_backend_failure COMMAND aeg_backend_failure_test "$<TARGET_FILE_DIR:aeg_editor>/shaders")
-        set_tests_properties(aeg_backend_failure PROPERTIES LABELS gpu TIMEOUT 60)
-        add_executable(aeg_renderer_lifecycle_test tests/RendererLifecycle.cpp src/render/VulkanRenderer.cpp)
-        target_link_libraries(aeg_renderer_lifecycle_test PRIVATE aeg_core aeg_imgui Vulkan::Vulkan glfw)
-        aeg_project_options(aeg_renderer_lifecycle_test)
-        add_dependencies(aeg_renderer_lifecycle_test aeg_resources)
-        add_test(NAME aeg_renderer_lifecycle COMMAND aeg_renderer_lifecycle_test
-            "$<TARGET_FILE_DIR:aeg_editor>" "${PROJECT_SOURCE_DIR}/tests/fixtures/embedded.gltf" "${CMAKE_BINARY_DIR}/lifecycle.ppm")
-        set_tests_properties(aeg_renderer_lifecycle PROPERTIES LABELS gpu TIMEOUT 60)
-        add_test(NAME aeg_gpu_smoke COMMAND "${CMAKE_COMMAND}"
-            "-DEDITOR=$<TARGET_FILE:aeg_editor>"
-            "-DCHECKER=$<TARGET_FILE:aeg_render_check>"
-            "-DCAPTURE=${CMAKE_BINARY_DIR}/smoke.ppm"
-            -P "${PROJECT_SOURCE_DIR}/tests/GpuSmoke.cmake")
-        set_tests_properties(aeg_gpu_smoke PROPERTIES LABELS gpu TIMEOUT 90)
-        foreach(fixture alpha-opaque alpha-default alpha-mask alpha-mask-custom alpha-blend uri-spaces uri-unicode)
-            set(expect_blank OFF)
-            if(fixture STREQUAL "alpha-mask")
-                set(expect_blank ON)
-            endif()
-            add_test(NAME "aeg_gpu_${fixture}" COMMAND "${CMAKE_COMMAND}"
-                "-DEDITOR=$<TARGET_FILE:aeg_editor>"
-                "-DCHECKER=$<TARGET_FILE:aeg_render_check>"
-                "-DCAPTURE=${CMAKE_BINARY_DIR}/${fixture}.ppm"
-                "-DMODEL=${PROJECT_SOURCE_DIR}/tests/fixtures/${fixture}.gltf"
-                "-DEXPECT_BLANK=${expect_blank}"
-                -P "${PROJECT_SOURCE_DIR}/tests/GpuSmoke.cmake")
-            set_tests_properties("aeg_gpu_${fixture}" PROPERTIES LABELS gpu TIMEOUT 90)
-        endforeach()
-        foreach(fixture pmx-utf8 pmx-utf16 pmx-alpha pmx-extra-uv)
-            add_test(NAME "aeg_gpu_${fixture}" COMMAND "${CMAKE_COMMAND}"
-                "-DEDITOR=$<TARGET_FILE:aeg_editor>"
-                "-DCHECKER=$<TARGET_FILE:aeg_render_check>"
-                "-DCAPTURE=${CMAKE_BINARY_DIR}/${fixture}.ppm"
-                "-DMODEL=${PROJECT_SOURCE_DIR}/tests/fixtures/${fixture}.pmx"
-                -P "${PROJECT_SOURCE_DIR}/tests/GpuSmoke.cmake")
-            set_tests_properties("aeg_gpu_${fixture}" PROPERTIES LABELS gpu TIMEOUT 90)
-        endforeach()
-    endif()
+    add_subdirectory(tests)
 endif()

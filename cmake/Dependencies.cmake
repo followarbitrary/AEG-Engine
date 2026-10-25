@@ -95,7 +95,7 @@ add_library(aeg_imgui STATIC
     "${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp"
     "${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp")
 target_include_directories(aeg_imgui SYSTEM PUBLIC "${imgui_SOURCE_DIR}" "${imgui_SOURCE_DIR}/backends")
-target_link_libraries(aeg_imgui PUBLIC glfw Vulkan::Vulkan)
+target_link_libraries(aeg_imgui PRIVATE glfw Vulkan::Vulkan)
 target_compile_definitions(aeg_imgui PUBLIC GLFW_INCLUDE_NONE)
 if(WIN32)
     # ImGui 1.91 disables native IME integration for non-MSVC unless opted in.

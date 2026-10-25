@@ -1,0 +1,5 @@
+add_executable(aeg_camera_tests OrbitCameraTests.cpp)
+target_link_libraries(aeg_camera_tests PRIVATE aeg::camera)
+aeg_project_options(aeg_camera_tests)
+add_test(NAME aeg_camera_tests COMMAND aeg_camera_tests)
+set_tests_properties(aeg_camera_tests PROPERTIES LABELS cpu)

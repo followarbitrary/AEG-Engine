@@ -1,0 +1,65 @@
+add_executable(aeg_temporal_aa_test TemporalAA.cpp)
+target_link_libraries(aeg_temporal_aa_test PRIVATE aeg::render glfw)
+aeg_project_options(aeg_temporal_aa_test)
+add_dependencies(aeg_temporal_aa_test aeg_resources)
+add_test(NAME aeg_temporal_aa COMMAND aeg_temporal_aa_test
+    "$<TARGET_FILE_DIR:aeg_editor>" "${CMAKE_BINARY_DIR}/temporal-aa")
+set_tests_properties(aeg_temporal_aa PROPERTIES LABELS gpu TIMEOUT 90)
+
+add_executable(aeg_antialiasing_test Antialiasing.cpp)
+target_link_libraries(aeg_antialiasing_test PRIVATE aeg::render glfw)
+aeg_project_options(aeg_antialiasing_test)
+add_dependencies(aeg_antialiasing_test aeg_resources)
+add_test(NAME aeg_antialiasing COMMAND aeg_antialiasing_test
+    "$<TARGET_FILE_DIR:aeg_editor>" "${CMAKE_BINARY_DIR}/antialiasing")
+set_tests_properties(aeg_antialiasing PROPERTIES LABELS gpu TIMEOUT 90)
+
+add_executable(aeg_render_check RenderSmoke.cpp)
+aeg_project_options(aeg_render_check)
+
+# Keep loader-symbol failure injection in the executable. The renderer itself
+# is compiled once into aeg_render and linked by every GPU test.
+add_executable(aeg_backend_failure_test BackendFailure.cpp)
+target_link_libraries(aeg_backend_failure_test PRIVATE aeg::render Vulkan::Vulkan glfw)
+aeg_project_options(aeg_backend_failure_test)
+add_dependencies(aeg_backend_failure_test aeg_resources)
+add_test(NAME aeg_backend_failure COMMAND aeg_backend_failure_test "$<TARGET_FILE_DIR:aeg_editor>/shaders")
+set_tests_properties(aeg_backend_failure PROPERTIES LABELS gpu TIMEOUT 60)
+
+add_executable(aeg_renderer_lifecycle_test RendererLifecycle.cpp)
+target_link_libraries(aeg_renderer_lifecycle_test PRIVATE aeg::render aeg::camera glfw)
+aeg_project_options(aeg_renderer_lifecycle_test)
+add_dependencies(aeg_renderer_lifecycle_test aeg_resources)
+add_test(NAME aeg_renderer_lifecycle COMMAND aeg_renderer_lifecycle_test
+    "$<TARGET_FILE_DIR:aeg_editor>" "${PROJECT_SOURCE_DIR}/tests/fixtures/embedded.gltf" "${CMAKE_BINARY_DIR}/lifecycle.ppm")
+set_tests_properties(aeg_renderer_lifecycle PROPERTIES LABELS gpu TIMEOUT 60)
+
+add_test(NAME aeg_gpu_smoke COMMAND "${CMAKE_COMMAND}"
+    "-DEDITOR=$<TARGET_FILE:aeg_editor>"
+    "-DCHECKER=$<TARGET_FILE:aeg_render_check>"
+    "-DCAPTURE=${CMAKE_BINARY_DIR}/smoke.ppm"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/GpuSmoke.cmake")
+set_tests_properties(aeg_gpu_smoke PROPERTIES LABELS gpu TIMEOUT 90)
+foreach(fixture alpha-opaque alpha-default alpha-mask alpha-mask-custom alpha-blend uri-spaces uri-unicode)
+    set(expect_blank OFF)
+    if(fixture STREQUAL "alpha-mask")
+        set(expect_blank ON)
+    endif()
+    add_test(NAME "aeg_gpu_${fixture}" COMMAND "${CMAKE_COMMAND}"
+        "-DEDITOR=$<TARGET_FILE:aeg_editor>"
+        "-DCHECKER=$<TARGET_FILE:aeg_render_check>"
+        "-DCAPTURE=${CMAKE_BINARY_DIR}/${fixture}.ppm"
+        "-DMODEL=${PROJECT_SOURCE_DIR}/tests/fixtures/${fixture}.gltf"
+        "-DEXPECT_BLANK=${expect_blank}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/GpuSmoke.cmake")
+    set_tests_properties("aeg_gpu_${fixture}" PROPERTIES LABELS gpu TIMEOUT 90)
+endforeach()
+foreach(fixture pmx-utf8 pmx-utf16 pmx-alpha pmx-extra-uv)
+    add_test(NAME "aeg_gpu_${fixture}" COMMAND "${CMAKE_COMMAND}"
+        "-DEDITOR=$<TARGET_FILE:aeg_editor>"
+        "-DCHECKER=$<TARGET_FILE:aeg_render_check>"
+        "-DCAPTURE=${CMAKE_BINARY_DIR}/${fixture}.ppm"
+        "-DMODEL=${PROJECT_SOURCE_DIR}/tests/fixtures/${fixture}.pmx"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/GpuSmoke.cmake")
+    set_tests_properties("aeg_gpu_${fixture}" PROPERTIES LABELS gpu TIMEOUT 90)
+endforeach()

@@ -30,7 +30,7 @@ CLion 也可以使用自带的 MinGW 工具链；在 CMake 配置中选择对应
 
 # 只配置；或只构建已配置目录里的 CPU 测试目标
 .\scripts\build.ps1 -Configuration Debug -ConfigureOnly
-.\scripts\build.ps1 -Configuration Debug -SkipConfigure -Target aeg_core_tests
+.\scripts\build.ps1 -Configuration Debug -SkipConfigure -Target aeg_core_tests -NoTests
 ```
 
 可用 `-Jobs 4` 控制并行编译数，`-NoTests` 跳过测试。`-SkipConfigure` 使用现有缓存，也保留现有 GPU 测试设置；改变设置时应重新配置。普通构建默认关闭 GPU 测试。
@@ -114,7 +114,7 @@ glTF 的 OPAQUE 会忽略 alpha，MASK 使用模型指定的 cutoff（默认 0.5
 
 ## 已验证的里程碑
 
-2026-10-25 在本机 MSVC 19.51 / RTX 5070 / Vulkan SDK 1.4.357.0 上完成 Debug、Release 编译。完整 CTest **18/18 通过**，包含两个具有 **33 项模型/相机用例及 8 项字体用例**的 CPU 目标，以及 **16 项真实 GPU 测试**。MinGW 构建和两个 CPU 目标也通过验证。CPU 回归覆盖左右拖动时模型表面的投影运动方向，以及 PMX 编码、坐标/绕序、UV、材质、中文路径、透明裁切和错误输入；字体回归检查中文实际字形、Unicode 字体路径、字体数据所有权和无效字体诊断；GPU 测试另检查 PMX 场景确实可见。
+2026-10-25 在本机 MSVC 19.51 / RTX 5070 / Vulkan SDK 1.4.357.0 上完成 Debug、Release 编译。模块拆分后的完整 CTest **20/20 通过**，包含公开接口、相机、模型导入、字体四个 CPU 目标，以及 **16 项真实 GPU 测试**。原有 **33 项模型/相机用例及 8 项字体用例**保留，新增公开接口编译与运行检查。MinGW 构建和四个 CPU 目标也通过验证。CPU 回归覆盖左右拖动时模型表面的投影运动方向，以及 PMX 编码、坐标/绕序、UV、材质、中文路径、透明裁切和错误输入；字体回归检查中文实际字形、Unicode 字体路径、字体数据所有权和无效字体诊断；GPU 测试另检查 PMX 场景确实可见。
 
 GPU 测试检查场景截图确实包含模型，覆盖 OPAQUE/MASK 材质、含空格及中文资源 URI、窗口与视口反复缩放、导入替换失败后画面保持不变，以及 ImGui 初始化失败时的资源回收。测试同时检查 Vulkan 同步验证及退出阶段的错误输出。测试使用隐藏窗口；`-GpuTests` 仍需要可用的 Windows 桌面和 Vulkan 驱动。
 
@@ -124,14 +124,56 @@ TAA GPU 回归验证静态多帧累积与帧间波动、正交及透视相机/�
 
 ## 代码结构与依赖
 
-| 路径 / 目标 | 职责 |
-| --- | --- |
-| `include/aeg/` | 模块公共接口 |
-| `src/assets/`、`src/core/` / `aeg_core` | Assimp 导入、纹理解码、CPU 数据、轨道相机 |
-| `src/render/` | Vulkan 设备、资源、离屏视口、呈现与截图 |
-| `src/editor/`、`src/main.cpp` / `aeg_editor` | 界面、交互、文件导入、命令行 |
-| `shaders/`、`assets/` | GLSL 与离线演示资源 |
-| `tests/` / `aeg_core_tests`、`aeg_editor_font_tests` | CPU 导入、相机和中文字体回归测试；可选 GPU 截图验证 |
+| 路径 | CMake 目标 | 命名空间 / 职责 |
+| --- | --- | --- |
+| `engine/foundation/` | `aeg::foundation` | `aeg::foundation`，Bounds、UTF-8 路径处理 |
+| `engine/camera/` | `aeg::camera` | `aeg::camera`，轨道相机 |
+| `engine/assets/` | `aeg::assets` | `aeg::assets`，CPU 模型数据、Assimp 导入、纹理解码、PMX 校验 |
+| `engine/render/` | `aeg::render` | `aeg::render`，Vulkan 设备、交换链、场景、视口、抗锯齿、截图 |
+| `editor/` | `aeg::editor` | `aeg::editor`，窗口、主循环、停靠、各面板与字体 |
+| `apps/editor/private/` | `aeg_editor` | 全局 main、`aeg::app` 命令行入口 |
+| `tests/{foundation,camera,assets,render,editor}/` | 对应测试目标 | 与功能目录对应的 CPU/GPU 回归；数据保留在 `tests/fixtures/` |
+| `assets/` | 运行时复制 | 离线演示模型与纹理 |
+
+各模块都有自己的 `CMakeLists.txt`。公开头文件直接位于 `public/`，内部头文件与源文件位于 `private/`。例如：
+
+```text
+engine/render/
+├─ CMakeLists.txt
+├─ public/
+│  ├─ VulkanRenderer.hpp
+│  ├─ RenderSettings.hpp
+│  └─ AntialiasingSettings.hpp
+└─ private/
+   ├─ VulkanRenderer.cpp
+   ├─ VulkanRendererImpl.hpp
+   ├─ vulkan/
+   ├─ scene/
+   ├─ viewport/
+   ├─ antialiasing/
+   └─ shaders/{scene,postprocess}/
+```
+
+`VulkanRenderer.cpp` 保留初始化、帧提交和销毁的协调；设备、交换链、资源、管线、场景、视口和各抗锯齿通道的实现分别位于对应文件。GLSL 也随渲染模块组织，编译后的运行时文件名和目录保持一致。
+
+使用模块时链接其 CMake 目标，通过扁平头文件名引用公开接口：
+
+```cmake
+target_link_libraries(my_tool PRIVATE aeg::camera aeg::render)
+```
+
+```cpp
+#include <OrbitCamera.hpp>
+#include <ModelImporter.hpp>
+#include <VulkanRenderer.hpp>
+
+aeg::camera::OrbitCamera camera;
+auto model = aeg::assets::loadModel(path);
+```
+
+CMake 仅导出各模块的 `public/`；`private/` 只供模块自身使用。公开接口测试不获得任何模块的 private 搜索路径，9 个公开头文件也分别通过独立编译检查。字体白盒测试单独获得 `editor/private/fonts/`，该目录不会传递给应用程序。GPU 测试链接同一个渲染库，统一复用其实现。`aeg_core_tests` 保留为相机与模型导入测试的构建聚合目标。
+
+重构前后相同输入的 TAA 与 MSAA+FXAA 场景截图逐字节一致；导入、相机与抗锯齿行为继续通过现有回归验证。
 
 固定依赖版本及 SHA256 校验在 `cmake/Dependencies.cmake`：
 
