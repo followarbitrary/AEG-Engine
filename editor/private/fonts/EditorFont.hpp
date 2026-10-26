@@ -10,5 +10,5 @@ struct EditorFontInfo {
 // Requires an active ImGui context. Loads and builds a Chinese-capable font
 // before renderer initialization; font data is owned by the font atlas.
 [[nodiscard]] EditorFontInfo configureEditorFont(const std::filesystem::path& resourceDirectory,
-                                               const std::filesystem::path& requestedFont = {});
+                                                 const std::filesystem::path& requestedFont = {});
 }

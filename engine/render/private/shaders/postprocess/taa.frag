@@ -11,7 +11,8 @@ layout(push_constant) uniform TemporalParameters {
     layout(offset = 0) vec2 inverseResolution;
     layout(offset = 8) float historyWeight;
     layout(offset = 12) uint historyValid;
-} temporal;
+}
+temporal;
 
 void main() {
     ivec2 resolution = textureSize(currentColor, 0);

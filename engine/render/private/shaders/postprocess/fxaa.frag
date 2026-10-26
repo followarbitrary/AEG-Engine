@@ -3,21 +3,16 @@
 layout(location = 0) in vec2 uv;
 layout(location = 0) out vec4 outColor;
 layout(set = 0, binding = 0) uniform sampler2D sceneColor;
-layout(push_constant) uniform FxaaParameters {
-    layout(offset = 0) vec2 inverseResolution;
-} fxaa;
+layout(push_constant) uniform FxaaParameters { layout(offset = 0) vec2 inverseResolution; }
+fxaa;
 
 // Compact spatial FXAA following the edge, endpoint and subpixel tests described in
 // https://developer.download.nvidia.com/assets/gamedev/files/sdk/11/FXAA_WhitePaper.pdf
 // Adaptation: gamma-2 luma guides filtering, but all RGB sampling/blending stays linear.
 // Endpoint search is limited to 12 texels and uses one bilinear tap per endpoint.
-vec3 sampleColor(vec2 position) {
-    return textureLod(sceneColor, position, 0.0).rgb;
-}
+vec3 sampleColor(vec2 position) { return textureLod(sceneColor, position, 0.0).rgb; }
 
-float perceptualLuma(vec3 linearColor) {
-    return dot(sqrt(max(linearColor, vec3(0.0))), vec3(0.299, 0.587, 0.114));
-}
+float perceptualLuma(vec3 linearColor) { return dot(sqrt(max(linearColor, vec3(0.0))), vec3(0.299, 0.587, 0.114)); }
 
 void main() {
     vec2 texel = fxaa.inverseResolution;
@@ -49,12 +44,10 @@ void main() {
     float lumaSW = perceptualLuma(southWest);
     float lumaSE = perceptualLuma(southEast);
 
-    float horizontal = abs(lumaNW - 2.0 * lumaW + lumaSW)
-                     + 2.0 * abs(lumaN - 2.0 * lumaM + lumaS)
-                     + abs(lumaNE - 2.0 * lumaE + lumaSE);
-    float vertical = abs(lumaNW - 2.0 * lumaN + lumaNE)
-                   + 2.0 * abs(lumaW - 2.0 * lumaM + lumaE)
-                   + abs(lumaSW - 2.0 * lumaS + lumaSE);
+    float horizontal = abs(lumaNW - 2.0 * lumaW + lumaSW) + 2.0 * abs(lumaN - 2.0 * lumaM + lumaS) +
+                       abs(lumaNE - 2.0 * lumaE + lumaSE);
+    float vertical = abs(lumaNW - 2.0 * lumaN + lumaNE) + 2.0 * abs(lumaW - 2.0 * lumaM + lumaE) +
+                     abs(lumaSW - 2.0 * lumaS + lumaSE);
     bool horizontalEdge = horizontal >= vertical;
     float negativeLuma = horizontalEdge ? lumaN : lumaW;
     float positiveLuma = horizontalEdge ? lumaS : lumaE;
@@ -102,7 +95,6 @@ void main() {
 
     float neighborLuma = 0.25 * (lumaN + lumaS + lumaW + lumaE);
     float subpixelBlend = clamp((abs(neighborLuma - lumaM) / contrast - 0.25) / 0.75, 0.0, 0.75);
-    vec3 neighborhood = (center + north + south + west + east
-                       + northWest + northEast + southWest + southEast) / 9.0;
+    vec3 neighborhood = (center + north + south + west + east + northWest + northEast + southWest + southEast) / 9.0;
     outColor = vec4(mix(edgeFiltered, neighborhood, subpixelBlend), 1.0);
 }

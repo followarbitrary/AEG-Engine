@@ -42,10 +42,8 @@ struct Context {
 
 struct TemporaryDirectory {
     fs::path path = fs::temp_directory_path() /
-        ("aeg-font-tests-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    TemporaryDirectory() {
-        require(fs::create_directory(path), "create unique temporary font directory");
-    }
+                    ("aeg-font-tests-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    TemporaryDirectory() { require(fs::create_directory(path), "create unique temporary font directory"); }
     ~TemporaryDirectory() {
         std::error_code error;
         fs::remove_all(path, error);
@@ -81,8 +79,8 @@ void requireChineseFont(const aeg::editor::EditorFontInfo& info) {
             "report the size of the installed font");
     // These are characters used in editor labels and model paths. A fallback
     // question mark also has positive width, so measurement alone is insufficient.
-    constexpr ImWchar characters[] = {
-        'A', 0x4E2D, 0x6587, 0x573A, 0x666F, 0x6A21, 0x578B, 0x5BFC, 0x5165, 0x8DEF, 0x5F84, 0x3002, 0x2014};
+    constexpr ImWchar characters[] = {'A',    0x4E2D, 0x6587, 0x573A, 0x666F, 0x6A21, 0x578B,
+                                      0x5BFC, 0x5165, 0x8DEF, 0x5F84, 0x3002, 0x2014};
     for (const auto character : characters) {
         const auto* glyph = io.FontDefault->FindGlyphNoFallback(character);
         require(glyph != nullptr && glyph != io.FontDefault->FallbackGlyph,
@@ -91,8 +89,7 @@ void requireChineseFont(const aeg::editor::EditorFontInfo& info) {
     }
     const char* label = "A \xE4\xB8\xAD\xE6\x96\x87 \xE6\xA8\xA1\xE5\x9E\x8B";
     const auto size = io.FontDefault->CalcTextSizeA(info.pixelSize, FLT_MAX, 0, label);
-    require(std::isfinite(size.x) && size.x > info.pixelSize && size.y > 0,
-            "measure a mixed UTF-8 editor label");
+    require(std::isfinite(size.x) && size.x > info.pixelSize && size.y > 0, "measure a mixed UTF-8 editor label");
 }
 
 std::string thrownMessage(const std::function<void()>& action) {
@@ -135,9 +132,8 @@ void unicodeExplicitFont() {
 void missingExplicitFont() {
     TemporaryDirectory resources;
     Context context;
-    const auto message = thrownMessage([&] {
-        (void)aeg::editor::configureEditorFont(resources.path, resources.path / "absent-font.ttf");
-    });
+    const auto message = thrownMessage(
+        [&] { (void)aeg::editor::configureEditorFont(resources.path, resources.path / "absent-font.ttf"); });
     require(message.find("absent-font.ttf") != std::string::npos,
             "missing explicit font diagnostic identifies the requested file");
 }
@@ -214,9 +210,8 @@ void outOfBoundsFontTable() {
 void latinOnlyExplicitFont() {
     TemporaryDirectory resources;
     Context context;
-    const auto message = thrownMessage([&] {
-        (void)aeg::editor::configureEditorFont(resources.path, installedFont({"arial.ttf"}));
-    });
+    const auto message =
+        thrownMessage([&] { (void)aeg::editor::configureEditorFont(resources.path, installedFont({"arial.ttf"})); });
     require(message.find("chinese") != std::string::npos || message.find("cjk") != std::string::npos ||
                 message.find("glyph") != std::string::npos,
             "Latin-only font diagnostic explains the missing Chinese coverage");

@@ -65,7 +65,8 @@ aeg::assets::ModelData layers(bool reverseOrder) {
     model.meshes.push_back(quad(0.15f, 0.2f, 2));
     return model;
 }
-void colorAt(const Image& image, const aeg::math::Mat4& vp, aeg::math::Vec3 point, unsigned channel, const std::string& label) {
+void colorAt(const Image& image, const aeg::math::Mat4& vp, aeg::math::Vec3 point, unsigned channel,
+             const std::string& label) {
     const auto clip = vp * aeg::math::Vec4(point, 1);
     const auto ndc = aeg::math::Vec3(clip) / clip.w;
     const int x = int((ndc.x * 0.5f + 0.5f) * float(image.width));

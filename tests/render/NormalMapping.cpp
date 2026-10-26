@@ -171,8 +171,8 @@ struct EffectPmxFiles : AutomaticPmxFiles {
         std::filesystem::remove(root / "effects", error);
     }
 };
-aeg::assets::ModelData plane(Sample sample = tiltedX, aeg::math::Vec3 normal = {0, 0, 1}, aeg::math::Vec4 tangent = {1, 0, 0, 1},
-                             float scale = 1) {
+aeg::assets::ModelData plane(Sample sample = tiltedX, aeg::math::Vec3 normal = {0, 0, 1},
+                             aeg::math::Vec4 tangent = {1, 0, 0, 1}, float scale = 1) {
     aeg::assets::ModelData model;
     model.name = "Known tangent-frame normal-map fixture";
     aeg::assets::MeshData mesh;
@@ -199,7 +199,7 @@ aeg::assets::ModelData withoutMap(aeg::assets::ModelData model) {
 // are hand-derived literals, independent of renderer transformation helpers.
 aeg::math::Vec3 mapped(Sample sample, float scale, aeg::math::Vec3 n, aeg::math::Vec3 t, aeg::math::Vec3 b) {
     const aeg::math::Vec3 encoded(float(sample[0]) * 2 / 255 - 1, float(sample[1]) * 2 / 255 - 1,
-                            float(sample[2]) * 2 / 255 - 1);
+                                  float(sample[2]) * 2 / 255 - 1);
     return aeg::math::normalize(t * (encoded.x * scale) + b * (encoded.y * scale) + n * encoded.z);
 }
 }
@@ -267,8 +267,10 @@ int main(int argc, char** argv) {
             require(std::abs(positive - negative) > 0.3, label + " has no geometric-normal calibration");
             return positive > negative ? 1.0f : -1.0f;
         };
-        constexpr std::array<aeg::math::Vec3, 6> axes{{{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}}};
-        auto response = [&](const aeg::assets::ModelData& source, aeg::math::Vec3 expectedNormal, const std::string& label) {
+        constexpr std::array<aeg::math::Vec3, 6> axes{
+            {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}}};
+        auto response = [&](const aeg::assets::ModelData& source, aeg::math::Vec3 expectedNormal,
+                            const std::string& label) {
             const auto sign = faceSign(source, label);
             renderer.uploadModel(source);
             for (std::size_t axis = 0; axis < axes.size(); ++axis)
@@ -369,8 +371,8 @@ int main(int argc, char** argv) {
             const auto center = model.bounds.center();
             const float radius = std::max(model.bounds.radius(), 0.01f);
             const auto eye = center + aeg::math::normalize(aeg::math::Vec3(2.5f, 1.8f, 3.5f)) * radius * 3.2f;
-            auto projection =
-                aeg::math::perspective(aeg::math::to_radians(45.0f), float(width) / float(height), radius * 0.01f, radius * 7, {true, false});
+            auto projection = aeg::math::perspective(aeg::math::to_radians(45.0f), float(width) / float(height),
+                                                     radius * 0.01f, radius * 7, {true, false});
             settings.clipSpace = {true, false};
             settings.viewProjection = projection * aeg::math::look_at(eye, center, aeg::math::Vec3(0, 1, 0));
             settings.model = aeg::math::identity();
@@ -669,8 +671,8 @@ int main(int argc, char** argv) {
         // Nonuniform scale: N = normalize(1/1.8,1/.65,1/.45),
         // T = normalize(1.8,-.65,0), B = cross(N,T). A wrongly inverse-
         // transposed tangent differs even after orthogonalization here.
-        const auto diagonal =
-            plane(tiltedX, aeg::math::normalize(aeg::math::Vec3(1, 1, 1)), aeg::math::Vec4(aeg::math::normalize(aeg::math::Vec3(1, -1, 0)), 1));
+        const auto diagonal = plane(tiltedX, aeg::math::normalize(aeg::math::Vec3(1, 1, 1)),
+                                    aeg::math::Vec4(aeg::math::normalize(aeg::math::Vec3(1, -1, 0)), 1));
         const aeg::math::Vec3 scaledN{0.20133877f, 0.55755351f, 0.80535507f};
         const aeg::math::Vec3 scaledT{0.94055390f, -0.33964446f, 0};
         const aeg::math::Vec3 scaledB{0.27353439f, 0.75747985f, -0.59279272f};

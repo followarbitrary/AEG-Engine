@@ -28,8 +28,8 @@ void main() {
     gl_Position = scene.viewProjection * scene.model * vec4(inPosition, 1.0);
     normal = transpose(inverse(mat3(scene.model))) * inNormal;
     // Normals and tangents transform differently under nonuniform scaling.
-    tangentFrame = vec4(mat3(scene.model) * inTangent.xyz,
-        inTangent.w * (determinant(mat3(scene.model)) < 0.0 ? -1.0 : 1.0));
+    tangentFrame =
+        vec4(mat3(scene.model) * inTangent.xyz, inTangent.w * (determinant(mat3(scene.model)) < 0.0 ? -1.0 : 1.0));
     uv = inUV;
 #ifdef AEG_TAA
     // Rasterization is jittered, while motion tracks the unjittered surface.

@@ -1,8 +1,7 @@
 // RGB tangent-space normals use linear data, with scale on X/Y only.
 // https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#materialnormaltexture
 vec3 applyNormalMap(vec3 n, vec4 tangent, vec3 encodedNormal, float scale, float strength) {
-    if (abs(tangent.w) < 0.5 || scale == 0.0 || strength == 0.0 ||
-        any(isnan(tangent)) || any(isinf(tangent))) return n;
+    if (abs(tangent.w) < 0.5 || scale == 0.0 || strength == 0.0 || any(isnan(tangent)) || any(isinf(tangent))) return n;
     float magnitude = max(max(abs(tangent.x), abs(tangent.y)), abs(tangent.z));
     if (magnitude < 1e-12) return n;
     vec3 t = tangent.xyz / magnitude;

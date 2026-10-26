@@ -7,7 +7,8 @@ void Renderer::Impl::drawFxaa(rhi::CommandList& commands) {
     commands.setViewport(viewport->extent());
     commands.bindPipeline(*postPipeline);
     commands.bindSet(*postLayout, 0, *viewport->postDescriptor);
-    const aeg::math::Vec2 reciprocal{1.0f / static_cast<float>(viewport->width), 1.0f / static_cast<float>(viewport->height)};
+    const aeg::math::Vec2 reciprocal{1.0f / static_cast<float>(viewport->width),
+                                     1.0f / static_cast<float>(viewport->height)};
     commands.pushConstants(*postLayout, std::as_bytes(std::span(&reciprocal, 1)));
     commands.draw(3);
     commands.endRenderPass();

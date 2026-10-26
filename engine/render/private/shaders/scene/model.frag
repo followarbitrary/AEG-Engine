@@ -40,10 +40,8 @@ void main() {
     float opacity = material.alphaMode == 2 ? clamp(base.a, 0.0, 1.0) : 1.0;
     if (material.alphaMode == 2 && opacity <= 0.0) discard;
     vec3 n = normalize(normal);
-    if (material.hasNormalMap != 0 && scene.parameters.z > 0.5 &&
-        scene.parameters.w > 0.0 && scene.parameters.y < 0.5)
-        n = applyNormalMap(n, tangentFrame, texture(normalTexture, uv).rgb,
-                           material.normalScale, scene.parameters.w);
+    if (material.hasNormalMap != 0 && scene.parameters.z > 0.5 && scene.parameters.w > 0.0 && scene.parameters.y < 0.5)
+        n = applyNormalMap(n, tangentFrame, texture(normalTexture, uv).rgb, material.normalScale, scene.parameters.w);
     if (!gl_FrontFacing) n = -n;
     float diffuse = max(dot(n, -normalize(scene.lightDirection.xyz)), 0.0);
     float lighting = scene.parameters.y > 0.5 ? 1.0 : scene.parameters.x + (1.0 - scene.parameters.x) * diffuse;
@@ -56,16 +54,18 @@ void main() {
         return;
     }
     float currentNdcDepth = currentClip.z / currentClip.w;
-    float currentDepth = scene.temporalInfo.z > 0.5 ? currentClip.w
-        : (scene.clipConvention.y > 0.5 ? 1.0 - currentNdcDepth : currentNdcDepth);
+    float currentDepth = scene.temporalInfo.z > 0.5
+                             ? currentClip.w
+                             : (scene.clipConvention.y > 0.5 ? 1.0 - currentNdcDepth : currentNdcDepth);
     outMotionDepth = vec4(0.0, 0.0, -1.0, currentDepth);
     if (previousClip.w > 0.0) {
         // Positive viewport height maps NDC y=-1 to UV y=0 in both frames.
         vec2 currentUV = currentClip.xy / currentClip.w * 0.5 + 0.5;
         vec2 previousUV = previousClip.xy / previousClip.w * 0.5 + 0.5;
         float previousNdcDepth = previousClip.z / previousClip.w;
-        float previousDepth = scene.temporalInfo.w > 0.5 ? previousClip.w
-            : (scene.clipConvention.w > 0.5 ? 1.0 - previousNdcDepth : previousNdcDepth);
+        float previousDepth = scene.temporalInfo.w > 0.5
+                                  ? previousClip.w
+                                  : (scene.clipConvention.w > 0.5 ? 1.0 - previousNdcDepth : previousNdcDepth);
         outMotionDepth = vec4(currentUV - previousUV, previousDepth, currentDepth);
     }
 #endif

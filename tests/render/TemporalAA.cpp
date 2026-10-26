@@ -246,9 +246,8 @@ int main(int argc, char** argv) {
         } else {
             std::vector<Image> raw;
             for (unsigned i = 1; i <= 8; ++i) {
-                settings.viewProjection =
-                    aeg::math::translation(aeg::math::Vec3(2 * (halton(i, 2) - 0.5f) / float(width),
-                                                           2 * (halton(i, 3) - 0.5f) / float(height), 0));
+                settings.viewProjection = aeg::math::translation(aeg::math::Vec3(
+                    2 * (halton(i, 2) - 0.5f) / float(width), 2 * (halton(i, 3) - 0.5f) / float(height), 0));
                 frame();
                 raw.push_back(capture("raw-jitter-" + std::to_string(i)));
             }
@@ -329,8 +328,9 @@ int main(int argc, char** argv) {
             frame();
             require(renderer.temporalFrameCount() == 1, "background discontinuity did not reset history");
             advance(1);
-            settings.viewProjection = aeg::math::perspective(0.9f, float(width) / float(height), 0.1f, 10.0f, {true, false}) *
-                                      aeg::math::look_at(aeg::math::Vec3(0, 0, 2), aeg::math::Vec3(0), aeg::math::Vec3(0, 1, 0));
+            settings.viewProjection =
+                aeg::math::perspective(0.9f, float(width) / float(height), 0.1f, 10.0f, {true, false}) *
+                aeg::math::look_at(aeg::math::Vec3(0, 0, 2), aeg::math::Vec3(0), aeg::math::Vec3(0, 1, 0));
             frame();
             require(renderer.temporalFrameCount() == 1, "projection type change did not reset history");
             settings.viewProjection = aeg::math::identity();
@@ -355,8 +355,10 @@ int main(int argc, char** argv) {
             const auto modelError = rampError(capture("ramp-model"), shifted(rampStatic, 2));
             std::cout << "TAA reprojection mean errors: camera " << cameraError << ", model " << modelError << '\n';
             require(cameraError < 0.75 && modelError < 0.75, "camera/model reprojection left a textured history lag");
-            const auto projection = aeg::math::perspective(0.9f, float(width) / float(height), 0.1f, 10.0f, {true, false});
-            const auto perspective = projection * aeg::math::look_at(aeg::math::Vec3(0, 0, 2), aeg::math::Vec3(0), aeg::math::Vec3(0, 1, 0));
+            const auto projection =
+                aeg::math::perspective(0.9f, float(width) / float(height), 0.1f, 10.0f, {true, false});
+            const auto perspective =
+                projection * aeg::math::look_at(aeg::math::Vec3(0, 0, 2), aeg::math::Vec3(0), aeg::math::Vec3(0, 1, 0));
             settings.model = aeg::math::identity();
             settings.viewProjection = perspective;
             frame();

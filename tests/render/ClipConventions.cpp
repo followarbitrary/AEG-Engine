@@ -36,8 +36,10 @@ Image read(const std::filesystem::path& path) {
 assets::MeshData quad(float left, float right, float bottom, float top, float z, unsigned material) {
     assets::MeshData mesh;
     mesh.materialIndex = material;
-    mesh.vertices = {{{left, bottom, z}, {0, 0, 1}, {}}, {{right, bottom, z}, {0, 0, 1}, {}},
-                     {{right, top, z}, {0, 0, 1}, {}}, {{left, top, z}, {0, 0, 1}, {}}};
+    mesh.vertices = {{{left, bottom, z}, {0, 0, 1}, {}},
+                     {{right, bottom, z}, {0, 0, 1}, {}},
+                     {{right, top, z}, {0, 0, 1}, {}},
+                     {{left, top, z}, {0, 0, 1}, {}}};
     mesh.indices = {0, 1, 2, 0, 2, 3};
     return mesh;
 }
@@ -47,8 +49,7 @@ assets::ModelData layers(bool reverseOrder) {
     model.materials[0].baseColor = {1, 0, 0, 1};
     model.materials[1].baseColor = {0, 0, 1, 1};
     model.materials[2].baseColor = {0, 1, 0, 1};
-    model.meshes = {quad(-1, 1, 0, 1, -3, 0), quad(-1, 1, -1, 0, -3, 1),
-                    quad(-0.25f, 0.25f, -0.5f, 0.5f, -2, 2)};
+    model.meshes = {quad(-1, 1, 0, 1, -3, 0), quad(-1, 1, -1, 0, -3, 1), quad(-0.25f, 0.25f, -0.5f, 0.5f, -2, 2)};
     if (reverseOrder) std::reverse(model.meshes.begin(), model.meshes.end());
     return model;
 }
@@ -61,8 +62,7 @@ void sample(const Image& image, const math::Mat4& canonical, math::Vec3 point, u
     for (int dy = -2; dy <= 2; ++dy)
         for (int dx = -2; dx <= 2; ++dx)
             for (unsigned c = 0; c < 3; ++c)
-                require(std::abs(int(image.rgb[((y + dy) * extent + x + dx) * 3 + c]) -
-                                 (c == channel ? 255 : 0)) <= 2,
+                require(std::abs(int(image.rgb[((y + dy) * extent + x + dx) * 3 + c]) - (c == channel ? 255 : 0)) <= 2,
                         label + " inverted image orientation or selected the farther surface");
 }
 void nearImage(const Image& image, const Image& reference, const std::string& label) {
@@ -111,7 +111,10 @@ int main(int argc, char** argv) {
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     auto* window = glfwCreateWindow(320, 240, "AEG clip convention test", nullptr, nullptr);
-    if (!window) { glfwTerminate(); return 1; }
+    if (!window) {
+        glfwTerminate();
+        return 1;
+    }
     ImGui::CreateContext();
     ImGui::GetIO().IniFilename = nullptr;
     std::ostringstream diagnostics;
@@ -157,22 +160,23 @@ int main(int argc, char** argv) {
                 for (const bool yDown : {false, true})
                     for (const bool reversed : {false, true}) {
                         const math::ClipSpaceConvention convention{yDown, reversed};
-                        const auto projection = perspective
-                            ? math::perspective(math::to_radians(60), 1, 0.1f, 10, convention)
-                            : math::orthographic(-1.5f, 1.5f, -1.5f, 1.5f, 0.1f, 10, convention);
+                        const auto projection =
+                            perspective ? math::perspective(math::to_radians(60), 1, 0.1f, 10, convention)
+                                        : math::orthographic(-1.5f, 1.5f, -1.5f, 1.5f, 0.1f, 10, convention);
                         settings.set_camera({math::identity(), projection, convention});
                         // Switch convention on an already populated temporal history, without an explicit reset.
                         if (first) renderer.uploadModel(layers(false));
                         frame();
                         if (mode.taa)
-                            require(renderer.temporalFrameCount() == 1, "Convention or projection change retained history");
+                            require(renderer.temporalFrameCount() == 1,
+                                    "Convention or projection change retained history");
                         for (unsigned i = 1; i < (mode.taa ? 12u : 2u); ++i) frame();
                         const auto image = capture();
-                        const auto canonical = perspective
-                            ? math::perspective(math::to_radians(60), 1, 0.1f, 10, {true, reversed})
-                            : math::orthographic(-1.5f, 1.5f, -1.5f, 1.5f, 0.1f, 10, {true, reversed});
+                        const auto canonical =
+                            perspective ? math::perspective(math::to_radians(60), 1, 0.1f, 10, {true, reversed})
+                                        : math::orthographic(-1.5f, 1.5f, -1.5f, 1.5f, 0.1f, 10, {true, reversed});
                         const auto label = std::string(perspective ? "Perspective" : "Orthographic") +
-                            (yDown ? " Y-down" : " Y-up") + (reversed ? " reverse" : " normal");
+                                           (yDown ? " Y-down" : " Y-up") + (reversed ? " reverse" : " normal");
                         sample(image, canonical, {0, 0.875f, -3}, 0, label);
                         sample(image, canonical, {0, -0.875f, -3}, 2, label);
                         sample(image, canonical, {0, 0, -2}, 1, label);
@@ -180,8 +184,10 @@ int main(int argc, char** argv) {
                         require(image.rgb[(extent / 4 * extent + extent / 2) * 3] > 250 &&
                                     image.rgb[(extent * 3 / 4 * extent + extent / 2) * 3 + 2] > 250,
                                 label + " did not preserve world-up image orientation");
-                        if (first) reference = image;
-                        else nearImage(image, reference, label);
+                        if (first)
+                            reference = image;
+                        else
+                            nearImage(image, reference, label);
                         first = false;
                         // Draw far surfaces after the foreground too; depth must win in both draw orders.
                         renderer.uploadModel(layers(true));
@@ -207,9 +213,9 @@ int main(int argc, char** argv) {
                 for (const bool yDown : {false, true})
                     for (const bool reversed : {false, true}) {
                         const math::ClipSpaceConvention convention{yDown, reversed};
-                        const auto projection = perspective
-                            ? math::perspective(math::to_radians(60), 1, 0.1f, 10, convention)
-                            : math::orthographic(-1.5f, 1.5f, -1.5f, 1.5f, 0.1f, 10, convention);
+                        const auto projection =
+                            perspective ? math::perspective(math::to_radians(60), 1, 0.1f, 10, convention)
+                                        : math::orthographic(-1.5f, 1.5f, -1.5f, 1.5f, 0.1f, 10, convention);
                         settings.model = math::identity();
                         settings.set_camera({math::identity(), projection, convention});
                         renderer.resetTemporalHistory();
@@ -230,7 +236,8 @@ int main(int argc, char** argv) {
         }
         require(renderer.validationErrorCount() == 0, "Vulkan validation failed for clip conventions");
         renderer.waitIdle();
-        std::cout << "PASS " << captureIndex << " clip captures: four flags, perspective/orthographic, depth, "
+        std::cout << "PASS " << captureIndex
+                  << " clip captures: four flags, perspective/orthographic, depth, "
                      "orientation, FXAA/TAA, history switches and motion\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

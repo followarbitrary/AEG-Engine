@@ -39,8 +39,7 @@ std::filesystem::path windowsFontsDirectory() {
 #endif
 }
 
-std::filesystem::path selectFont(const std::filesystem::path& resources,
-                                 const std::filesystem::path& requested) {
+std::filesystem::path selectFont(const std::filesystem::path& resources, const std::filesystem::path& requested) {
     std::error_code error;
     if (!requested.empty()) {
         if (!std::filesystem::is_regular_file(requested, error))
@@ -78,15 +77,15 @@ void validateFontContainer(std::span<const unsigned char> bytes) {
                (std::uint32_t(bytes[offset + 2]) << 8) | bytes[offset + 3];
     };
     const auto tag = [](const char* value) -> std::uint32_t {
-        return (std::uint32_t(value[0]) << 24) | (std::uint32_t(value[1]) << 16) |
-               (std::uint32_t(value[2]) << 8) | std::uint32_t(value[3]);
+        return (std::uint32_t(value[0]) << 24) | (std::uint32_t(value[1]) << 16) | (std::uint32_t(value[2]) << 8) |
+               std::uint32_t(value[3]);
     };
     std::size_t face = 0;
     if (read32(0) == tag("ttcf")) {
         const auto version = read32(4);
         const auto count = read32(8);
-        if ((version != 0x00010000 && version != 0x00020000) || count == 0 ||
-            count > bytes.size() / 4 || !within(12, std::size_t(count) * 4))
+        if ((version != 0x00010000 && version != 0x00020000) || count == 0 || count > bytes.size() / 4 ||
+            !within(12, std::size_t(count) * 4))
             invalid();
         for (std::size_t i = 0; i < count; ++i)
             if (!within(read32(12 + i * 4), 12)) invalid();
@@ -96,7 +95,10 @@ void validateFontContainer(std::span<const unsigned char> bytes) {
     if (format != 0x00010000 && format != tag("OTTO") && format != tag("true")) invalid();
     const auto count = read16(face + 4);
     if (!count || !within(face + 12, std::size_t(count) * 16)) invalid();
-    struct Table { std::uint32_t name; std::size_t offset, length; };
+    struct Table {
+        std::uint32_t name;
+        std::size_t offset, length;
+    };
     std::vector<Table> tables;
     tables.reserve(count);
     for (std::size_t i = 0; i < count; ++i) {
@@ -144,8 +146,8 @@ void validateFontContainer(std::span<const unsigned char> bytes) {
         const auto loca = find("loca", (std::size_t(glyphs) + 1) * stride);
         std::size_t previous = 0;
         for (std::size_t i = 0; i <= glyphs; ++i) {
-            const auto offset = stride == 2 ? std::size_t(read16(loca.offset + i * 2)) * 2
-                                           : std::size_t(read32(loca.offset + i * 4));
+            const auto offset =
+                stride == 2 ? std::size_t(read16(loca.offset + i * 2)) * 2 : std::size_t(read32(loca.offset + i * 4));
             if (offset < previous || offset > glyf.length) invalid();
             previous = offset;
         }
@@ -156,7 +158,8 @@ std::vector<unsigned char> readFont(const std::filesystem::path& path) {
     std::ifstream input(path, std::ios::binary | std::ios::ate);
     const auto length = input.tellg();
     if (!input || length < 256 || length > 64 * 1024 * 1024)
-        throw std::runtime_error("Invalid font file size (expected 256 bytes to 64 MiB): " + foundation::pathToUtf8(path));
+        throw std::runtime_error("Invalid font file size (expected 256 bytes to 64 MiB): " +
+                                 foundation::pathToUtf8(path));
     std::vector<unsigned char> bytes(static_cast<std::size_t>(length));
     input.seekg(0);
     if (!input.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size())))
@@ -177,21 +180,15 @@ std::vector<unsigned char> readFont(const std::filesystem::path& path) {
 }
 
 // Static storage is required: ImGui retains this range pointer in its config.
-constexpr ImWchar chineseRanges[] = {
-    0x0020, 0x00FF, // Latin and Latin supplement.
-    0x2000, 0x206F, // General punctuation, including em dash and ellipsis.
-    0x3000, 0x30FF, // CJK punctuation and Kana, also useful for PMX names.
-    0x31F0, 0x31FF,
-    0x3400, 0x4DBF, // CJK Extension A.
-    0x4E00, 0x9FFF, // Simplified and Traditional Chinese ideographs.
-    0xFF00, 0xFFEF,
-    0xFFFD, 0xFFFD,
-    0
-};
+constexpr ImWchar chineseRanges[] = {0x0020, 0x00FF, // Latin and Latin supplement.
+                                     0x2000, 0x206F, // General punctuation, including em dash and ellipsis.
+                                     0x3000, 0x30FF, // CJK punctuation and Kana, also useful for PMX names.
+                                     0x31F0, 0x31FF, 0x3400, 0x4DBF, // CJK Extension A.
+                                     0x4E00, 0x9FFF,                 // Simplified and Traditional Chinese ideographs.
+                                     0xFF00, 0xFFEF, 0xFFFD, 0xFFFD, 0};
 }
 
-EditorFontInfo configureEditorFont(const std::filesystem::path& resources,
-                                   const std::filesystem::path& requested) {
+EditorFontInfo configureEditorFont(const std::filesystem::path& resources, const std::filesystem::path& requested) {
     if (!ImGui::GetCurrentContext()) throw std::runtime_error("Editor font needs an active ImGui context");
     auto& io = ImGui::GetIO();
     if (!io.Fonts->Fonts.empty())
@@ -210,10 +207,12 @@ EditorFontInfo configureEditorFont(const std::filesystem::path& resources,
     io.Fonts->Flags |= ImFontAtlasFlags_NoPowerOfTwoHeight;
     constexpr float pixels = 18;
     auto* font = io.Fonts->AddFontFromMemoryTTF(owned, static_cast<int>(bytes.size()), pixels, &config, chineseRanges);
-    if (!font || !io.Fonts->Build()) throw std::runtime_error("Cannot build Chinese font atlas: " + foundation::pathToUtf8(source));
+    if (!font || !io.Fonts->Build())
+        throw std::runtime_error("Cannot build Chinese font atlas: " + foundation::pathToUtf8(source));
     for (const ImWchar glyph : {ImWchar(0x4E2D), ImWchar(0x6587), ImWchar(0x6A21), ImWchar(0x578B)})
         if (!font->FindGlyphNoFallback(glyph))
-            throw std::runtime_error("Selected font does not contain Chinese glyphs: " + foundation::pathToUtf8(source));
+            throw std::runtime_error("Selected font does not contain Chinese glyphs: " +
+                                     foundation::pathToUtf8(source));
     io.FontDefault = font;
     return {source, pixels};
 }
