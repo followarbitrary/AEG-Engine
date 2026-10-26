@@ -2,8 +2,8 @@
 
 namespace aeg::render::detail {
 void barrier(VkCommandBuffer command, VkImage image, VkImageLayout oldLayout, VkImageLayout newLayout,
-                    VkAccessFlags sourceAccess, VkAccessFlags destinationAccess, VkPipelineStageFlags sourceStage,
-                    VkPipelineStageFlags destinationStage) {
+             VkAccessFlags sourceAccess, VkAccessFlags destinationAccess, VkPipelineStageFlags sourceStage,
+             VkPipelineStageFlags destinationStage) {
     VkImageMemoryBarrier info{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
     info.srcAccessMask = sourceAccess;
     info.dstAccessMask = destinationAccess;
@@ -25,7 +25,7 @@ std::uint32_t DeviceResources::memoryType(std::uint32_t mask, VkMemoryPropertyFl
 }
 
 Buffer DeviceResources::buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties,
-              bool map) const {
+                               bool map) const {
     if (!size) throw std::runtime_error("Cannot allocate an empty GPU buffer");
     Buffer result;
     result.device = device;
@@ -47,7 +47,7 @@ Buffer DeviceResources::buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMe
 }
 
 Image DeviceResources::image(std::uint32_t width, std::uint32_t height, VkFormat format, VkImageUsageFlags usage,
-            VkImageAspectFlags aspect, VkSampleCountFlagBits samples) const {
+                             VkImageAspectFlags aspect, VkSampleCountFlagBits samples) const {
     Image result;
     result.device = device;
     VkImageCreateInfo info{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
@@ -103,7 +103,9 @@ void DeviceResources::immediate(const std::function<void(VkCommandBuffer)>& reco
     vkFreeCommandBuffers(device, commandPool, 1, &command);
 }
 
-Image DeviceResources::texture(const assets::ImageData& pixels) const {
+Image DeviceResources::texture(const assets::ImageData& pixels, VkFormat format) const {
+    if (format != VK_FORMAT_R8G8B8A8_SRGB && format != VK_FORMAT_R8G8B8A8_UNORM)
+        throw std::runtime_error("Unsupported RGBA8 texture format");
     VkPhysicalDeviceProperties properties{};
     vkGetPhysicalDeviceProperties(physical, &properties);
     const auto bytes = static_cast<std::uint64_t>(pixels.width) * pixels.height * 4;
@@ -113,7 +115,7 @@ Image DeviceResources::texture(const assets::ImageData& pixels) const {
     auto staging = buffer(bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
                           VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true);
     std::memcpy(staging.mapped, pixels.rgba.data(), pixels.rgba.size());
-    auto result = image(pixels.width, pixels.height, VK_FORMAT_R8G8B8A8_SRGB,
+    auto result = image(pixels.width, pixels.height, format,
                         VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_IMAGE_ASPECT_COLOR_BIT);
     immediate([&](VkCommandBuffer command) {
         barrier(command, result.handle, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0,
@@ -121,11 +123,10 @@ Image DeviceResources::texture(const assets::ImageData& pixels) const {
         VkBufferImageCopy copy{};
         copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
         copy.imageExtent = {pixels.width, pixels.height, 1};
-        vkCmdCopyBufferToImage(command, staging.handle, result.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
-                               &copy);
-        barrier(command, result.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT,
-                VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+        vkCmdCopyBufferToImage(command, staging.handle, result.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+        barrier(command, result.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
     });
     return result;
 }

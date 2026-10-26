@@ -20,8 +20,10 @@ struct MaterialPush {
     glm::vec4 color{1};
     float alphaCutoff{0.5f};
     std::uint32_t alphaMasked{};
-    glm::vec2 reserved{};
+    float normalScale{1};
+    std::uint32_t hasNormalMap{};
 };
 static_assert(sizeof(MaterialPush) == 32);
 static_assert(offsetof(MaterialPush, alphaCutoff) == 16 && offsetof(MaterialPush, alphaMasked) == 20);
+static_assert(offsetof(MaterialPush, normalScale) == 24 && offsetof(MaterialPush, hasNormalMap) == 28);
 }

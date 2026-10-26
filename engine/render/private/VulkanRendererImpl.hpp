@@ -24,12 +24,11 @@
 #include <set>
 #include <vector>
 
-
 namespace aeg::render {
-using detail::check;
-using assets::ModelData;
 using assets::MaterialData;
+using assets::ModelData;
 using assets::Vertex;
+using detail::check;
 
 struct VulkanRenderer::Impl {
     GLFWwindow* window{};
@@ -60,7 +59,7 @@ struct VulkanRenderer::Impl {
     bool rebuildSwapchain{};
     VkRenderPass presentPass{}, postPass{}, temporalPass{};
     VkDescriptorPool uiPool{}, uniformPool{};
-    VkDescriptorSetLayout sceneLayout{}, materialLayout{}, temporalSetLayout{};
+    VkDescriptorSetLayout sceneLayout{}, materialLayout{}, postSetLayout{}, temporalSetLayout{};
     VkDescriptorSet sceneDescriptor{};
     VkPipelineLayout pipelineLayout{}, postLayout{}, temporalLayout{};
     VkPipeline postPipeline{}, temporalPipeline{};
@@ -119,7 +118,7 @@ struct VulkanRenderer::Impl {
     void resetTemporalHistory() noexcept;
 
     std::unique_ptr<ViewportTargets> createViewport(std::uint32_t width, std::uint32_t height,
-                                                   const AntialiasingSettings& settings);
+                                                    const AntialiasingSettings& settings);
 
     void resizeViewport(std::uint32_t width, std::uint32_t height);
 
@@ -144,6 +143,5 @@ struct VulkanRenderer::Impl {
     void captureViewport(const std::filesystem::path& path);
 
     void shutdown() noexcept;
-
 };
 }

@@ -11,8 +11,8 @@ void VulkanRenderer::Impl::createScenePass(ScenePipeline& target) {
     attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    attachments[0].finalLayout = multisampled ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
-                                             : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    attachments[0].finalLayout =
+        multisampled ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     attachments[1].format = depthFormat;
     attachments[1].samples = target.samples;
     attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
@@ -41,16 +41,14 @@ void VulkanRenderer::Impl::createScenePass(ScenePipeline& target) {
     dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
     dependencies[0].dstSubpass = 0;
     dependencies[0].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
-                                   VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
-                                   VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+                                   VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
                                    VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
     dependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
                                    VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
                                    VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-    dependencies[0].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT |
-                                    VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    dependencies[0].dstAccessMask =
-        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    dependencies[0].srcAccessMask =
+        VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
     // The sampled scene is drawn at a different offset/scale in ImGui.
     // Framebuffer-local dependencies would not synchronize those texels.
     dependencies[0].dependencyFlags = 0;
@@ -78,14 +76,18 @@ SceneUniform VulkanRenderer::Impl::sceneUniform(const RenderSettings& settings) 
     auto light = settings.lightDirection;
     if (glm::dot(light, light) < 0.000001f) light = {0, -1, 0};
     uniform.lightDirection = glm::vec4(light, 0);
-    uniform.parameters = {std::clamp(settings.ambient, 0.0f, 1.0f), settings.unlit ? 1.0f : 0.0f, 0, 0};
+    uniform.parameters = {
+        std::clamp(settings.ambient, 0.0f, 1.0f), settings.unlit ? 1.0f : 0.0f, settings.normalMapping ? 1.0f : 0.0f,
+        std::isfinite(settings.normalStrength) ? std::clamp(settings.normalStrength, 0.0f, 4.0f) : 1.0f};
     if (aa.taa) {
         const bool perspective = perspectiveProjection(settings.viewProjection);
         if (temporalHistory.valid && (settings.unlit != temporalHistory.previous.unlit ||
-            settings.ambient != temporalHistory.previous.ambient ||
-            settings.lightDirection != temporalHistory.previous.lightDirection ||
-            settings.background != temporalHistory.previous.background ||
-            perspective != perspectiveProjection(temporalHistory.previous.viewProjection)))
+                                      settings.normalMapping != temporalHistory.previous.normalMapping ||
+                                      settings.normalStrength != temporalHistory.previous.normalStrength ||
+                                      settings.ambient != temporalHistory.previous.ambient ||
+                                      settings.lightDirection != temporalHistory.previous.lightDirection ||
+                                      settings.background != temporalHistory.previous.background ||
+                                      perspective != perspectiveProjection(temporalHistory.previous.viewProjection)))
             resetTemporalHistory();
         const auto halton = [](std::uint32_t index, std::uint32_t base) {
             float value = 0, fraction = 1;
@@ -104,10 +106,14 @@ SceneUniform VulkanRenderer::Impl::sceneUniform(const RenderSettings& settings) 
         // Clip translation works for an already combined VP, including ortho.
         uniform.viewProjection = jitter * settings.viewProjection;
         uniform.currentViewProjection = settings.viewProjection;
-        uniform.previousViewProjection = temporalHistory.valid ? temporalHistory.previous.viewProjection : settings.viewProjection;
+        uniform.previousViewProjection =
+            temporalHistory.valid ? temporalHistory.previous.viewProjection : settings.viewProjection;
         uniform.previousModel = temporalHistory.valid ? temporalHistory.previous.model : settings.model;
-        uniform.temporalInfo = {inverse.x, inverse.y, perspective ? 1.0f : 0.0f,
-            (temporalHistory.valid ? perspectiveProjection(temporalHistory.previous.viewProjection) : perspective) ? 1.0f : 0.0f};
+        uniform.temporalInfo = {
+            inverse.x, inverse.y, perspective ? 1.0f : 0.0f,
+            (temporalHistory.valid ? perspectiveProjection(temporalHistory.previous.viewProjection) : perspective)
+                ? 1.0f
+                : 0.0f};
     }
     return uniform;
 }

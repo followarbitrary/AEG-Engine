@@ -3,7 +3,8 @@
 namespace aeg::render {
 VulkanRenderer::Impl::~Impl() { shutdown(); }
 
-void VulkanRenderer::Impl::initialize(GLFWwindow* target, const std::filesystem::path& shaders, bool requestedValidation) {
+void VulkanRenderer::Impl::initialize(GLFWwindow* target, const std::filesystem::path& shaders,
+                                      bool requestedValidation) {
     window = target;
     shaderDirectory = shaders;
     createInstance(requestedValidation);
@@ -13,11 +14,11 @@ void VulkanRenderer::Impl::initialize(GLFWwindow* target, const std::filesystem:
     createDescriptors();
     scenePipeline(1);
     createPostPass();
-    postPipeline = createPipeline(postPass, postLayout, VK_SAMPLE_COUNT_1_BIT,
-        false, "fullscreen.vert.spv", "fxaa.frag.spv");
+    postPipeline =
+        createPipeline(postPass, postLayout, VK_SAMPLE_COUNT_1_BIT, false, "fullscreen.vert.spv", "fxaa.frag.spv");
     if (temporalSupported)
-        temporalPipeline = createPipeline(temporalPass, temporalLayout, VK_SAMPLE_COUNT_1_BIT,
-            false, "fullscreen.vert.spv", "taa.frag.spv", 2);
+        temporalPipeline = createPipeline(temporalPass, temporalLayout, VK_SAMPLE_COUNT_1_BIT, false,
+                                          "fullscreen.vert.spv", "taa.frag.spv", 2);
     if (!ImGui_ImplGlfw_InitForVulkan(window, true)) throw std::runtime_error("ImGui GLFW initialization failed");
     glfwBackend = true;
     ImGui_ImplVulkan_InitInfo info{};
@@ -146,6 +147,7 @@ void VulkanRenderer::Impl::shutdown() noexcept {
         if (uiPool) vkDestroyDescriptorPool(device, uiPool, nullptr);
         if (sceneLayout) vkDestroyDescriptorSetLayout(device, sceneLayout, nullptr);
         if (materialLayout) vkDestroyDescriptorSetLayout(device, materialLayout, nullptr);
+        if (postSetLayout) vkDestroyDescriptorSetLayout(device, postSetLayout, nullptr);
         if (temporalSetLayout) vkDestroyDescriptorSetLayout(device, temporalSetLayout, nullptr);
         if (sampler) vkDestroySampler(device, sampler, nullptr);
         if (viewportSampler) vkDestroySampler(device, viewportSampler, nullptr);

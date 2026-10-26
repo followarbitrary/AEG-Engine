@@ -10,7 +10,7 @@ struct GpuMesh {
 };
 
 struct GpuMaterial {
-    detail::Image image;
+    detail::Image image, normalImage;
     VkDescriptorSet descriptor{};
     MaterialPush parameters;
 };

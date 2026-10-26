@@ -1,6 +1,8 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
 layout(location = 0) in vec3 normal;
 layout(location = 1) in vec2 uv;
+layout(location = 4) in vec4 tangentFrame;
 layout(location = 0) out vec4 outColor;
 #ifdef AEG_TAA
 layout(location = 2) in vec4 currentClip;
@@ -21,16 +23,24 @@ layout(set = 0, binding = 0) uniform Scene {
 }
 scene;
 layout(set = 1, binding = 0) uniform sampler2D baseTexture;
+layout(set = 1, binding = 1) uniform sampler2D normalTexture;
 layout(push_constant) uniform Material {
     vec4 baseColor;
     float alphaCutoff;
     uint alphaMasked;
+    float normalScale;
+    uint hasNormalMap;
 }
 material;
+#include "normal_mapping.glsl"
 void main() {
     vec4 base = texture(baseTexture, uv) * material.baseColor;
     if (material.alphaMasked != 0 && base.a < material.alphaCutoff) discard;
     vec3 n = normalize(normal);
+    if (material.hasNormalMap != 0 && scene.parameters.z > 0.5 &&
+        scene.parameters.w > 0.0 && scene.parameters.y < 0.5)
+        n = applyNormalMap(n, tangentFrame, texture(normalTexture, uv).rgb,
+                           material.normalScale, scene.parameters.w);
     if (!gl_FrontFacing) n = -n;
     float diffuse = max(dot(n, -normalize(scene.lightDirection.xyz)), 0.0);
     float lighting = scene.parameters.y > 0.5 ? 1.0 : scene.parameters.x + (1.0 - scene.parameters.x) * diffuse;

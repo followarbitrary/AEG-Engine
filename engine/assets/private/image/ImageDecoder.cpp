@@ -29,7 +29,20 @@ ImageData decode(const unsigned char* bytes, std::size_t size) {
     return image;
 }
 }
-ImageData readTexture(const aiScene& scene, const aiString& name, const std::filesystem::path& directory, bool gltf) {
+ImageData readTexture(const std::filesystem::path& path) {
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    if (!file) throw std::runtime_error("file could not be opened");
+    const auto size = file.tellg();
+    if (size <= 0 || size > std::numeric_limits<int>::max()) throw std::runtime_error("texture byte size is invalid");
+    std::vector<unsigned char> bytes(static_cast<std::size_t>(size));
+    file.seekg(0);
+    if (!file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size())))
+        throw std::runtime_error("texture file is incomplete");
+    return decode(bytes.data(), bytes.size());
+}
+ImageData readTexture(const aiScene& scene, const aiString& name, const std::filesystem::path& directory, bool gltf,
+                      std::filesystem::path* externalPath) {
+    if (externalPath) externalPath->clear();
     if (const auto* embedded = scene.GetEmbeddedTexture(name.C_Str())) {
         if (embedded->mHeight == 0)
             return decode(reinterpret_cast<const unsigned char*>(embedded->pcData), embedded->mWidth);
@@ -52,15 +65,10 @@ ImageData readTexture(const aiScene& scene, const aiString& name, const std::fil
     std::string relative = name.C_Str();
     std::replace(relative.begin(), relative.end(), '\\', '/');
     if (gltf) relative = percentDecode(relative);
-    const auto path = directory / foundation::pathFromUtf8(relative);
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
-    if (!file) throw std::runtime_error("file could not be opened");
-    const auto size = file.tellg();
-    if (size <= 0 || size > std::numeric_limits<int>::max()) throw std::runtime_error("texture byte size is invalid");
-    std::vector<unsigned char> bytes(static_cast<std::size_t>(size));
-    file.seekg(0);
-    if (!file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size())))
-        throw std::runtime_error("texture file is incomplete");
-    return decode(bytes.data(), bytes.size());
+    const auto path = (directory / foundation::pathFromUtf8(relative)).lexically_normal();
+    // Retain the resolved reference even when decoding fails, so a sibling
+    // normal image can still be discovered alongside an unavailable base image.
+    if (externalPath) *externalPath = path;
+    return readTexture(path);
 }
 }

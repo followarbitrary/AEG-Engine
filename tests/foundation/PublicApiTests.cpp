@@ -3,6 +3,7 @@
 #include <OrbitCamera.hpp>
 #include <ModelData.hpp>
 #include <ModelImporter.hpp>
+#include <MaterialTextures.hpp>
 #include <RenderSettings.hpp>
 #include <AntialiasingSettings.hpp>
 #include <VulkanRenderer.hpp>
@@ -19,23 +20,24 @@
 
 namespace {
 static_assert(std::is_same_v<decltype(aeg::assets::ModelData{}.bounds), aeg::foundation::Bounds>);
-static_assert(std::is_same_v<decltype(&aeg::assets::loadModel),
-                             aeg::assets::ModelData (*)(const std::filesystem::path&)>);
-static_assert(std::is_same_v<decltype(&aeg::foundation::pathToUtf8),
-                             std::string (*)(const std::filesystem::path&)>);
-static_assert(std::is_same_v<decltype(&aeg::foundation::pathFromUtf8),
-                             std::filesystem::path (*)(std::string_view)>);
+static_assert(
+    std::is_same_v<decltype(&aeg::assets::loadModel), aeg::assets::ModelData (*)(const std::filesystem::path&)>);
+static_assert(std::is_same_v<decltype(&aeg::assets::prepareModelMaterials), void (*)(aeg::assets::ModelData&)>);
+static_assert(std::is_same_v<decltype(&aeg::assets::initializeModelMaterials), void (*)(aeg::assets::ModelData&)>);
+static_assert(
+    std::is_same_v<decltype(&aeg::assets::clearMaterialNormalMap), void (*)(aeg::assets::ModelData&, std::size_t)>);
+static_assert(std::is_same_v<decltype(&aeg::foundation::pathToUtf8), std::string (*)(const std::filesystem::path&)>);
+static_assert(std::is_same_v<decltype(&aeg::foundation::pathFromUtf8), std::filesystem::path (*)(std::string_view)>);
 static_assert(std::is_same_v<decltype(&aeg::camera::OrbitCamera::fit),
                              void (aeg::camera::OrbitCamera::*)(const aeg::foundation::Bounds&)>);
 static_assert(std::is_same_v<decltype(&aeg::render::VulkanRenderer::uploadModel),
                              void (aeg::render::VulkanRenderer::*)(const aeg::assets::ModelData&)>);
 static_assert(std::is_same_v<decltype(&aeg::render::VulkanRenderer::setAntialiasing),
                              void (aeg::render::VulkanRenderer::*)(const aeg::render::AntialiasingSettings&)>);
-static_assert(std::is_same_v<decltype(&aeg::render::VulkanRenderer::drawFrame),
-                             void (aeg::render::VulkanRenderer::*)(aeg::render::RenderSettings&,
-                                                                const std::function<void()>&)>);
-static_assert(std::is_same_v<decltype(&aeg::editor::runEditor),
-                             int (*)(const aeg::editor::EditorOptions&)>);
+static_assert(
+    std::is_same_v<decltype(&aeg::render::VulkanRenderer::drawFrame),
+                   void (aeg::render::VulkanRenderer::*)(aeg::render::RenderSettings&, const std::function<void()>&)>);
+static_assert(std::is_same_v<decltype(&aeg::editor::runEditor), int (*)(const aeg::editor::EditorOptions&)>);
 static_assert(!std::is_copy_constructible_v<aeg::render::VulkanRenderer>);
 
 void require(bool condition, const char* message) {

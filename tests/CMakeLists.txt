@@ -4,7 +4,8 @@ add_subdirectory(assets)
 add_subdirectory(editor)
 
 # Preserve the build helper target while keeping module tests independent.
-add_custom_target(aeg_core_tests DEPENDS aeg_camera_tests aeg_assets_tests)
+add_custom_target(aeg_core_tests DEPENDS aeg_camera_tests aeg_assets_tests
+    aeg_normal_mapping_assets_tests aeg_auto_normal_mapping_assets_tests aeg_mmd_effect_normal_tests)
 
 if(AEG_ENABLE_GPU_TESTS)
     add_subdirectory(render)

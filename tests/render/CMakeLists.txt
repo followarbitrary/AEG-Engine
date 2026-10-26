@@ -1,3 +1,12 @@
+add_executable(aeg_normal_mapping_test NormalMapping.cpp)
+target_link_libraries(aeg_normal_mapping_test PRIVATE aeg::render glfw)
+target_compile_definitions(aeg_normal_mapping_test PRIVATE AEG_TEST_FIXTURES="${PROJECT_SOURCE_DIR}/tests/fixtures")
+aeg_project_options(aeg_normal_mapping_test)
+add_dependencies(aeg_normal_mapping_test aeg_resources)
+add_test(NAME aeg_normal_mapping COMMAND aeg_normal_mapping_test
+    "$<TARGET_FILE_DIR:aeg_editor>" "${CMAKE_BINARY_DIR}/normal-mapping")
+set_tests_properties(aeg_normal_mapping PROPERTIES LABELS gpu TIMEOUT 90)
+
 add_executable(aeg_temporal_aa_test TemporalAA.cpp)
 target_link_libraries(aeg_temporal_aa_test PRIVATE aeg::render glfw)
 aeg_project_options(aeg_temporal_aa_test)

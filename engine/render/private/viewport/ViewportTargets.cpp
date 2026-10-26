@@ -7,7 +7,7 @@ void VulkanRenderer::Impl::destroyViewport() noexcept {
 }
 
 std::unique_ptr<ViewportTargets> VulkanRenderer::Impl::createViewport(std::uint32_t width, std::uint32_t height,
-                                               const AntialiasingSettings& settings) {
+                                                                      const AntialiasingSettings& settings) {
     auto& scene = scenePipeline(settings.msaaSamples, settings.taa);
     auto candidate = std::make_unique<ViewportTargets>();
     candidate->device = device;
@@ -15,21 +15,22 @@ std::unique_ptr<ViewportTargets> VulkanRenderer::Impl::createViewport(std::uint3
     candidate->width = width;
     candidate->height = height;
     candidate->color = resources.image(width, height, sceneFormat,
-                                    VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
-                                        VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
-                                    VK_IMAGE_ASPECT_COLOR_BIT);
+                                       VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                                           VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                                       VK_IMAGE_ASPECT_COLOR_BIT);
     candidate->depth = resources.image(width, height, depthFormat, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-                                    VK_IMAGE_ASPECT_DEPTH_BIT, scene.samples);
+                                       VK_IMAGE_ASPECT_DEPTH_BIT, scene.samples);
     const bool multisampled = settings.msaaSamples > 1;
     if (multisampled)
-        candidate->multisample = resources.image(width, height, sceneFormat,
-            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_IMAGE_ASPECT_COLOR_BIT, scene.samples);
+        candidate->multisample = resources.image(width, height, sceneFormat, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+                                                 VK_IMAGE_ASPECT_COLOR_BIT, scene.samples);
     if (settings.taa)
         candidate->motion = resources.image(width, height, motionFormat,
-            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
-            VK_IMAGE_ASPECT_COLOR_BIT);
+                                            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                                                VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                                            VK_IMAGE_ASPECT_COLOR_BIT);
     const std::array attachments{multisampled ? candidate->multisample.view : candidate->color.view,
-                                candidate->depth.view, settings.taa ? candidate->motion.view : candidate->color.view};
+                                 candidate->depth.view, settings.taa ? candidate->motion.view : candidate->color.view};
     VkFramebufferCreateInfo frame{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
     frame.renderPass = scene.pass;
     frame.attachmentCount = (multisampled || settings.taa) ? 3u : 2u;
@@ -40,7 +41,7 @@ std::unique_ptr<ViewportTargets> VulkanRenderer::Impl::createViewport(std::uint3
     check(vkCreateFramebuffer(device, &frame, nullptr, &candidate->sceneFrame), "vkCreateFramebuffer(viewport)");
     if (settings.fxaa || settings.taa) {
         VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-            (settings.fxaa ? 1u : 0u) + (settings.taa ? 8u : 0u)};
+                                  (settings.fxaa ? 1u : 0u) + (settings.taa ? 8u : 0u)};
         VkDescriptorPoolCreateInfo pool{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
         pool.maxSets = (settings.fxaa ? 1u : 0u) + (settings.taa ? 2u : 0u);
         pool.poolSizeCount = 1;
@@ -49,8 +50,9 @@ std::unique_ptr<ViewportTargets> VulkanRenderer::Impl::createViewport(std::uint3
     }
     if (settings.fxaa) {
         candidate->filtered = resources.image(width, height, sceneFormat,
-            VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
-            VK_IMAGE_ASPECT_COLOR_BIT);
+                                              VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                                                  VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                                              VK_IMAGE_ASPECT_COLOR_BIT);
         frame.renderPass = postPass;
         frame.attachmentCount = 1;
         frame.pAttachments = &candidate->filtered.view;
@@ -58,8 +60,9 @@ std::unique_ptr<ViewportTargets> VulkanRenderer::Impl::createViewport(std::uint3
         VkDescriptorSetAllocateInfo allocate{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
         allocate.descriptorPool = candidate->postPool;
         allocate.descriptorSetCount = 1;
-        allocate.pSetLayouts = &materialLayout;
-        check(vkAllocateDescriptorSets(device, &allocate, &candidate->postDescriptor), "vkAllocateDescriptorSets(FXAA)");
+        allocate.pSetLayouts = &postSetLayout;
+        check(vkAllocateDescriptorSets(device, &allocate, &candidate->postDescriptor),
+              "vkAllocateDescriptorSets(FXAA)");
         VkDescriptorImageInfo image{viewportSampler, candidate->color.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
         write.dstSet = candidate->postDescriptor;
@@ -71,12 +74,12 @@ std::unique_ptr<ViewportTargets> VulkanRenderer::Impl::createViewport(std::uint3
     }
     if (settings.taa) {
         for (std::size_t i = 0; i < 2; ++i) {
-            const auto usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
-                               VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-            candidate->historyColor[i] = resources.image(width, height, historyFormat, usage,
-                                                        VK_IMAGE_ASPECT_COLOR_BIT);
-            candidate->historyDepth[i] = resources.image(width, height, historyDepthFormat, usage,
-                                                        VK_IMAGE_ASPECT_COLOR_BIT);
+            const auto usage =
+                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+            candidate->historyColor[i] =
+                resources.image(width, height, historyFormat, usage, VK_IMAGE_ASPECT_COLOR_BIT);
+            candidate->historyDepth[i] =
+                resources.image(width, height, historyDepthFormat, usage, VK_IMAGE_ASPECT_COLOR_BIT);
             const std::array views{candidate->historyColor[i].view, candidate->historyDepth[i].view};
             frame.renderPass = temporalPass;
             frame.attachmentCount = static_cast<std::uint32_t>(views.size());
@@ -89,11 +92,11 @@ std::unique_ptr<ViewportTargets> VulkanRenderer::Impl::createViewport(std::uint3
             allocate.pSetLayouts = &temporalSetLayout;
             check(vkAllocateDescriptorSets(device, &allocate, &candidate->temporalDescriptors[i]),
                   "vkAllocateDescriptorSets(TAA)");
-            const std::array<VkDescriptorImageInfo, 4> images{{
-                {pointSampler, candidate->color.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-                {pointSampler, candidate->motion.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-                {viewportSampler, candidate->historyColor[i].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
-                {pointSampler, candidate->historyDepth[i].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}}};
+            const std::array<VkDescriptorImageInfo, 4> images{
+                {{pointSampler, candidate->color.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+                 {pointSampler, candidate->motion.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+                 {viewportSampler, candidate->historyColor[i].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+                 {pointSampler, candidate->historyDepth[i].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL}}};
             std::array<VkWriteDescriptorSet, 4> writes{};
             for (std::uint32_t binding = 0; binding < writes.size(); ++binding) {
                 auto& write = writes[binding];
@@ -112,12 +115,12 @@ std::unique_ptr<ViewportTargets> VulkanRenderer::Impl::createViewport(std::uint3
             for (std::size_t i = 0; i < 2; ++i)
                 for (const auto* image : {&candidate->historyColor[i], &candidate->historyDepth[i]})
                     detail::barrier(cmd, image->handle, VK_IMAGE_LAYOUT_UNDEFINED,
-                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, VK_ACCESS_SHADER_READ_BIT,
-                        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+                                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, 0, VK_ACCESS_SHADER_READ_BIT,
+                                    VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
         });
     }
     candidate->descriptor = ImGui_ImplVulkan_AddTexture(viewportSampler, candidate->output().view,
-                                                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+                                                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     if (!candidate->descriptor) throw std::runtime_error("Cannot allocate ImGui viewport descriptor");
     return candidate;
 }

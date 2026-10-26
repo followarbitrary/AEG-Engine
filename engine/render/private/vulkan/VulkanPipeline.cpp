@@ -15,9 +15,9 @@ std::vector<std::uint32_t> readShader(const std::filesystem::path& path) {
 }
 }
 
-VkPipeline VulkanRenderer::Impl::createPipeline(VkRenderPass renderPass, VkPipelineLayout layout, VkSampleCountFlagBits samples,
-                          bool scene, const char* vertexName, const char* fragmentName,
-                          std::uint32_t colorAttachmentCount) {
+VkPipeline VulkanRenderer::Impl::createPipeline(VkRenderPass renderPass, VkPipelineLayout layout,
+                                                VkSampleCountFlagBits samples, bool scene, const char* vertexName,
+                                                const char* fragmentName, std::uint32_t colorAttachmentCount) {
     const auto vertexCode = readShader(shaderDirectory / vertexName),
                fragmentCode = readShader(shaderDirectory / fragmentName);
     VkPipeline result{};
@@ -41,17 +41,17 @@ VkPipeline VulkanRenderer::Impl::createPipeline(VkRenderPass renderPass, VkPipel
         stages[1].module = fragment;
         stages[1].pName = "main";
         VkVertexInputBindingDescription binding{0, sizeof(Vertex), VK_VERTEX_INPUT_RATE_VERTEX};
-        const std::array<VkVertexInputAttributeDescription, 3> attributes{
+        const std::array<VkVertexInputAttributeDescription, 4> attributes{
             {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, static_cast<std::uint32_t>(offsetof(Vertex, position))},
              {1, 0, VK_FORMAT_R32G32B32_SFLOAT, static_cast<std::uint32_t>(offsetof(Vertex, normal))},
-             {2, 0, VK_FORMAT_R32G32_SFLOAT, static_cast<std::uint32_t>(offsetof(Vertex, uv))}}};
+             {2, 0, VK_FORMAT_R32G32_SFLOAT, static_cast<std::uint32_t>(offsetof(Vertex, uv))},
+             {3, 0, VK_FORMAT_R32G32B32A32_SFLOAT, static_cast<std::uint32_t>(offsetof(Vertex, tangent))}}};
         VkPipelineVertexInputStateCreateInfo input{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
         input.vertexBindingDescriptionCount = scene ? 1u : 0u;
         input.pVertexBindingDescriptions = &binding;
-        input.vertexAttributeDescriptionCount = scene ? 3u : 0u;
+        input.vertexAttributeDescriptionCount = scene ? static_cast<std::uint32_t>(attributes.size()) : 0u;
         input.pVertexAttributeDescriptions = attributes.data();
-        VkPipelineInputAssemblyStateCreateInfo assembly{
-            VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
+        VkPipelineInputAssemblyStateCreateInfo assembly{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
         assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
         VkPipelineViewportStateCreateInfo viewportState{VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
         viewportState.viewportCount = 1;
@@ -68,8 +68,8 @@ VkPipeline VulkanRenderer::Impl::createPipeline(VkRenderPass renderPass, VkPipel
         depth.depthWriteEnable = scene ? VK_TRUE : VK_FALSE;
         depth.depthCompareOp = VK_COMPARE_OP_LESS;
         VkPipelineColorBlendAttachmentState attachment{};
-        attachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT |
-                                    VK_COLOR_COMPONENT_A_BIT;
+        attachment.colorWriteMask =
+            VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
         VkPipelineColorBlendStateCreateInfo blend{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
         const std::array blendAttachments{attachment, attachment};
         blend.attachmentCount = colorAttachmentCount;
@@ -112,9 +112,9 @@ ScenePipeline& VulkanRenderer::Impl::scenePipeline(std::uint32_t samples, bool t
         candidate->samples = static_cast<VkSampleCountFlagBits>(samples);
         candidate->temporal = temporal;
         createScenePass(*candidate);
-        candidate->pipeline = createPipeline(candidate->pass, pipelineLayout, candidate->samples,
-            true, temporal ? "model_taa.vert.spv" : "model.vert.spv",
-            temporal ? "model_taa.frag.spv" : "model.frag.spv", temporal ? 2u : 1u);
+        candidate->pipeline = createPipeline(candidate->pass, pipelineLayout, candidate->samples, true,
+                                             temporal ? "model_taa.vert.spv" : "model.vert.spv",
+                                             temporal ? "model_taa.frag.spv" : "model.frag.spv", temporal ? 2u : 1u);
         cached = std::move(candidate);
     }
     return *cached;

@@ -11,6 +11,7 @@
 #include <imgui.h>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <filesystem>
@@ -60,6 +61,11 @@ struct EditorState {
     render::RenderSettings settings;
     ImportQueue imports;
     std::array<char, 4096> importPath{};
+    std::size_t selectedMaterial{0};
+    bool materialEditorInitialized{false};
+    std::array<char, 4096> normalMapPath{};
+    std::string materialNotice;
+    std::string materialError;
     bool autoRotate{false};
     bool frameRequested{false};
     bool sceneRendered{false};
@@ -76,6 +82,8 @@ void drawWorkspace(render::VulkanRenderer& renderer);
 void processImports(EditorState& state, render::VulkanRenderer& renderer);
 void drawScenePanel(EditorState& state);
 void drawImportPanel(EditorState& state);
+void resetMaterialEditor(EditorState& state);
+void drawMaterialSection(EditorState& state, render::VulkanRenderer& renderer);
 void drawInspectorPanel(EditorState& state, render::VulkanRenderer& renderer);
 void drawViewportPanel(EditorState& state, render::VulkanRenderer& renderer);
 }

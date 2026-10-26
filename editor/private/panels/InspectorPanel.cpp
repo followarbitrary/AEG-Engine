@@ -36,8 +36,19 @@ void drawInspectorPanel(EditorState& state, render::VulkanRenderer& renderer) {
                 frameRequested = true;
             }
         }
+        drawMaterialSection(state, renderer);
         if (ImGui::CollapsingHeader("光照###Lighting", ImGuiTreeNodeFlags_DefaultOpen)) {
             ImGui::Checkbox("无光照材质###Unlit materials", &settings.unlit);
+            ImGui::BeginDisabled(settings.unlit);
+            ImGui::Checkbox("使用法线贴图###Normal mapping", &settings.normalMapping);
+            ImGui::BeginDisabled(!settings.normalMapping);
+            ImGui::SliderFloat("法线强度###Normal strength", &settings.normalStrength, 0, 4, "%.2f");
+            ImGui::EndDisabled();
+            ImGui::EndDisabled();
+            const auto normalMapMaterialCount = static_cast<std::size_t>(
+                std::count_if(state.model.materials.begin(), state.model.materials.end(),
+                              [](const assets::MaterialData& material) { return material.hasNormalMap; }));
+            ImGui::Text("使用法线贴图的材质数：%zu", normalMapMaterialCount);
             ImGui::SliderFloat("环境光###Ambient", &settings.ambient, 0, 1, "%.2f");
             ImGui::TextUnformatted("光照方向");
             ImGui::SetNextItemWidth(-1);

@@ -71,8 +71,8 @@ private:
 };
 class FileSystem final : public Assimp::IOSystem {
 public:
-    explicit FileSystem(const std::filesystem::path& source)
-        : source_(source), directory_(source.parent_path()), gltf_(isGltf(source)) {
+    explicit FileSystem(const std::filesystem::path& source, std::vector<std::filesystem::path>* openedFiles)
+        : source_(source), directory_(source.parent_path()), gltf_(isGltf(source)), openedFiles_(openedFiles) {
         directoryPrefix_ = genericUtf8(directory_);
         if (!directoryPrefix_.ends_with('/')) directoryPrefix_ += '/';
     }
@@ -88,8 +88,13 @@ public:
     Assimp::IOStream* Open(const char* path, const char* mode = "rb") override {
         if (!mode || mode[0] != 'r') return nullptr;
         try {
-            auto file = std::make_unique<FileStream>(resolve(path));
-            return file->good() ? file.release() : nullptr;
+            const auto resolved = resolve(path);
+            auto file = std::make_unique<FileStream>(resolved);
+            if (!file->good()) return nullptr;
+            if (openedFiles_ && resolved.lexically_normal() != source_ &&
+                std::find(openedFiles_->begin(), openedFiles_->end(), resolved) == openedFiles_->end())
+                openedFiles_->push_back(resolved);
+            return file.release();
         } catch (const std::runtime_error&) {
             return nullptr;
         }
@@ -117,9 +122,11 @@ private:
     std::filesystem::path source_, directory_;
     std::string directoryPrefix_;
     bool gltf_;
+    std::vector<std::filesystem::path>* openedFiles_;
 };
 }
-Assimp::IOSystem* createFileSystem(const std::filesystem::path& source) {
-    return new FileSystem(source);
+Assimp::IOSystem* createFileSystem(const std::filesystem::path& source,
+                                   std::vector<std::filesystem::path>* openedFiles) {
+    return new FileSystem(source, openedFiles);
 }
 }

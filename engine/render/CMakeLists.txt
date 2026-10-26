@@ -36,7 +36,7 @@ foreach(shader model.vert model.frag fullscreen.vert fxaa.frag taa.frag)
     add_custom_command(OUTPUT "${output}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/compiled-shaders"
         COMMAND Vulkan::glslc --target-env=vulkan1.2 "${source}" -o "${output}"
-        DEPENDS "${source}"
+        DEPENDS "${source}" "${aeg_shader_root}/scene/normal_mapping.glsl"
         COMMENT "Compiling ${shader} to SPIR-V" VERBATIM)
     list(APPEND aeg_shader_outputs "${output}")
 endforeach()
@@ -46,7 +46,7 @@ foreach(stage vert frag)
     add_custom_command(OUTPUT "${output}"
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/compiled-shaders"
         COMMAND Vulkan::glslc --target-env=vulkan1.2 -DAEG_TAA=1 "${source}" -o "${output}"
-        DEPENDS "${source}"
+        DEPENDS "${source}" "${aeg_shader_root}/scene/normal_mapping.glsl"
         COMMENT "Compiling temporal model.${stage} to SPIR-V" VERBATIM)
     list(APPEND aeg_shader_outputs "${output}")
 endforeach()

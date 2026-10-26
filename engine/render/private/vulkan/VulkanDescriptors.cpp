@@ -10,14 +10,19 @@ void VulkanRenderer::Impl::createDescriptors() {
     VkDescriptorSetLayoutCreateInfo layout{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
     layout.bindingCount = 1;
     layout.pBindings = &uniform;
-    check(vkCreateDescriptorSetLayout(device, &layout, nullptr, &sceneLayout),
-          "vkCreateDescriptorSetLayout(scene)");
+    check(vkCreateDescriptorSetLayout(device, &layout, nullptr, &sceneLayout), "vkCreateDescriptorSetLayout(scene)");
     VkDescriptorSetLayoutBinding texture{};
     texture.binding = 0;
     texture.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     texture.descriptorCount = 1;
     texture.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     layout.pBindings = &texture;
+    check(vkCreateDescriptorSetLayout(device, &layout, nullptr, &postSetLayout),
+          "vkCreateDescriptorSetLayout(postprocess)");
+    std::array materialTextures{texture, texture};
+    materialTextures[1].binding = 1;
+    layout.bindingCount = static_cast<std::uint32_t>(materialTextures.size());
+    layout.pBindings = materialTextures.data();
     check(vkCreateDescriptorSetLayout(device, &layout, nullptr, &materialLayout),
           "vkCreateDescriptorSetLayout(material)");
     VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1};
@@ -31,9 +36,8 @@ void VulkanRenderer::Impl::createDescriptors() {
     allocate.descriptorSetCount = 1;
     allocate.pSetLayouts = &sceneLayout;
     check(vkAllocateDescriptorSets(device, &allocate, &sceneDescriptor), "vkAllocateDescriptorSets(scene)");
-    uniformBuffer =
-        resources.buffer(sizeof(SceneUniform), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-                         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true);
+    uniformBuffer = resources.buffer(sizeof(SceneUniform), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, true);
     VkDescriptorBufferInfo buffer{uniformBuffer.handle, 0, sizeof(SceneUniform)};
     VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
     write.dstSet = sceneDescriptor;
@@ -74,13 +78,13 @@ void VulkanRenderer::Impl::createDescriptors() {
     check(vkCreatePipelineLayout(device, &pipelineInfo, nullptr, &pipelineLayout), "vkCreatePipelineLayout(scene)");
     push.size = sizeof(glm::vec2);
     pipelineInfo.setLayoutCount = 1;
-    pipelineInfo.pSetLayouts = &materialLayout;
+    pipelineInfo.pSetLayouts = &postSetLayout;
     check(vkCreatePipelineLayout(device, &pipelineInfo, nullptr, &postLayout), "vkCreatePipelineLayout(FXAA)");
     if (temporalSupported) {
         std::array<VkDescriptorSetLayoutBinding, 4> textures{};
         for (std::uint32_t binding = 0; binding < textures.size(); ++binding)
-            textures[binding] = {binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
-                                 VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
+            textures[binding] = {binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT,
+                                 nullptr};
         layout.bindingCount = static_cast<std::uint32_t>(textures.size());
         layout.pBindings = textures.data();
         check(vkCreateDescriptorSetLayout(device, &layout, nullptr, &temporalSetLayout),

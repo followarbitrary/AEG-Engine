@@ -17,8 +17,8 @@ void drawImportPanel(EditorState& state) {
         ImGui::TextDisabled("模型库");
         ImGui::TextWrapped("打开 OBJ、glTF、GLB 或 PMX 文件，也可将文件拖入窗口。");
         ImGui::SetNextItemWidth(-1);
-        const bool enter = ImGui::InputTextWithHint("##ModelPath", "模型文件路径", importPath.data(),
-                                                    importPath.size(), ImGuiInputTextFlags_EnterReturnsTrue);
+        const bool enter = ImGui::InputTextWithHint("##ModelPath", "模型文件路径", importPath.data(), importPath.size(),
+                                                    ImGuiInputTextFlags_EnterReturnsTrue);
         if (ImGui::Button("导入模型###Import model", {-1, 0}) || enter) {
             if (importPath[0])
                 imports.paths.push_back(foundation::pathFromUtf8(importPath.data()));
@@ -56,6 +56,7 @@ void processImports(EditorState& state, render::VulkanRenderer& renderer) {
             auto candidate = assets::loadModel(path);
             renderer.uploadModel(candidate);
             model = std::move(candidate);
+            resetMaterialEditor(state);
             transform = {};
             camera.fit(model.bounds);
             renderer.resetTemporalHistory();

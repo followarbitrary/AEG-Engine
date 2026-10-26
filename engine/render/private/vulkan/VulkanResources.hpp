@@ -15,8 +15,8 @@ inline void check(VkResult result, const char* operation) {
 }
 
 void barrier(VkCommandBuffer command, VkImage image, VkImageLayout oldLayout, VkImageLayout newLayout,
-                    VkAccessFlags sourceAccess, VkAccessFlags destinationAccess, VkPipelineStageFlags sourceStage,
-                    VkPipelineStageFlags destinationStage);
+             VkAccessFlags sourceAccess, VkAccessFlags destinationAccess, VkPipelineStageFlags sourceStage,
+             VkPipelineStageFlags destinationStage);
 
 struct DeviceResources {
     VkPhysicalDevice physical{};
@@ -53,6 +53,6 @@ struct DeviceResources {
         });
         return result;
     }
-    Image texture(const assets::ImageData& pixels) const;
+    Image texture(const assets::ImageData& pixels, VkFormat format = VK_FORMAT_R8G8B8A8_SRGB) const;
 };
 }

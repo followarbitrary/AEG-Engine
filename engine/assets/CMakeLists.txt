@@ -1,8 +1,14 @@
 add_library(aeg_assets STATIC
     public/ModelData.hpp
     public/ModelImporter.hpp
+    public/MaterialTextures.hpp
     private/ModelData.cpp
     private/ModelImporter.cpp
+    private/material/MaterialTextures.cpp
+    private/material/NormalMapDiscovery.cpp
+    private/material/effects/EffectNormalTexture.cpp
+    private/mmd/MmdEffectNormals.cpp
+    private/geometry/TangentSpace.cpp
     private/assimp/AssimpFileSystem.cpp
     private/image/ImageDecoder.cpp
     private/pmx/PmxValidation.cpp)

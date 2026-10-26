@@ -9,5 +9,7 @@ struct RenderSettings {
     float ambient{0.28f};
     glm::vec4 background{0.035f, 0.045f, 0.065f, 1};
     bool unlit{false};
+    bool normalMapping{true};
+    float normalStrength{1}; // Global multiplier on material normalScale, clamped to [0, 4].
 };
 }
