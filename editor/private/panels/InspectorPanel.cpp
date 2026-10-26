@@ -19,9 +19,15 @@ void drawInspectorPanel(EditorState& state, render::Renderer& renderer) {
     bool antialiasingChanged = false;
     if (ImGui::Begin(inspectorWindow)) {
         if (ImGui::CollapsingHeader("变换###Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
-            ImGui::DragFloat3("位置###Position", &transform.translation.x, 0.02f);
-            ImGui::DragFloat3("旋转###Rotation", &transform.rotation.x, 0.5f);
-            ImGui::DragFloat3("缩放###Scale", &transform.scale.x, 0.01f, -1000, 1000);
+            float translation[]{transform.translation.x, transform.translation.y, transform.translation.z};
+            float rotation[]{transform.rotation.x, transform.rotation.y, transform.rotation.z};
+            float scale[]{transform.scale.x, transform.scale.y, transform.scale.z};
+            if (ImGui::DragFloat3("位置###Position", translation, 0.02f))
+                transform.translation = {translation[0], translation[1], translation[2]};
+            if (ImGui::DragFloat3("旋转###Rotation", rotation, 0.5f))
+                transform.rotation = {rotation[0], rotation[1], rotation[2]};
+            if (ImGui::DragFloat3("缩放###Scale", scale, 0.01f, -1000, 1000))
+                transform.scale = {scale[0], scale[1], scale[2]};
             for (int axis = 0; axis < 3; ++axis) {
                 if (!std::isfinite(transform.translation[axis])) transform.translation[axis] = 0;
                 if (!std::isfinite(transform.rotation[axis])) transform.rotation[axis] = 0;
@@ -52,10 +58,14 @@ void drawInspectorPanel(EditorState& state, render::Renderer& renderer) {
             ImGui::SliderFloat("环境光###Ambient", &settings.ambient, 0, 1, "%.2f");
             ImGui::TextUnformatted("光照方向");
             ImGui::SetNextItemWidth(-1);
-            ImGui::SliderFloat3("##LightDirection", &settings.lightDirection.x, -1, 1, "%.2f");
-            if (glm::dot(settings.lightDirection, settings.lightDirection) < 0.0001f)
+            float lightDirection[]{settings.lightDirection.x, settings.lightDirection.y, settings.lightDirection.z};
+            if (ImGui::SliderFloat3("##LightDirection", lightDirection, -1, 1, "%.2f"))
+                settings.lightDirection = {lightDirection[0], lightDirection[1], lightDirection[2]};
+            if (math::dot(settings.lightDirection, settings.lightDirection) < 0.0001f)
                 settings.lightDirection = {0, -1, 0};
-            ImGui::ColorEdit3("背景###Background", &settings.background.x);
+            float background[]{settings.background.x, settings.background.y, settings.background.z};
+            if (ImGui::ColorEdit3("背景###Background", background))
+                settings.background = {background[0], background[1], background[2], settings.background.w};
         }
         if (ImGui::CollapsingHeader("抗锯齿###Antialiasing", ImGuiTreeNodeFlags_DefaultOpen)) {
             ImGui::BeginDisabled(!supportedTaa);

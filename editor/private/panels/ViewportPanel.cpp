@@ -5,16 +5,16 @@
 
 namespace aeg::editor {
 namespace {
-foundation::Bounds transformedBounds(const foundation::Bounds& bounds, const glm::mat4& transform) {
+foundation::Bounds transformedBounds(const foundation::Bounds& bounds, const math::Mat4& transform) {
     foundation::Bounds result;
-    result.min = glm::vec3(std::numeric_limits<float>::max());
-    result.max = glm::vec3(std::numeric_limits<float>::lowest());
+    result.min = math::Vec3(std::numeric_limits<float>::max());
+    result.max = math::Vec3(std::numeric_limits<float>::lowest());
     for (unsigned corner = 0; corner < 8; ++corner) {
-        const glm::vec3 point{corner & 1 ? bounds.max.x : bounds.min.x, corner & 2 ? bounds.max.y : bounds.min.y,
-                              corner & 4 ? bounds.max.z : bounds.min.z};
-        const auto world = glm::vec3(transform * glm::vec4(point, 1));
-        result.min = glm::min(result.min, world);
-        result.max = glm::max(result.max, world);
+        const math::Vec3 point{corner & 1 ? bounds.max.x : bounds.min.x, corner & 2 ? bounds.max.y : bounds.min.y,
+                               corner & 4 ? bounds.max.z : bounds.min.z};
+        const auto world = math::transform_point(transform, point);
+        result.min = math::min(result.min, world);
+        result.max = math::max(result.max, world);
     }
     return result;
 }
@@ -76,7 +76,7 @@ void drawViewportPanel(EditorState& state, render::Renderer& renderer, EditorGra
         renderer.resetTemporalHistory();
         frameRequested = false;
     }
-    settings.viewProjection =
-        camera.projection(static_cast<float>(viewportWidth) / static_cast<float>(viewportHeight)) * camera.view();
+    settings.set_camera(
+        camera.render_camera(static_cast<float>(viewportWidth) / static_cast<float>(viewportHeight), {true, false}));
 }
 }

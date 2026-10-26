@@ -4,7 +4,7 @@
 #include <Utf8Path.hpp>
 #include <GLFW/glfw3.h>
 #include <imgui.h>
-#include <glm/gtc/matrix_transform.hpp>
+#include <math.hpp>
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -112,14 +112,14 @@ double interior(const Image& image, float horizontalCenter = 0.5f) {
     return sum / double(count);
 }
 constexpr float ambient = 0.12f;
-void expectedLight(const Image& image, glm::vec3 normal, glm::vec3 towardLight, const std::string& label,
+void expectedLight(const Image& image, aeg::math::Vec3 normal, aeg::math::Vec3 towardLight, const std::string& label,
                    float horizontalCenter = 0.5f) {
-    const double expected = ambient + (1 - ambient) * std::max(glm::dot(normal, towardLight), 0.0f);
+    const double expected = ambient + (1 - ambient) * std::max(aeg::math::dot(normal, towardLight), 0.0f);
     const double actual = interior(image, horizontalCenter);
     require(std::abs(actual - expected) < 0.013, label + " has incorrect linear lighting: expected " +
                                                      std::to_string(expected) + ", got " + std::to_string(actual));
 }
-double patchLight(const Image& image, glm::vec2 center) {
+double patchLight(const Image& image, aeg::math::Vec2 center) {
     const int x = int(center.x * float(image.width));
     const int y = int(center.y * float(image.height));
     require(x > 1 && y > 1 && x + 1 < int(image.width) && y + 1 < int(image.height),
@@ -171,7 +171,7 @@ struct EffectPmxFiles : AutomaticPmxFiles {
         std::filesystem::remove(root / "effects", error);
     }
 };
-aeg::assets::ModelData plane(Sample sample = tiltedX, glm::vec3 normal = {0, 0, 1}, glm::vec4 tangent = {1, 0, 0, 1},
+aeg::assets::ModelData plane(Sample sample = tiltedX, aeg::math::Vec3 normal = {0, 0, 1}, aeg::math::Vec4 tangent = {1, 0, 0, 1},
                              float scale = 1) {
     aeg::assets::ModelData model;
     model.name = "Known tangent-frame normal-map fixture";
@@ -197,10 +197,10 @@ aeg::assets::ModelData withoutMap(aeg::assets::ModelData model) {
 }
 // Only the map contract: UNORM decode, scale XY, normalize. World frames below
 // are hand-derived literals, independent of renderer transformation helpers.
-glm::vec3 mapped(Sample sample, float scale, glm::vec3 n, glm::vec3 t, glm::vec3 b) {
-    const glm::vec3 encoded(float(sample[0]) * 2 / 255 - 1, float(sample[1]) * 2 / 255 - 1,
+aeg::math::Vec3 mapped(Sample sample, float scale, aeg::math::Vec3 n, aeg::math::Vec3 t, aeg::math::Vec3 b) {
+    const aeg::math::Vec3 encoded(float(sample[0]) * 2 / 255 - 1, float(sample[1]) * 2 / 255 - 1,
                             float(sample[2]) * 2 / 255 - 1);
-    return glm::normalize(t * (encoded.x * scale) + b * (encoded.y * scale) + n * encoded.z);
+    return aeg::math::normalize(t * (encoded.x * scale) + b * (encoded.y * scale) + n * encoded.z);
 }
 }
 
@@ -254,7 +254,7 @@ int main(int argc, char** argv) {
             if (expectGrayscale) grayscale(image);
             return image;
         };
-        auto light = [&](glm::vec3 towardLight, const std::string& name) {
+        auto light = [&](aeg::math::Vec3 towardLight, const std::string& name) {
             settings.lightDirection = -towardLight;
             frame();
             return capture(name);
@@ -267,8 +267,8 @@ int main(int argc, char** argv) {
             require(std::abs(positive - negative) > 0.3, label + " has no geometric-normal calibration");
             return positive > negative ? 1.0f : -1.0f;
         };
-        constexpr std::array<glm::vec3, 6> axes{{{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}}};
-        auto response = [&](const aeg::assets::ModelData& source, glm::vec3 expectedNormal, const std::string& label) {
+        constexpr std::array<aeg::math::Vec3, 6> axes{{{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}}};
+        auto response = [&](const aeg::assets::ModelData& source, aeg::math::Vec3 expectedNormal, const std::string& label) {
             const auto sign = faceSign(source, label);
             renderer.uploadModel(source);
             for (std::size_t axis = 0; axis < axes.size(); ++axis)
@@ -279,7 +279,7 @@ int main(int argc, char** argv) {
 
         const auto source = plane();
         const auto sign = faceSign(source, "identity");
-        const glm::vec3 litZ{0, 0, sign};
+        const aeg::math::Vec3 litZ{0, 0, sign};
         renderer.uploadModel(withoutMap(source));
         const auto geometric = light(litZ, "geometric-baseline");
         renderer.uploadModel(plane(neutral));
@@ -305,9 +305,9 @@ int main(int argc, char** argv) {
             spatialTexture.rgba.insert(spatialTexture.rgba.end(), sample.begin(), sample.end());
             spatialTexture.rgba.push_back(255);
         }
-        const std::array<glm::vec2, 4> texelCenters{
+        const std::array<aeg::math::Vec2, 4> texelCenters{
             {{0.3875f, 0.3f}, {0.6125f, 0.3f}, {0.3875f, 0.7f}, {0.6125f, 0.7f}}};
-        const auto spatialLight = glm::normalize(glm::vec3(1, 2, 3)) * sign;
+        const auto spatialLight = aeg::math::normalize(aeg::math::Vec3(1, 2, 3)) * sign;
         renderer.uploadModel(spatial);
         const auto originalSpatial = light(spatialLight, "spatial-original");
         auto mirroredSpatial = spatial;
@@ -318,14 +318,14 @@ int main(int argc, char** argv) {
         // Reflecting U reverses physical tangent X. Reflecting the light X too
         // makes each mirrored texel retain its original brightness independently
         // of the back-face convention, while exchanging the image columns.
-        const glm::vec3 reflectedLight{-spatialLight.x, spatialLight.y, spatialLight.z};
+        const aeg::math::Vec3 reflectedLight{-spatialLight.x, spatialLight.y, spatialLight.z};
         renderer.uploadModel(mirroredSpatial);
         const auto mirroredSpatialImage = light(reflectedLight, "spatial-mirrored-uv");
         for (std::size_t i = 0; i < spatialSamples.size(); ++i) {
             const auto originalNormal = mapped(spatialSamples[i], 1, {0, 0, 1}, {1, 0, 0}, {0, 1, 0}) * sign;
             const auto mirroredNormal = mapped(spatialSamples[i ^ 1], 1, {0, 0, 1}, {-1, 0, 0}, {0, 1, 0}) * sign;
-            const double originalExpected = ambient + (1 - ambient) * glm::dot(originalNormal, spatialLight);
-            const double mirroredExpected = ambient + (1 - ambient) * glm::dot(mirroredNormal, reflectedLight);
+            const double originalExpected = ambient + (1 - ambient) * aeg::math::dot(originalNormal, spatialLight);
+            const double mirroredExpected = ambient + (1 - ambient) * aeg::math::dot(mirroredNormal, reflectedLight);
             require(std::abs(patchLight(originalSpatial, texelCenters[i]) - originalExpected) < 0.025,
                     "2x2 normal map sampled the wrong original UV region " + std::to_string(i));
             require(std::abs(patchLight(mirroredSpatialImage, texelCenters[i]) - mirroredExpected) < 0.025,
@@ -337,9 +337,9 @@ int main(int argc, char** argv) {
 
         // Close the real importer -> generated tangent -> material upload -> GPU
         // path, including the embedded image and authored glTF normal scale.
-        settings.model = glm::translate(glm::mat4(1), glm::vec3(-0.7f, -0.7f, 0.5f)) *
-                         glm::scale(glm::mat4(1), glm::vec3(1.4f, 1.4f, 1));
-        settings.lightDirection = -glm::normalize(glm::vec3(1, 2, 1)) * sign;
+        settings.model = aeg::math::translation(aeg::math::Vec3(-0.7f, -0.7f, 0.5f)) *
+                         aeg::math::scale(aeg::math::Vec3(1.4f, 1.4f, 1));
+        settings.lightDirection = -aeg::math::normalize(aeg::math::Vec3(1, 2, 1)) * sign;
         Image importedGltf;
         for (const auto* filename : {"normal-map.gltf", "normal-map.glb"}) {
             const auto imported = aeg::assets::loadModel(std::filesystem::path(AEG_TEST_FIXTURES) / filename);
@@ -359,7 +359,7 @@ int main(int argc, char** argv) {
             else
                 samePixels(importedMapped, importedGltf, "equivalent glTF/GLB imported normal map");
         }
-        settings.model = glm::mat4(1);
+        settings.model = aeg::math::identity();
 
         // Every imported format and source-less procedural ModelData uses the
         // same public normal assignment path. PMX has no native normal slot;
@@ -368,13 +368,13 @@ int main(int argc, char** argv) {
         auto fitImported = [&](const aeg::assets::ModelData& model) {
             const auto center = model.bounds.center();
             const float radius = std::max(model.bounds.radius(), 0.01f);
-            const auto eye = center + glm::normalize(glm::vec3(2.5f, 1.8f, 3.5f)) * radius * 3.2f;
+            const auto eye = center + aeg::math::normalize(aeg::math::Vec3(2.5f, 1.8f, 3.5f)) * radius * 3.2f;
             auto projection =
-                glm::perspective(glm::radians(45.0f), float(width) / float(height), radius * 0.01f, radius * 7);
-            projection[1][1] *= -1;
-            settings.viewProjection = projection * glm::lookAt(eye, center, glm::vec3(0, 1, 0));
-            settings.model = glm::mat4(1);
-            settings.lightDirection = -glm::normalize(glm::vec3(0.6f, 1, 0.8f));
+                aeg::math::perspective(aeg::math::to_radians(45.0f), float(width) / float(height), radius * 0.01f, radius * 7, {true, false});
+            settings.clipSpace = {true, false};
+            settings.viewProjection = projection * aeg::math::look_at(eye, center, aeg::math::Vec3(0, 1, 0));
+            settings.model = aeg::math::identity();
+            settings.lightDirection = -aeg::math::normalize(aeg::math::Vec3(0.6f, 1, 0.8f));
         };
         const auto fixtures = std::filesystem::path(AEG_TEST_FIXTURES);
         {
@@ -417,7 +417,7 @@ int main(int argc, char** argv) {
             auto maskModel = bound;
             for (std::size_t i = 0; i < maskModel.materials.size(); ++i) {
                 auto& material = maskModel.materials[i];
-                material.baseColor = i == materialIndex ? glm::vec4(0, 0, 0, 1) : glm::vec4(1);
+                material.baseColor = i == materialIndex ? aeg::math::Vec4(0, 0, 0, 1) : aeg::math::Vec4(1);
                 material.texture = {};
                 material.hasTexture = false;
                 material.hasNormalMap = false;
@@ -567,7 +567,7 @@ int main(int argc, char** argv) {
                 auto maskModel = model;
                 for (std::size_t i = 0; i < maskModel.materials.size(); ++i) {
                     auto& material = maskModel.materials[i];
-                    material.baseColor = i == materialIndex ? glm::vec4(0, 0, 0, 1) : glm::vec4(1);
+                    material.baseColor = i == materialIndex ? aeg::math::Vec4(0, 0, 0, 1) : aeg::math::Vec4(1);
                     material.texture = {};
                     material.hasTexture = false;
                     material.hasNormalMap = false;
@@ -631,15 +631,15 @@ int main(int argc, char** argv) {
             samePixels(capture(std::string(filename) + "-external-cleared", false), baseline,
                        "cleared external normal assignment");
         }
-        settings.model = settings.viewProjection = glm::mat4(1);
+        settings.model = settings.viewProjection = aeg::math::identity();
         auto procedural = withoutMap(source);
-        for (auto& vertex : procedural.meshes[0].vertices) vertex.tangent = glm::vec4(0);
+        for (auto& vertex : procedural.meshes[0].vertices) vertex.tangent = aeg::math::Vec4(0);
         require(procedural.source.empty(), "procedural normal fixture unexpectedly has a source format");
         aeg::assets::setMaterialNormalMap(procedural, 0,
                                           aeg::assets::ImageData{1, 1, {tiltedX[0], tiltedX[1], tiltedX[2], 255}});
         response(procedural, mapped(tiltedX, 1, {0, 0, 1}, {1, 0, 0}, {0, 1, 0}), "procedural-common-material");
 
-        settings.lightDirection = -glm::normalize(glm::vec3(sign, 0, sign));
+        settings.lightDirection = -aeg::math::normalize(aeg::math::Vec3(sign, 0, sign));
         renderer.uploadModel(withoutMap(source));
         frame();
         const auto disabledBaseline = capture("controls-baseline");
@@ -670,25 +670,25 @@ int main(int argc, char** argv) {
         // T = normalize(1.8,-.65,0), B = cross(N,T). A wrongly inverse-
         // transposed tangent differs even after orthogonalization here.
         const auto diagonal =
-            plane(tiltedX, glm::normalize(glm::vec3(1, 1, 1)), glm::vec4(glm::normalize(glm::vec3(1, -1, 0)), 1));
-        const glm::vec3 scaledN{0.20133877f, 0.55755351f, 0.80535507f};
-        const glm::vec3 scaledT{0.94055390f, -0.33964446f, 0};
-        const glm::vec3 scaledB{0.27353439f, 0.75747985f, -0.59279272f};
-        settings.model = glm::scale(glm::mat4(1), glm::vec3(1.8f, 0.65f, 0.45f));
+            plane(tiltedX, aeg::math::normalize(aeg::math::Vec3(1, 1, 1)), aeg::math::Vec4(aeg::math::normalize(aeg::math::Vec3(1, -1, 0)), 1));
+        const aeg::math::Vec3 scaledN{0.20133877f, 0.55755351f, 0.80535507f};
+        const aeg::math::Vec3 scaledT{0.94055390f, -0.33964446f, 0};
+        const aeg::math::Vec3 scaledB{0.27353439f, 0.75747985f, -0.59279272f};
+        settings.model = aeg::math::scale(aeg::math::Vec3(1.8f, 0.65f, 0.45f));
         response(diagonal, mapped(tiltedX, 1, scaledN, scaledT, scaledB), "nonuniform-model");
-        settings.model = glm::scale(glm::mat4(1), glm::vec3(-1.8f, 0.65f, 0.45f));
+        settings.model = aeg::math::scale(aeg::math::Vec3(-1.8f, 0.65f, 0.45f));
         response(diagonal,
                  mapped(tiltedX, 1, {-scaledN.x, scaledN.y, scaledN.z}, {-scaledT.x, scaledT.y, scaledT.z},
                         {-scaledB.x, scaledB.y, scaledB.z}),
                  "mirrored-nonuniform-model");
         // Y tilt isolates determinant correction of B under a model mirror.
-        settings.model = glm::scale(glm::mat4(1), glm::vec3(-1, 0.75f, 1));
+        settings.model = aeg::math::scale(aeg::math::Vec3(-1, 0.75f, 1));
         response(plane(tiltedY), mapped(tiltedY, 1, {0, 0, 1}, {-1, 0, 0}, {0, 1, 0}), "mirrored-model-y");
-        settings.model = glm::mat4(1);
+        settings.model = aeg::math::identity();
 
         renderer.uploadModel(withoutMap(source));
         const auto fallback = light(litZ, "invalid-basis-baseline");
-        const std::array<glm::vec4, 3> invalidTangents{{{0, 0, 0, 0}, {0, 0, 0, 1}, {0, 0, 1, 1}}};
+        const std::array<aeg::math::Vec4, 3> invalidTangents{{{0, 0, 0, 0}, {0, 0, 0, 1}, {0, 0, 1, 1}}};
         for (std::size_t i = 0; i < invalidTangents.size(); ++i) {
             auto invalidBasis = plane(tiltedX, {0, 0, 1}, invalidTangents[i]);
             for (auto& vertex : invalidBasis.meshes[0].vertices) vertex.uv = {0, 0};
@@ -711,7 +711,7 @@ int main(int argc, char** argv) {
         // Check mapped interiors through every requested MSAA/FXAA path.
         // Merely softening primitive edges cannot satisfy these assertions.
         const auto expectedNormal = mapped(tiltedX, 1, {0, 0, 1}, {1, 0, 0}, {0, 1, 0}) * sign;
-        const glm::vec3 litX{sign, 0, 0};
+        const aeg::math::Vec3 litX{sign, 0, 0};
         auto mixed = source;
         mixed.meshes.push_back(mixed.meshes[0]);
         mixed.meshes[1].materialIndex = 1;

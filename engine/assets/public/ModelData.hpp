@@ -3,25 +3,30 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <type_traits>
 #include <vector>
-#include <glm/glm.hpp>
+#include <math.hpp>
 #include <Bounds.hpp>
 
 namespace aeg::assets {
 struct Vertex {
-    glm::vec3 position{};
-    glm::vec3 normal{0, 1, 0};
-    glm::vec2 uv{};
+    math::Vec3 position{};
+    math::Vec3 normal{0, 1, 0};
+    math::Vec2 uv{};
     // Final UV0 +U direction and handedness (+/-1); w=0 disables normal mapping.
-    glm::vec4 tangent{0, 0, 0, 0};
+    math::Vec4 tangent{0, 0, 0, 0};
 };
+static_assert(std::is_standard_layout_v<Vertex> && std::is_trivially_copyable_v<Vertex>);
+static_assert(sizeof(Vertex) == 64 && alignof(Vertex) == 16);
+static_assert(offsetof(Vertex, position) == 0 && offsetof(Vertex, normal) == 16);
+static_assert(offsetof(Vertex, uv) == 32 && offsetof(Vertex, tangent) == 48);
 struct ImageData {
     std::uint32_t width{1}, height{1};
     std::vector<std::uint8_t> rgba{255, 255, 255, 255};
 };
 struct MaterialData {
     std::string name;
-    glm::vec4 baseColor{1};
+    math::Vec4 baseColor{1};
     ImageData texture;
     bool hasTexture{false};
     bool alphaMasked{false};

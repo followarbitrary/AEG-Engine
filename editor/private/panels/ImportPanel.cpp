@@ -58,6 +58,8 @@ void processImports(EditorState& state, render::Renderer& renderer) {
             model = std::move(candidate);
             resetMaterialEditor(state);
             transform = {};
+            // Each successful import starts from the front; ordinary focus keeps the orbit angle.
+            camera = {};
             camera.fit(model.bounds);
             renderer.resetTemporalHistory();
             imports.error.clear();

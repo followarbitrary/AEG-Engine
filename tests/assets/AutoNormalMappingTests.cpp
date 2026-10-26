@@ -93,8 +93,8 @@ void prepared(const ModelData& value, const fs::path& image, std::size_t index =
         if (mesh.materialIndex == index)
             for (const auto& vertex : mesh.vertices)
                 require(std::abs(vertex.tangent.w) == 1 &&
-                            std::abs(glm::length(glm::vec3(vertex.tangent)) - 1) < 0.001f &&
-                            std::abs(glm::dot(vertex.normal, glm::vec3(vertex.tangent))) < 0.001f,
+                            std::abs(aeg::math::length(aeg::math::Vec3(vertex.tangent)) - 1) < 0.001f &&
+                            std::abs(aeg::math::dot(vertex.normal, aeg::math::Vec3(vertex.tangent))) < 0.001f,
                         "initialization must prepare tangent frames for a discovered map");
 }
 void unmapped(const ModelData& value, bool quiet = true, std::size_t index = 0) {

@@ -1,6 +1,7 @@
 #include <Bounds.hpp>
 #include <Utf8Path.hpp>
 #include <OrbitCamera.hpp>
+#include <RenderCamera.hpp>
 #include <ModelData.hpp>
 #include <ModelImporter.hpp>
 #include <MaterialTextures.hpp>
@@ -20,6 +21,13 @@
 #include <type_traits>
 
 namespace {
+static_assert(std::is_standard_layout_v<aeg::assets::Vertex>);
+static_assert(std::is_trivially_copyable_v<aeg::assets::Vertex>);
+static_assert(sizeof(aeg::assets::Vertex) == 64 && alignof(aeg::assets::Vertex) == 16);
+static_assert(offsetof(aeg::assets::Vertex, position) == 0);
+static_assert(offsetof(aeg::assets::Vertex, normal) == 16);
+static_assert(offsetof(aeg::assets::Vertex, uv) == 32);
+static_assert(offsetof(aeg::assets::Vertex, tangent) == 48);
 static_assert(std::is_same_v<decltype(aeg::assets::ModelData{}.bounds), aeg::foundation::Bounds>);
 static_assert(
     std::is_same_v<decltype(&aeg::assets::loadModel), aeg::assets::ModelData (*)(const std::filesystem::path&)>);
@@ -31,6 +39,9 @@ static_assert(std::is_same_v<decltype(&aeg::foundation::pathToUtf8), std::string
 static_assert(std::is_same_v<decltype(&aeg::foundation::pathFromUtf8), std::filesystem::path (*)(std::string_view)>);
 static_assert(std::is_same_v<decltype(&aeg::camera::OrbitCamera::fit),
                              void (aeg::camera::OrbitCamera::*)(const aeg::foundation::Bounds&)>);
+static_assert(std::is_same_v<
+              decltype(&aeg::camera::OrbitCamera::render_camera),
+              aeg::camera::RenderCamera (aeg::camera::OrbitCamera::*)(float, aeg::math::ClipSpaceConvention) const>);
 static_assert(std::is_same_v<decltype(&aeg::render::Renderer::uploadModel),
                              void (aeg::render::Renderer::*)(const aeg::assets::ModelData&)>);
 static_assert(std::is_same_v<decltype(&aeg::render::Renderer::setAntialiasing),
@@ -62,13 +73,13 @@ void publicCpuContracts() {
             "path encoding preserves spaces, plus signs and literal percent escapes");
 
     const aeg::foundation::Bounds bounds{{-2, -3, -6}, {2, 3, 6}};
-    require(glm::length(bounds.center()) < 0.001f, "bounds center");
+    require(aeg::math::length(bounds.center()) < 0.001f, "bounds center");
     require(std::abs(bounds.radius() - 7.0f) < 0.001f, "bounds radius");
     require(aeg::foundation::Bounds{}.radius() >= 0.01f, "degenerate bounds radius floor");
 
     aeg::camera::OrbitCamera camera;
     camera.fit(bounds);
-    require(glm::length(camera.target() - bounds.center()) < 0.001f, "camera fits shared bounds");
+    require(aeg::math::length(camera.target() - bounds.center()) < 0.001f, "camera fits shared bounds");
     require(std::isfinite(camera.distance()) && camera.distance() > bounds.radius(), "camera fit distance");
     const auto view = camera.view();
     const auto projection = camera.projection(16.0f / 9.0f);

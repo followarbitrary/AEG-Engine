@@ -1,6 +1,6 @@
 #include <ModelData.hpp>
 #include <ModelImporter.hpp>
-#include <glm/gtc/matrix_transform.hpp>
+#include <math.hpp>
 #include <cmath>
 #include <chrono>
 #include <filesystem>
@@ -37,7 +37,7 @@ void triangle() {
     require(close(model.bounds.min.x, 0) && close(model.bounds.max.x, 2) && close(model.bounds.max.y, 3),
             "triangle bounds");
     for (const auto& v : model.meshes[0].vertices)
-        require(close(glm::length(v.normal), 1) && v.normal.z > 0.99f, "generated normals");
+        require(close(aeg::math::length(v.normal), 1) && v.normal.z > 0.99f, "generated normals");
     for (const auto i : model.meshes[0].indices) require(i < 3, "valid indices");
 }
 void transformed() {
@@ -61,7 +61,7 @@ void binaryAndEmbedded() {
     const auto& material = embedded.materials.at(embedded.meshes.at(0).materialIndex);
     require(material.hasTexture && material.texture.width == 32 && material.texture.height == 32,
             "embedded PNG decode");
-    require(close(material.baseColor.r, 0.3f) && close(material.baseColor.b, 0.7f), "glTF base color factor");
+    require(close(material.baseColor.x, 0.3f) && close(material.baseColor.z, 0.7f), "glTF base color factor");
     require(material.texture.rgba[0] == 90 && material.texture.rgba[(31 * 32 + 1) * 4] == 205,
             "decoded image rows retain top-left order");
     bool foundOrigin = false, foundBottom = false;
@@ -84,27 +84,27 @@ void textureFallback() {
     require(!material.hasTexture && material.texture.width == 1 && material.texture.height == 1,
             "white texture fallback dimensions");
     require(material.texture.rgba == std::vector<std::uint8_t>({255, 255, 255, 255}), "white fallback pixels");
-    require(close(material.baseColor.r, 0.25f) && close(material.baseColor.b, 0.75f), "material base color");
+    require(close(material.baseColor.x, 0.25f) && close(material.baseColor.z, 0.75f), "material base color");
 }
 void alphaModes() {
     for (const auto* filename : {"alpha-opaque.gltf", "alpha-default.gltf"}) {
         const auto model = aeg::assets::loadModel(fixture(filename));
         const auto& m = model.materials.at(model.meshes.at(0).materialIndex);
-        require(!m.alphaMasked && close(m.baseColor.a, 0),
+        require(!m.alphaMasked && close(m.baseColor.w, 0),
                 "opaque mode preserves alpha factor without enabling discard");
         require(model.warnings.empty(), "opaque alpha is supported without warnings");
     }
     const auto mask = aeg::assets::loadModel(fixture("alpha-mask.gltf"));
     const auto& masked = mask.materials.at(mask.meshes.at(0).materialIndex);
-    require(masked.alphaMasked && close(masked.alphaCutoff, 0.5f) && close(masked.baseColor.a, 0.3f),
+    require(masked.alphaMasked && close(masked.alphaCutoff, 0.5f) && close(masked.baseColor.w, 0.3f),
             "MASK uses default cutoff and preserves alpha factor");
     const auto custom = aeg::assets::loadModel(fixture("alpha-mask-custom.gltf"));
     const auto& customized = custom.materials.at(custom.meshes.at(0).materialIndex);
-    require(customized.alphaMasked && close(customized.alphaCutoff, 0.1f) && close(customized.baseColor.a, 0.3f),
+    require(customized.alphaMasked && close(customized.alphaCutoff, 0.1f) && close(customized.baseColor.w, 0.3f),
             "MASK honors custom cutoff");
     const auto blend = aeg::assets::loadModel(fixture("alpha-blend.gltf"));
     const auto& blended = blend.materials.at(blend.meshes.at(0).materialIndex);
-    require(!blended.alphaMasked && close(blended.baseColor.a, 0.3f) && !blend.warnings.empty(),
+    require(!blended.alphaMasked && close(blended.baseColor.w, 0.3f) && !blend.warnings.empty(),
             "BLEND warns and uses opaque fallback");
 }
 void externalUriSpaces() {
@@ -137,8 +137,7 @@ void literalPercentPaths() {
     } cleanup{temporary};
     std::filesystem::create_directories(temporary);
     std::filesystem::copy_file(fixture("uri-spaces.gltf"), temporary / "scene%20.gltf");
-    for (const auto* filename :
-         {"mesh data.bin", "base color.png", "literal-percent.obj", "literal-percent.mtl"})
+    for (const auto* filename : {"mesh data.bin", "base color.png", "literal-percent.obj", "literal-percent.mtl"})
         std::filesystem::copy_file(fixture(filename), temporary / filename);
     std::filesystem::copy_file(fixture("literal texture.png"), temporary / "literal%20texture.png");
     const auto model = aeg::assets::loadModel(temporary / "scene%20.gltf");
@@ -185,9 +184,8 @@ void pmxGeometry(const char* filename) {
     const auto model = aeg::assets::loadModel(fixture(filename));
     require(model.vertexCount() == 24 && model.triangleCount() == 12, "PMX cube counts and sharp face seams");
     require(model.meshes.size() == 2 && model.materials.size() == 2, "PMX material groups remain distinct");
-    require(close(model.bounds.min.x, -1) && close(model.bounds.max.x, 1) &&
-                close(model.bounds.min.y, 0) && close(model.bounds.max.y, 2) &&
-                close(model.bounds.min.z, -3) && close(model.bounds.max.z, -1),
+    require(close(model.bounds.min.x, -1) && close(model.bounds.max.x, 1) && close(model.bounds.min.y, 0) &&
+                close(model.bounds.max.y, 2) && close(model.bounds.min.z, -3) && close(model.bounds.max.z, -1),
             "PMX bounds convert from source left-handed coordinates");
     require(model.meshes[0].materialIndex != model.meshes[1].materialIndex, "PMX meshes use their own materials");
     bool foundTop = false, foundBottom = false;
@@ -199,14 +197,13 @@ void pmxGeometry(const char* filename) {
             const auto& a = mesh.vertices[mesh.indices[index]];
             const auto& b = mesh.vertices[mesh.indices[index + 1]];
             const auto& c = mesh.vertices[mesh.indices[index + 2]];
-            require(glm::dot(glm::cross(b.position - a.position, c.position - a.position), a.normal) > 0,
+            require(aeg::math::dot(aeg::math::cross(b.position - a.position, c.position - a.position), a.normal) > 0,
                     "PMX triangle winding agrees with outward normals after handedness conversion");
         }
         for (const auto& vertex : mesh.vertices) {
-            require(close(glm::length(vertex.normal), 1) &&
-                        close(std::abs(vertex.normal.x) + std::abs(vertex.normal.y) +
-                                  std::abs(vertex.normal.z), 1) &&
-                        glm::dot(vertex.normal, vertex.position - glm::vec3(0, 1, -2)) > 0.99f,
+            require(close(aeg::math::length(vertex.normal), 1) &&
+                        close(std::abs(vertex.normal.x) + std::abs(vertex.normal.y) + std::abs(vertex.normal.z), 1) &&
+                        aeg::math::dot(vertex.normal, vertex.position - aeg::math::Vec3(0, 1, -2)) > 0.99f,
                     "PMX supplied sharp normals remain normalized and point outward");
             if (vertex.normal.z < -0.99f && close(vertex.position.x, -1)) {
                 if (close(vertex.position.y, 2)) {
@@ -222,11 +219,11 @@ void pmxGeometry(const char* filename) {
     require(foundTop && foundBottom, "PMX UV checks reference both source face corners");
     const auto& textured = model.materials.at(model.meshes[0].materialIndex);
     const auto& solid = model.materials.at(model.meshes[1].materialIndex);
-    require(close(textured.baseColor.r, 0.25f) && close(textured.baseColor.g, 0.5f) &&
-                close(textured.baseColor.b, 0.75f) && close(textured.baseColor.a, 1),
+    require(close(textured.baseColor.x, 0.25f) && close(textured.baseColor.y, 0.5f) &&
+                close(textured.baseColor.z, 0.75f) && close(textured.baseColor.w, 1),
             "PMX textured diffuse color and opacity");
-    require(close(solid.baseColor.r, 0.8f) && close(solid.baseColor.g, 0.2f) &&
-                close(solid.baseColor.b, 0.1f) && close(solid.baseColor.a, 1) && !solid.hasTexture,
+    require(close(solid.baseColor.x, 0.8f) && close(solid.baseColor.y, 0.2f) && close(solid.baseColor.z, 0.1f) &&
+                close(solid.baseColor.w, 1) && !solid.hasTexture,
             "PMX untextured material preserves its diffuse color");
     require(textured.hasTexture && textured.texture.width == 32 && textured.texture.height == 32 &&
                 textured.texture.rgba.size() == 32 * 32 * 4,
@@ -236,8 +233,8 @@ void pmxGeometry(const char* filename) {
             "PMX texture decode preserves top-left image row order");
 }
 void pmxUnicodePaths() {
-    auto temporary = std::filesystem::temp_directory_path() /
-                     std::filesystem::path(u8"aeg-pmx-\u6a21\u578b %20 with spaces-");
+    auto temporary =
+        std::filesystem::temp_directory_path() / std::filesystem::path(u8"aeg-pmx-\u6a21\u578b %20 with spaces-");
     temporary += std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
     struct Cleanup {
         std::filesystem::path path;
@@ -263,25 +260,24 @@ void pmxTextureFallback() {
     require(!material.hasTexture && material.texture.width == 1 && material.texture.height == 1 &&
                 material.texture.rgba == std::vector<std::uint8_t>({255, 255, 255, 255}),
             "missing PMX texture uses white fallback");
-    require(close(material.baseColor.r, 0.25f) && close(material.baseColor.b, 0.75f),
+    require(close(material.baseColor.x, 0.25f) && close(material.baseColor.z, 0.75f),
             "missing PMX texture retains diffuse color");
     bool textureWarning = false;
-    for (const auto& warning : model.warnings)
-        textureWarning |= warning.find("absent.png") != std::string::npos;
+    for (const auto& warning : model.warnings) textureWarning |= warning.find("absent.png") != std::string::npos;
     require(textureWarning, "missing PMX texture warning identifies unavailable resource");
 }
 void pmxOpacity() {
     const auto model = aeg::assets::loadModel(fixture("pmx-alpha.pmx"));
     const auto& partial = model.materials.at(model.meshes.at(0).materialIndex);
     const auto& hidden = model.materials.at(model.meshes.at(1).materialIndex);
-    require(close(partial.baseColor.a, 0.4f) && close(hidden.baseColor.a, 0),
+    require(close(partial.baseColor.w, 0.4f) && close(hidden.baseColor.w, 0),
             "PMX diffuse opacity is retained, including zero");
     require(partial.alphaMasked && hidden.alphaMasked && close(partial.alphaCutoff, 0.1f) &&
                 close(hidden.alphaCutoff, 0.1f),
             "PMX cutout metadata clips transparent texels and zero-opacity materials");
     require(partial.hasTexture && partial.texture.width == 2 && partial.texture.height == 2 &&
-                partial.texture.rgba[3] == 0 && partial.texture.rgba[7] == 255 &&
-                partial.texture.rgba[11] == 255 && partial.texture.rgba[15] == 0,
+                partial.texture.rgba[3] == 0 && partial.texture.rgba[7] == 255 && partial.texture.rgba[11] == 255 &&
+                partial.texture.rgba[15] == 0,
             "PMX cutout image alpha survives texture decode");
     bool opacityWarning = false;
     for (const auto& warning : model.warnings)
@@ -305,7 +301,7 @@ void pmxSignatureDetection() {
     std::filesystem::copy_file(fixture("pmx-alpha.pmx"), renamed);
     const auto model = aeg::assets::loadModel(renamed);
     const auto& material = model.materials.at(model.meshes.at(0).materialIndex);
-    require(model.triangleCount() == 12 && material.alphaMasked && close(material.baseColor.a, 0.4f),
+    require(model.triangleCount() == 12 && material.alphaMasked && close(material.baseColor.w, 0.4f),
             "signature-detected PMX uses PMX material rules regardless of extension");
     const auto invalid = temporary / "invalid.bin";
     std::filesystem::copy_file(fixture("pmx-bad-uv-header.pmx"), invalid);
@@ -356,31 +352,20 @@ int main() {
         {"PMX opacity and cutout", pmxOpacity},
         {"PMX signature detection and header guard", pmxSignatureDetection},
         {"PMX truncated input", [] { throws([] { (void)aeg::assets::loadModel(fixture("pmx-truncated.pmx")); }); }},
-        {"PMX rejects excessive UV channels", [] {
-             throws([] { (void)aeg::assets::loadModel(fixture("pmx-bad-uv-header.pmx")); });
-         }},
-        {"PMX rejects invalid string encoding", [] {
-             throws([] { (void)aeg::assets::loadModel(fixture("pmx-bad-encoding.pmx")); });
-         }},
-        {"PMX rejects invalid index width", [] {
-             throws([] { (void)aeg::assets::loadModel(fixture("pmx-bad-index-width.pmx")); });
-         }},
-        {"PMX rejects out-of-range vertex index", [] {
-             pmxInvalidReference("pmx-bad-vertex-index.pmx", "vertex");
-         }},
-        {"PMX rejects material span beyond indices", [] {
-             pmxInvalidReference("pmx-bad-material-span.pmx", "material");
-         }},
-        {"PMX rejects out-of-range texture index", [] {
-             pmxInvalidReference("pmx-bad-texture.pmx", "texture");
-         }},
-        {"PMX rejects cyclic bone parent", [] {
-             pmxInvalidReference("pmx-bad-bone-parent.pmx", "bone");
-         }},
-        {"PMX invalid skinning reports standard exception", [] {
-             throws([] { (void)aeg::assets::loadModel(fixture("pmx-bad-skinning.pmx")); });
-         }},
-};
+        {"PMX rejects excessive UV channels",
+         [] { throws([] { (void)aeg::assets::loadModel(fixture("pmx-bad-uv-header.pmx")); }); }},
+        {"PMX rejects invalid string encoding",
+         [] { throws([] { (void)aeg::assets::loadModel(fixture("pmx-bad-encoding.pmx")); }); }},
+        {"PMX rejects invalid index width",
+         [] { throws([] { (void)aeg::assets::loadModel(fixture("pmx-bad-index-width.pmx")); }); }},
+        {"PMX rejects out-of-range vertex index", [] { pmxInvalidReference("pmx-bad-vertex-index.pmx", "vertex"); }},
+        {"PMX rejects material span beyond indices",
+         [] { pmxInvalidReference("pmx-bad-material-span.pmx", "material"); }},
+        {"PMX rejects out-of-range texture index", [] { pmxInvalidReference("pmx-bad-texture.pmx", "texture"); }},
+        {"PMX rejects cyclic bone parent", [] { pmxInvalidReference("pmx-bad-bone-parent.pmx", "bone"); }},
+        {"PMX invalid skinning reports standard exception",
+         [] { throws([] { (void)aeg::assets::loadModel(fixture("pmx-bad-skinning.pmx")); }); }},
+    };
     for (const auto& [name, test] : tests) try {
             test();
             std::cout << "PASS " << name << '\n';

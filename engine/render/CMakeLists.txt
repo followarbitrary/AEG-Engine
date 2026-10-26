@@ -17,5 +17,5 @@ target_include_directories(aeg_render
     PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/public"
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/private")
 target_link_libraries(aeg_render
-    PUBLIC aeg::assets aeg::rhi)
+    PUBLIC aeg::assets aeg::camera aeg::rhi)
 aeg_project_options(aeg_render)

@@ -7,7 +7,7 @@
 #include <RenderSettings.hpp>
 #include <Renderer.hpp>
 
-#include <glm/gtc/matrix_transform.hpp>
+#include <math.hpp>
 #include <imgui.h>
 
 #include <array>
@@ -38,15 +38,14 @@ struct ImportQueue {
 };
 
 struct Transform {
-    glm::vec3 translation{0};
-    glm::vec3 rotation{0};
-    glm::vec3 scale{1};
-    glm::mat4 matrix() const {
-        auto result = glm::translate(glm::mat4(1), translation);
-        result = glm::rotate(result, glm::radians(rotation.x), glm::vec3(1, 0, 0));
-        result = glm::rotate(result, glm::radians(rotation.y), glm::vec3(0, 1, 0));
-        result = glm::rotate(result, glm::radians(rotation.z), glm::vec3(0, 0, 1));
-        return glm::scale(result, scale);
+    math::Vec3 translation{0};
+    math::Vec3 rotation{0};
+    math::Vec3 scale{1};
+    math::Mat4 matrix() const {
+        const auto orientation = math::axis_angle({1, 0, 0}, math::to_radians(rotation.x)) *
+                                 math::axis_angle({0, 1, 0}, math::to_radians(rotation.y)) *
+                                 math::axis_angle({0, 0, 1}, math::to_radians(rotation.z));
+        return math::trs(translation, orientation, scale);
     }
 };
 

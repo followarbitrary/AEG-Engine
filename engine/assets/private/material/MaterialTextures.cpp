@@ -20,7 +20,7 @@ void validateImage(const ImageData& image) {
     if (!pixels || pixels > std::numeric_limits<std::size_t>::max() / 4 || image.rgba.size() != pixels * 4)
         throw std::runtime_error("Normal texture dimensions or RGBA byte count are invalid");
 }
-bool finite(const glm::vec3& value) {
+bool finite(const math::Vec3& value) {
     return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
 }
 void validateMesh(const MeshData& mesh) {
@@ -31,7 +31,7 @@ void validateMesh(const MeshData& mesh) {
         throw std::runtime_error("Normal-mapped mesh contains invalid triangle indices");
     for (const auto& vertex : mesh.vertices)
         if (!finite(vertex.position) || !finite(vertex.normal) || !std::isfinite(vertex.uv.x) ||
-            !std::isfinite(vertex.uv.y) || !(glm::length(glm::dvec3(vertex.normal)) > 1e-12))
+            !std::isfinite(vertex.uv.y) || !(math::length(math::DVec3(vertex.normal)) > 1e-12))
             throw std::runtime_error("Normal-mapped mesh contains invalid geometry");
 }
 struct PreparedMeshes {
@@ -63,7 +63,7 @@ PreparedMeshes prepare(const ModelData& model, std::optional<std::size_t> select
         validateMesh(mesh);
         auto candidate = mesh;
         if (!candidate.hasUV0) {
-            for (auto& vertex : candidate.vertices) vertex.tangent = glm::vec4(0);
+            for (auto& vertex : candidate.vertices) vertex.tangent = math::Vec4(0);
             warn("Mesh '" + mesh.name + "' has no UV0 for its normal texture; keeping vertex normals");
         } else if (!detail::buildTangentSpace(candidate)) {
             warn("Mesh '" + mesh.name +

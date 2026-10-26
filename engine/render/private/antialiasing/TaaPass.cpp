@@ -7,9 +7,9 @@ void Renderer::Impl::resetTemporalHistory() noexcept {
     pendingOutput.reset();
 }
 
-bool Renderer::Impl::perspectiveProjection(const glm::mat4& matrix) {
-    return glm::dot(glm::vec3(matrix[0][3], matrix[1][3], matrix[2][3]),
-                    glm::vec3(matrix[0][3], matrix[1][3], matrix[2][3])) > 1e-12f;
+bool Renderer::Impl::perspectiveProjection(const aeg::math::Mat4& matrix) {
+    return aeg::math::dot(aeg::math::Vec3(matrix[0][3], matrix[1][3], matrix[2][3]),
+                    aeg::math::Vec3(matrix[0][3], matrix[1][3], matrix[2][3])) > 1e-12f;
 }
 
 void Renderer::Impl::drawTemporal(rhi::CommandList& commands) {

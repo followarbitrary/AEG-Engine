@@ -15,6 +15,7 @@ include(cmake/VulkanShaders.cmake)
 include(CTest)
 option(AEG_ENABLE_GPU_TESTS "Run GPU smoke tests (requires a display and Vulkan device)" OFF)
 
+add_subdirectory(engine/math)
 add_subdirectory(engine/foundation)
 add_subdirectory(engine/camera)
 add_subdirectory(engine/assets)

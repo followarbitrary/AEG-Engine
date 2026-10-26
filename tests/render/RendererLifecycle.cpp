@@ -46,7 +46,7 @@ int main(int argc, char** argv) {
                 glfwPollEvents();
                 renderer.drawFrame(settings, [&] {
                     renderer.resizeViewport(width, height);
-                    settings.viewProjection = camera.projection(float(width) / float(height)) * camera.view();
+                    settings.set_camera(camera.render_camera(float(width) / float(height), {true, false}));
                     ImGui::SetNextWindowPos({40, 60}, ImGuiCond_Always);
                     ImGui::SetNextWindowSize({500, 400}, ImGuiCond_Always);
                     ImGui::Begin("Scaled viewport");

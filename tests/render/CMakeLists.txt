@@ -1,3 +1,11 @@
+add_executable(aeg_clip_conventions_test ClipConventions.cpp)
+target_link_libraries(aeg_clip_conventions_test PRIVATE aeg::editor aeg::rhi_vulkan aeg::rhi_vulkan_gui glfw)
+aeg_project_options(aeg_clip_conventions_test)
+add_dependencies(aeg_clip_conventions_test aeg_resources)
+add_test(NAME aeg_clip_conventions COMMAND aeg_clip_conventions_test
+    "${CMAKE_BINARY_DIR}/clip-conventions")
+set_tests_properties(aeg_clip_conventions PROPERTIES LABELS gpu TIMEOUT 120)
+
 add_executable(aeg_depth_precision_test DepthPrecision.cpp)
 target_link_libraries(aeg_depth_precision_test PRIVATE aeg::editor aeg::rhi_vulkan aeg::rhi_vulkan_gui aeg::camera glfw)
 aeg_project_options(aeg_depth_precision_test)

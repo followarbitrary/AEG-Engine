@@ -24,6 +24,10 @@ struct FakePass final : rhi::RenderPass {
     rhi::RenderPassDesc desc;
     explicit FakePass(const rhi::RenderPassDesc& value) : desc(value) {}
 };
+struct FakePipeline final : rhi::GraphicsPipeline {
+    rhi::GraphicsPipelineDesc desc;
+    explicit FakePipeline(const rhi::GraphicsPipelineDesc& value) : desc(value) {}
+};
 struct FakeFramebuffer final : rhi::Framebuffer {
     rhi::FramebufferDesc desc;
     explicit FakeFramebuffer(const rhi::FramebufferDesc& value) : desc(value) {}
@@ -44,6 +48,8 @@ struct PassSnapshot {
     rhi::FramebufferDesc framebuffer;
     std::vector<rhi::TextureDesc> attachmentDescriptions;
     std::vector<BoundSetSnapshot> sets;
+    std::vector<rhi::ClearValue> clears;
+    rhi::GraphicsPipelineDesc pipeline;
 };
 class FakeDevice final : public rhi::Device {
 public:
@@ -102,8 +108,8 @@ public:
     std::unique_ptr<rhi::Framebuffer> createFramebuffer(const rhi::FramebufferDesc& desc) override {
         return std::make_unique<FakeFramebuffer>(desc);
     }
-    std::unique_ptr<rhi::GraphicsPipeline> createGraphicsPipeline(const rhi::GraphicsPipelineDesc&) override {
-        return std::make_unique<EmptyResource<rhi::GraphicsPipeline>>();
+    std::unique_ptr<rhi::GraphicsPipeline> createGraphicsPipeline(const rhi::GraphicsPipelineDesc& desc) override {
+        return std::make_unique<FakePipeline>(desc);
     }
     rhi::TextureReadback readback(rhi::Texture& texture, rhi::ResourceState) override {
         lastReadback = &texture;
@@ -126,18 +132,24 @@ public:
     std::vector<std::vector<std::byte>> constants;
     std::uint32_t indexedDraws{};
     void beginRenderPass(rhi::RenderPass& pass, rhi::Framebuffer& framebuffer, rhi::Extent2D,
-                         std::span<const rhi::ClearValue>) override {
+                         std::span<const rhi::ClearValue> clears) override {
         if (activePass_) throw std::runtime_error("Nested fake render pass");
         const auto& desc = dynamic_cast<FakePass&>(pass).desc;
         passes.push_back(desc.depth ? "scene" : desc.colors.size() == 2 ? "taa" : "fxaa");
         recordedPasses.push_back({&pass, desc, dynamic_cast<FakeFramebuffer&>(framebuffer).desc, {}, {}});
         activePass_ = &recordedPasses.back();
+        activePass_->clears.assign(clears.begin(), clears.end());
         for (const auto texture : activePass_->framebuffer.attachments)
             activePass_->attachmentDescriptions.push_back(texture->description());
     }
     void endRenderPass() override { activePass_ = nullptr; }
     void setViewport(rhi::Extent2D) override {}
-    void bindPipeline(rhi::GraphicsPipeline&) override {}
+    void bindPipeline(rhi::GraphicsPipeline& pipeline) override {
+        if (!activePass_) throw std::runtime_error("Fake pipeline outside render pass");
+        activePass_->pipeline = dynamic_cast<FakePipeline&>(pipeline).desc;
+        if (activePass_->pipeline.pass != activePass_->pass)
+            throw std::runtime_error("Pipeline belongs to the wrong render pass");
+    }
     void bindSet(rhi::PipelineLayout& layout, std::uint32_t index, rhi::BindingSet& set) override {
         if (!activePass_) throw std::runtime_error("Fake binding outside render pass");
         // Copy writes now: descriptor updates for a later frame must not rewrite this recording.

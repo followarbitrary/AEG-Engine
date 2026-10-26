@@ -58,8 +58,9 @@ struct Renderer::Impl {
     std::unique_ptr<rhi::GraphicsPipeline> createPipeline(rhi::RenderPass& pass, rhi::PipelineLayout& layout,
                                                           std::uint32_t samples, bool scene, detail::ShaderId vertexId,
                                                           detail::ShaderId fragmentId,
-                                                          std::uint32_t colorAttachmentCount = 1);
-    ScenePipeline& scenePipeline(std::uint32_t samples, bool temporal = false);
+                                                          std::uint32_t colorAttachmentCount = 1,
+                                                          rhi::DepthCompare depthCompare = rhi::DepthCompare::Less);
+    ScenePipeline& scenePipeline(std::uint32_t samples, bool temporal = false, bool reversed = false);
     void resetTemporalHistory() noexcept;
     void invalidateOutput() noexcept;
     std::unique_ptr<ViewportTargets> createViewport(std::uint32_t width, std::uint32_t height,
@@ -67,7 +68,7 @@ struct Renderer::Impl {
     void resizeViewport(std::uint32_t width, std::uint32_t height);
     void setAntialiasing(const AntialiasingSettings& requested);
     void uploadModel(const ModelData& source);
-    static bool perspectiveProjection(const glm::mat4& matrix);
+    static bool perspectiveProjection(const aeg::math::Mat4& matrix);
     SceneUniform sceneUniform(const RenderSettings& settings);
     void drawScene(rhi::CommandList& commands, const RenderSettings& settings);
     void drawTemporal(rhi::CommandList& commands);

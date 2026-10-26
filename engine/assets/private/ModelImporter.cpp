@@ -26,10 +26,10 @@
 
 namespace aeg::assets {
 namespace {
-bool finite(const glm::vec3& value) {
+bool finite(const math::Vec3& value) {
     return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
 }
-bool finite(const glm::vec4& value) { return finite(glm::vec3(value)) && std::isfinite(value.w); }
+bool finite(const math::Vec4& value) { return finite(math::Vec3(value)) && std::isfinite(value.w); }
 
 std::unordered_set<std::string> transformedObjNormals(const std::vector<std::filesystem::path>& openedFiles) {
     std::unordered_set<std::string> transformed;
@@ -131,7 +131,7 @@ ModelData loadModel(const std::filesystem::path& input) {
             source.Get(AI_MATKEY_OPACITY, opacity);
             if (!std::isfinite(opacity) || opacity < 0 || opacity > 1)
                 throw std::runtime_error("PMX material contains an invalid opacity");
-            material.baseColor.a = opacity;
+            material.baseColor.w = opacity;
             material.alphaMasked = true;
             material.alphaCutoff = 0.1f;
             if (opacity > 0 && opacity < 1)
@@ -198,7 +198,7 @@ ModelData loadModel(const std::filesystem::path& input) {
         model.materials.push_back(std::move(material));
     }
     if (model.materials.empty()) model.materials.emplace_back();
-    glm::vec3 minimum(std::numeric_limits<float>::max()), maximum(std::numeric_limits<float>::lowest());
+    math::Vec3 minimum(std::numeric_limits<float>::max()), maximum(std::numeric_limits<float>::lowest());
     for (unsigned i = 0; i < scene->mNumMeshes; ++i) {
         const auto& source = *scene->mMeshes[i];
         MeshData mesh;
@@ -233,18 +233,18 @@ ModelData loadModel(const std::filesystem::path& input) {
             if (!finite(vertex.position) || !finite(vertex.normal) || !std::isfinite(vertex.uv.x) ||
                 !std::isfinite(vertex.uv.y))
                 throw std::runtime_error("Model contains non-finite geometry");
-            const auto normalLength = glm::length(vertex.normal);
+            const auto normalLength = math::length(vertex.normal);
             if (!std::isfinite(normalLength))
                 throw std::runtime_error("Model contains an unsupported normal magnitude");
-            vertex.normal = normalLength > 0.000001f ? vertex.normal / normalLength : glm::vec3(0, 1, 0);
-            minimum = glm::min(minimum, vertex.position);
-            maximum = glm::max(maximum, vertex.position);
+            vertex.normal = normalLength > 0.000001f ? vertex.normal / normalLength : math::Vec3(0, 1, 0);
+            minimum = math::min(minimum, vertex.position);
+            maximum = math::max(maximum, vertex.position);
             mesh.vertices.push_back(vertex);
         }
         model.meshes.push_back(std::move(mesh));
     }
     if (model.meshes.empty()) throw std::runtime_error("Model contains no triangles");
-    if (!finite(maximum - minimum) || !std::isfinite(glm::length(maximum - minimum)))
+    if (!finite(maximum - minimum) || !std::isfinite(math::length(maximum - minimum)))
         throw std::runtime_error("Model bounds exceed supported coordinate range");
     model.bounds.min = minimum;
     model.bounds.max = maximum;

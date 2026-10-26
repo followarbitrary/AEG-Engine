@@ -65,9 +65,9 @@ aeg::assets::ModelData layers(bool reverseOrder) {
     model.meshes.push_back(quad(0.15f, 0.2f, 2));
     return model;
 }
-void colorAt(const Image& image, const glm::mat4& vp, glm::vec3 point, unsigned channel, const std::string& label) {
-    const auto clip = vp * glm::vec4(point, 1);
-    const auto ndc = glm::vec3(clip) / clip.w;
+void colorAt(const Image& image, const aeg::math::Mat4& vp, aeg::math::Vec3 point, unsigned channel, const std::string& label) {
+    const auto clip = vp * aeg::math::Vec4(point, 1);
+    const auto ndc = aeg::math::Vec3(clip) / clip.w;
     const int x = int((ndc.x * 0.5f + 0.5f) * float(image.width));
     const int y = int((ndc.y * 0.5f + 0.5f) * float(image.height));
     require(x > 0 && y > 0 && x + 1 < int(image.width) && y + 1 < int(image.height),
@@ -131,9 +131,9 @@ int main(int argc, char** argv) {
                     for (const float yaw : {0.0f, 0.4f, 0.8f}) {
                         aeg::camera::OrbitCamera camera;
                         camera.fit(model.bounds);
-                        camera.orbit((0.65f - yaw) / 0.005f, -0.35f / 0.005f);
+                        camera.orbit(-yaw / 0.005f, 0);
                         camera.zoom(zoom);
-                        settings.viewProjection = camera.projection(1) * camera.view();
+                        settings.set_camera(camera.render_camera(1, {true, false}));
                         renderer.resetTemporalHistory();
                         for (unsigned i = 0; i < (mode.taa ? 16u : 2u); ++i) frame();
                         const auto label = "layers-" + std::to_string(captureIndex++);

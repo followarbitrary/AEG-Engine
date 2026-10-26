@@ -17,7 +17,7 @@ if(MSVC)
 endif()
 
 function(aeg_project_options target)
-    target_compile_definitions(${target} PUBLIC GLM_FORCE_RADIANS GLM_FORCE_DEPTH_ZERO_TO_ONE GLFW_INCLUDE_NONE)
+    target_compile_definitions(${target} PUBLIC GLFW_INCLUDE_NONE)
     if(MSVC)
         target_compile_options(${target} PRIVATE /W4 /utf-8 /permissive-)
     else()

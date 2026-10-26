@@ -8,6 +8,7 @@ layout(set = 0, binding = 0) uniform Scene {
     mat4 model;
     vec4 lightDirection;
     vec4 parameters;
+    vec4 clipConvention;
 #ifdef AEG_TAA
     mat4 previousViewProjection;
     mat4 previousModel;

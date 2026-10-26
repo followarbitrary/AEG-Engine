@@ -1,6 +1,14 @@
 #include "RendererImpl.hpp"
 
 namespace aeg::render {
+namespace {
+math::Mat4 backendProjection(const RenderSettings& settings) {
+    if (settings.clipSpace.y_down) return settings.viewProjection;
+    auto reflection = math::identity();
+    reflection[1][1] = -1;
+    return reflection * settings.viewProjection;
+}
+}
 void Renderer::Impl::createScenePass(ScenePipeline& target) {
     const bool multisampled = target.samples > 1;
     rhi::RenderPassDesc desc;
@@ -25,17 +33,24 @@ void Renderer::Impl::createScenePass(ScenePipeline& target) {
 
 SceneUniform Renderer::Impl::sceneUniform(const RenderSettings& settings) {
     SceneUniform uniform;
-    uniform.viewProjection = settings.viewProjection;
+    const auto currentProjection = backendProjection(settings);
+    uniform.viewProjection = currentProjection;
     uniform.model = settings.model;
+    uniform.currentViewProjection = uniform.viewProjection;
+    uniform.previousViewProjection = uniform.viewProjection;
+    uniform.previousModel = settings.model;
+    uniform.clipConvention = {1, settings.clipSpace.reversed_z ? 1.0f : 0.0f, 1,
+                              settings.clipSpace.reversed_z ? 1.0f : 0.0f};
     auto light = settings.lightDirection;
-    if (glm::dot(light, light) < 0.000001f) light = {0, -1, 0};
-    uniform.lightDirection = glm::vec4(light, 0);
+    if (aeg::math::dot(light, light) < 0.000001f) light = {0, -1, 0};
+    uniform.lightDirection = aeg::math::Vec4(light, 0);
     uniform.parameters = {
         std::clamp(settings.ambient, 0.0f, 1.0f), settings.unlit ? 1.0f : 0.0f, settings.normalMapping ? 1.0f : 0.0f,
         std::isfinite(settings.normalStrength) ? std::clamp(settings.normalStrength, 0.0f, 4.0f) : 1.0f};
     if (aa.taa) {
         const bool perspective = perspectiveProjection(settings.viewProjection);
-        if (recordingHistory.valid && (settings.unlit != recordingHistory.previous.unlit ||
+        if (recordingHistory.valid && (settings.clipSpace != recordingHistory.previous.clipSpace ||
+                                       settings.unlit != recordingHistory.previous.unlit ||
                                        settings.normalMapping != recordingHistory.previous.normalMapping ||
                                        settings.normalStrength != recordingHistory.previous.normalStrength ||
                                        settings.ambient != recordingHistory.previous.ambient ||
@@ -52,16 +67,18 @@ SceneUniform Renderer::Impl::sceneUniform(const RenderSettings& settings) {
             }
             return value;
         };
-        const glm::vec2 inverse{1.0f / static_cast<float>(viewport->width),
+        const aeg::math::Vec2 inverse{1.0f / static_cast<float>(viewport->width),
                                 1.0f / static_cast<float>(viewport->height)};
-        glm::mat4 jitter(1);
+        auto jitter = aeg::math::identity();
         jitter[3][0] = 2 * (halton(recordingHistory.jitterIndex + 1, 2) - 0.5f) * inverse.x;
         jitter[3][1] = 2 * (halton(recordingHistory.jitterIndex + 1, 3) - 0.5f) * inverse.y;
-        uniform.viewProjection = jitter * settings.viewProjection;
-        uniform.currentViewProjection = settings.viewProjection;
+        uniform.viewProjection = jitter * currentProjection;
+        uniform.currentViewProjection = currentProjection;
         uniform.previousViewProjection =
-            recordingHistory.valid ? recordingHistory.previous.viewProjection : settings.viewProjection;
+            recordingHistory.valid ? backendProjection(recordingHistory.previous) : currentProjection;
         uniform.previousModel = recordingHistory.valid ? recordingHistory.previous.model : settings.model;
+        uniform.clipConvention.w = (recordingHistory.valid ? recordingHistory.previous.clipSpace.reversed_z
+                                                          : settings.clipSpace.reversed_z) ? 1.0f : 0.0f;
         uniform.temporalInfo = {
             inverse.x, inverse.y, perspective ? 1.0f : 0.0f,
             (recordingHistory.valid ? perspectiveProjection(recordingHistory.previous.viewProjection) : perspective)
@@ -72,17 +89,17 @@ SceneUniform Renderer::Impl::sceneUniform(const RenderSettings& settings) {
 }
 
 void Renderer::Impl::drawScene(rhi::CommandList& commands, const RenderSettings& settings) {
-    auto& scene = scenePipeline(aa.msaaSamples, aa.taa);
+    auto& scene = scenePipeline(aa.msaaSamples, aa.taa, settings.clipSpace.reversed_z);
     const auto uniform = sceneUniform(settings);
     std::memcpy(uniformBuffer->mapped().data(), &uniform, sizeof(uniform));
     std::array<rhi::ClearValue, 3> clears{};
-    clears[0].color = {settings.background.r, settings.background.g, settings.background.b, 1};
-    clears[1].depth = 1;
+    clears[0].color = {settings.background.x, settings.background.y, settings.background.z, 1};
+    clears[1].depth = settings.clipSpace.reversed_z ? 0.0f : 1.0f;
     clears[2].color = {0, 0, -1, -1};
     commands.beginRenderPass(*scene.pass, *viewport->sceneFrame, viewport->extent(),
                              std::span(clears).first(aa.taa ? 3u : 2u));
     commands.setViewport(viewport->extent());
-    commands.bindPipeline(*scene.pipeline);
+    commands.bindPipeline(*(settings.clipSpace.reversed_z ? scene.greater : scene.less));
     commands.bindSet(*pipelineLayout, 0, *sceneDescriptor);
     if (model)
         for (auto& mesh : model->meshes) {

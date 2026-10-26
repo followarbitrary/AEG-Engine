@@ -67,7 +67,7 @@ ctest --preset release
 ## 使用方法
 
 - **导入**：在界面的模型路径栏输入文件路径并点击导入，或把模型文件拖入窗口。模型附带的相对纹理路径会相对模型文件解析。导入失败会保留当前模型并显示错误。
-- **观察**：在场景视口内拖动鼠标旋转相机，水平拖动时可见模型表面跟随鼠标方向；使用中键拖动平移，滚轮缩放；点击“聚焦模型”或按 `F` 重新聚焦模型。具体拖动按键以界面底部提示为准。
+- **观察**：模型加载后默认从 +Z 沿 -Z 正视，重新导入也恢复该朝向。在场景视口内拖动鼠标旋转相机，水平拖动时可见模型表面跟随鼠标方向；使用中键拖动平移，滚轮缩放；点击“聚焦模型”或按 `F` 重新聚焦模型，保留当前观察角度。具体拖动按键以界面底部提示为准。
 - **调整**：在属性面板修改模型位置、旋转、缩放，以及光照方向、环境光、背景色等；可查看网格、顶点和三角形数量。
 - **法线贴图**：导入模型时自动读取材质声明的法线图，缺少声明时按文件名查找配套图片；所有已支持格式共用此规则。仍可在属性面板“材质”中选择材质，输入 RGB 法线图片路径，应用、替换或清除贴图；相对路径以模型所在目录为基准，也支持绝对路径和中文路径。“光照”中的“使用法线贴图”和 0–4 的“法线强度”控制全部材质，默认启用、强度为 1；强度为 0 时使用原来的顶点法线。无光照模式不受法线贴图影响，界面同时显示带法线贴图的材质数。
 - **抗锯齿**：在属性面板的“抗锯齿”中选择 MSAA 关闭、2x、4x 或 8x，或开启“TAA 时域抗锯齿”；“FXAA 后处理”可独立开关。TAA 开启时有效采样数为 1，MSAA 选择禁用。界面显示历史帧数并提供“重置历史”；聚焦模型也会自动重置。界面只提供设备支持的采样档位，命令行请求不支持的 MSAA 档位时向下降级并显示提示。默认均关闭。
@@ -155,9 +155,11 @@ glTF 的 OPAQUE 会忽略 alpha，MASK 使用模型指定的 cutoff（默认 0.5
 
 ## 已验证的里程碑
 
-2026-10-26 在本机 MSVC 19.51 / RTX 5070 / Vulkan SDK 1.4.357.0 上完成 Debug、Release 和 MinGW 编译。完整 Debug CTest **30/30 通过**，包含公开接口、相机、模型导入、法线贴图、自动查找、MMD 效果绑定、字体、RHI 描述校验、模拟渲染命令、内嵌着色器及生成器十一项 CPU 测试，以及 **19 项真实 GPU 测试**。原有 **33 项模型/相机用例及 8 项字体用例**保留，法线导入与通用材质接口新增 13 组用例，自动查找新增 15 组用例，EMD/FX 绑定新增 14 组用例。Release 和 MinGW 的十一项 CPU 测试也通过验证。CPU 回归覆盖左右拖动时模型表面的投影运动方向，以及 PMX 编码、坐标/绕序、UV、材质、中文路径、透明裁切和错误输入；字体回归检查中文实际字形、Unicode 字体路径、字体数据所有权和无效字体诊断；GPU 测试另检查 PMX 场景确实可见。
+2026-10-26 在本机 MSVC 19.51 / RTX 5070 / Vulkan SDK 1.4.357.0 上完成 Debug、Release 和 MinGW 编译。完整 Debug CTest **33/33 通过**，包含 SSE2／标量 Math 契约、公开接口、相机、模型导入、法线贴图、自动查找、MMD 效果绑定、字体、RHI 描述校验、模拟渲染命令、内嵌着色器及生成器十三项 CPU 测试，以及 **20 项真实 GPU 测试**。原有 **33 项模型/相机用例及 8 项字体用例**保留，法线导入与通用材质接口新增 13 组用例，自动查找新增 15 组用例，EMD/FX 绑定新增 14 组用例。Release 和 MinGW 的十三项 CPU 测试也通过验证。CPU 回归覆盖左右拖动时模型表面的投影运动方向，以及 PMX 编码、坐标/绕序、UV、材质、中文路径、透明裁切和错误输入；字体回归检查中文实际字形、Unicode 字体路径、字体数据所有权和无效字体诊断；GPU 测试另检查 PMX 场景确实可见。
 
 GPU 测试检查场景截图确实包含模型，覆盖 OPAQUE/MASK 材质、含空格及中文资源 URI、窗口与视口反复缩放、导入替换失败后画面保持不变，以及 ImGui 初始化失败时的资源回收。测试同时检查 Vulkan 同步验证及退出阶段的错误输出。测试使用隐藏窗口；`-GpuTests` 仍需要可用的 Windows 桌面和 Vulkan 驱动。
+
+Math 的普通 SSE2 和强制标量实现分别通过 16,724 个检查，覆盖布局、手算矩阵/四元数结果、归一化、失败回滚与别名、非有限值、极小/极大数量级，以及四种裁剪约定下的投影和视锥体。另用 10,000 组线性相关矩阵独立检查两种实现的奇异拒绝及输出保持。真实 GPU 回归检查四种约定下的方向、遮挡、投影切换与纹理运动；临时将运动矢量置零时会检出重投影滞后，恢复原着色器后通过。真实编辑器另验证了 PMX、自动法线贴图、相机拖拽及 TAA+FXAA，验证错误为零。
 
 内嵌着色器测试逐字节比较七份静态数据与构建生成的 SPIR-V，检查大小、对齐、魔数、静态存储及无效枚举；生成器测试检查错误输入诊断和原输出保留。独立 Ninja 构建验证完整并行生成、GLSL／包含文件／提取脚本修改后的增量依赖和重复空构建。隔离部署测试只复制可执行文件和运行库，不携带 `shaders/` 或 SPIR-V 文件，分别执行 MSAA 4x＋FXAA 和 TAA＋FXAA，并检查非空场景截图及验证错误为零。Debug、Release、MinGW 均通过该部署验证。
 
@@ -181,12 +183,41 @@ PMX 真实窗口检查了按材质应用、清除和重新应用外部法线图�
 
 EMD 真实窗口验证确认了声明图片自动加载、手动清除/覆盖以及重新导入恢复绑定。实际 MMD 模型的 32 个材质中仅两项加载了 EMD 指定的法线图，材质索引与文件声明对应，界面验证错误为零；验证过程中没有修改模型或配套文件。
 
+## Math 数学约定
+
+数学库公开接口为 `engine/math/public/math.hpp`，命名空间 `aeg::math`，链接目标 `aeg::math`。实现位于同模块 `private/`，无第三方数学库依赖；SSE2 与标量回退只影响内部矩阵乘法实现，不改变公开类型或 ABI。
+
+- 世界和视图均为右手坐标系：+X 向右、+Y 向上、相机沿 -Z 观察；角度为弧度，正旋转遵循右手定则。编辑器旋转控件保留角度显示，在调用 Math 时显式转换。
+- `Vec2/Vec3/Vec4` 的分量分别为 xy/xyz/xyzw；`Quat` 按 xyzw 存储，默认 `(0,0,0,1)`。旋转接口要求单位四元数，不会偷偷归一化输入。
+- `Vec3` 为 16 字节大小、16 字节对齐，尾部四字节是非语义填充，不能按连续三个浮点数序列化。`Vec2` 为 8 字节；`Vec4`、`Quat` 为 16 字节；`Mat4` 为 64 字节、16 字节对齐。顶点布局为 position0、normal16、uv32、tangent48，步长64；上传使用完整顶点结构及显式偏移。
+- `Mat4{}` 是零矩阵，单位矩阵必须使用 `identity()`。矩阵由四个列向量组成，`operator[]` 按列访问，`at(row,column)` 按行列访问。列向量在右侧相乘：`clip = projection * view * model * local`；`trs(t,r,s)` 等价于 `translation(t) * from_quat(r) * scale(s)`。Shader 使用相同列主序，上传不做隐式转置。
+- 点变换使用 w=1 并做透视除法；向量变换使用 w=0，不受平移影响。`try_*` 的无效输入、非有限结果及数值奇异变换会返回 false，并完整保留原输出，包括输入和输出别名的情况。
+- 值返回包装函数失败时返回零向量或零矩阵；四元数的 normalize、inverse 和轴角构造失败时返回单位四元数。`operator==` 逐分量精确比较；有限数的近似比较使用显式绝对容差的 `nearly_equal()`。`kEpsilon` 是数值阈值，不是世界尺度或时间步长。
+- `perspective()`、`orthographic()` 默认采用右手 0..1 深度；near/far 为正距离，可见相机 Z 在 `[-far,-near]`。`ClipSpaceConvention{y_down,reversed_z}` 分别控制 NDC Y 方向及 near1/far0 的反向深度；默认 near0/far1。公共 API 不提供 OpenGL -1..1 深度语义。
+- `RenderCamera::view_projection()` 返回 projection*view，`RenderSettings::set_camera()` 同时传递矩阵和对应的裁剪约定。渲染器显式转换到 Vulkan 正高度视口的 Y 方向；反向深度使用 clear0/Greater，普通深度使用 clear1/Less。TAA 对应转换当前帧和前一帧，切换约定时清空历史。
+- 平面方程为 `dot(normal,point)+offset`，内部取值 >=0；视锥面顺序固定为 Left、Right、Bottom、Top、Near、Far，对应 `FrustumPlane::kLeft` 至 `kFar`。`try_extract_frustum()` 使用对应裁剪约定并生成归一化平面；失败时保留输出。点和球体测试要求调用方先确保视锥体有效、平面已归一化；其他模块复用 Math 的提取函数。
+
+矩阵求逆使用按原始行幅度缩放的主元选择，主元比例及倒条件估计 `1/(||A||∞*||A⁻¹||∞)` 均须大于所给相对阈值，结果须有限。仿射矩阵单独检查 3×3 线性部分，排除平移量；整体很小但条件良好的缩放和大平移仍可求逆，默认阈值会拒绝极端各向异性或近线性相关的矩阵。
+
+秩检查还比较双精度行列式与其各项绝对值之和，按双精度机器精度识别抵消导致的数值奇异，不以世界单位设定下限。投影构造、点/向量变换及视锥提取只要求双精度可逆，不要求逆矩阵能够写入浮点 `Mat4`；极小近裁面和统一齐次缩放不会因此误拒绝。SSE2 和标量路径共享契约用例，允许轻微舍入差异，失败规则保持一致。
+
+只验证 Math 时无须 Vulkan SDK 或其他依赖（需要 C++23 编译器与 Ninja）：
+
+```powershell
+cmake -S engine/math -B build/math-standalone -G Ninja
+cmake --build build/math-standalone
+ctest --test-dir build/math-standalone --output-on-failure
+```
+
+`BUILD_TESTING=ON` 时生成普通实现及强制标量实现两个测试目标。`aeg_core_tests` 聚合目标也会构建这些 Math 测试。
+
 ## 代码结构与依赖
 
 | 路径 | CMake 目标 | 命名空间 / 职责 |
 | --- | --- | --- |
+| `engine/math/` | `aeg::math` | `aeg::math`，自研向量、四元数、矩阵、投影与视锥体 |
 | `engine/foundation/` | `aeg::foundation` | `aeg::foundation`，Bounds、UTF-8 路径处理 |
-| `engine/camera/` | `aeg::camera` | `aeg::camera`，轨道相机 |
+| `engine/camera/` | `aeg::camera` | `aeg::camera`，轨道相机与携带裁剪空间约定的 RenderCamera |
 | `engine/assets/` | `aeg::assets` | `aeg::assets`，CPU 模型数据、Assimp 导入、纹理解码、PMX 校验 |
 | `engine/rhi/` | `aeg::rhi` | `aeg::rhi`，设备、资源、绑定、管线、命令、交换链的通用接口与描述校验 |
 | `engine/rhi/vulkan/` | `aeg::rhi_vulkan` | `aeg::rhi::vulkan`，Vulkan 设备、内存、同步、交换链及着色器编译适配 |
@@ -195,10 +226,10 @@ EMD 真实窗口验证确认了声明图片自动加载、手动清除/覆盖以
 | `engine/render/` | `aeg::render` | `aeg::render`，通过 RHI 实现场景、材质、视口、抗锯齿、截图 |
 | `editor/` | `aeg::editor` | `aeg::editor`，窗口、帧协调、GUI 纹理生命周期、停靠、面板与字体 |
 | `apps/editor/private/` | `aeg_editor` | 全局 main、`aeg::app` 命令行入口与 Vulkan 工厂装配 |
-| `tests/{foundation,camera,assets,rhi,render,editor}/` | 对应测试目标 | 与功能目录对应的 CPU/GPU 回归；数据保留在 `tests/fixtures/` |
+| `tests/{math,foundation,camera,assets,rhi,render,editor}/` | 对应测试目标 | 与功能目录对应的 CPU/GPU 回归；数据保留在 `tests/fixtures/` |
 | `assets/` | 运行时复制 | 离线演示模型与纹理 |
 
-功能性 CMake 模块统一放在根目录 `cmake/`：`ProjectOptions.cmake` 管理编译器检测及目标编译／链接选项，`VulkanShaders.cmake` 定义着色器构建规则，`EmbedSpirv.cmake` 提取 SPIR-V 头文件；依赖修补和测试驱动脚本也集中在该目录。根入口加载这些模块，各功能目录的 `CMakeLists.txt` 声明目标、依赖和测试。
+功能性 CMake 模块统一放在根目录 `cmake/`：`ProjectOptions.cmake` 管理编译器检测及目标编译／链接选项，`MathLibrary.cmake` 定义普通／标量数学库目标，`VulkanShaders.cmake` 定义着色器构建规则，`EmbedSpirv.cmake` 提取 SPIR-V 头文件；依赖修补和测试驱动脚本也集中在该目录。根入口加载这些模块，各功能目录的 `CMakeLists.txt` 声明目标、依赖和测试。
 
 各模块都有自己的 `CMakeLists.txt`。公开头文件直接位于 `public/`，内部头文件与源文件位于 `private/`。例如：
 
@@ -218,7 +249,7 @@ engine/render/
    └─ shaders/{scene,postprocess}/
 ```
 
-RHI 的十个公开头文件平铺在 `engine/rhi/public/`，只依赖 C++ 标准库，不包含 Vulkan、GLFW、ImGui、Windows、GLM 或模型数据类型。Vulkan 资源、命令与呈现实现分别放在 `engine/rhi/vulkan/private/{device,resources,bindings,pipelines,commands,presentation}/`。模型和材质上传、场景绘制、视口、MSAA／TAA／FXAA 与截图转换均通过真实 RHI 对象和命令实现，通用 Renderer 不调用 Vulkan，也不持有 ImGui 或窗口对象。
+RHI 的十个公开头文件平铺在 `engine/rhi/public/`，只依赖 C++ 标准库，不包含 Vulkan、GLFW、ImGui、Windows 或模型数据类型。Vulkan 资源、命令与呈现实现分别放在 `engine/rhi/vulkan/private/{device,resources,bindings,pipelines,commands,presentation}/`。模型和材质上传、场景绘制、视口、MSAA／TAA／FXAA 与截图转换均通过真实 RHI 对象和命令实现，通用 Renderer 不调用 Vulkan，也不持有 ImGui 或窗口对象。
 
 ImGui 分成 core、GLFW 平台和 Vulkan 绘制三个目标。应用入口在创建窗口后通过工厂回调装配 Vulkan 设备、交换链和 GUI 适配器；`EditorGraphics` 协调等待与获取图像、UI 构建、场景与后处理、UI 绘制、提交及呈现。只有成功提交才推进 TAA 历史，呈现要求重建不会回滚已提交帧。GUI 使用稳定的纹理注册标识，并保留输出图像所有权直到注册更新或移除。
 
@@ -239,7 +270,7 @@ aeg::camera::OrbitCamera camera;
 auto model = aeg::assets::loadModel(path);
 ```
 
-CMake 仅导出各模块的 `public/`；Vulkan GUI 桥接与核心后端属于同一后端模块，内部共用私有互操作声明。RHI 的十个头文件分别接受独立编译检查，公开接口测试不获得模块的 private 搜索路径。字体白盒测试单独获得 `editor/private/fonts/`，该目录不会传递给应用程序。GPU 测试复用产品的 `EditorGraphics`、Renderer 和 Vulkan 后端；测试辅助类只提供调用转发，不重编另一份渲染实现。`aeg_core_tests` 保留为相机、模型导入与法线贴图导入测试的构建聚合目标。
+CMake 仅导出各模块的 `public/`；Vulkan GUI 桥接与核心后端属于同一后端模块，内部共用私有互操作声明。RHI 的十个头文件和 Math 头文件接受独立编译检查，公开接口测试不获得模块的 private 搜索路径。字体白盒测试单独获得 `editor/private/fonts/`，该目录不会传递给应用程序。GPU 测试复用产品的 `EditorGraphics`、Renderer 和 Vulkan 后端；测试辅助类只提供调用转发，不重编另一份渲染实现。`aeg_core_tests` 保留为 Math、相机、模型导入与法线贴图导入测试的构建聚合目标。
 
 可单独验证不需要图形 SDK 的 RHI 接口（需要可用 C++23 编译器与 Ninja）：
 
@@ -256,7 +287,6 @@ ctest --test-dir build/rhi-standalone --output-on-failure
 | 依赖 | 固定版本 | 官方来源 |
 | --- | --- | --- |
 | GLFW | 3.4 | [glfw/glfw](https://github.com/glfw/glfw/releases/tag/3.4) |
-| GLM | 1.0.1 | [g-truc/glm](https://github.com/g-truc/glm/releases/tag/1.0.1) |
 | Assimp | v5.4.3，OBJ / glTF / MMD(PMX) 导入器，静态库、内置 zlib | [assimp/assimp](https://github.com/assimp/assimp/releases/tag/v5.4.3) |
 | Dear ImGui | v1.91.9b-docking，GLFW / Vulkan 后端 | [ocornut/imgui](https://github.com/ocornut/imgui/releases/tag/v1.91.9b-docking) |
 | stb_image | commit `003501f6d7a8668ce8b6d875e34dd97ad0d5d5b5` | [nothings/stb](https://github.com/nothings/stb/commit/003501f6d7a8668ce8b6d875e34dd97ad0d5d5b5) |

@@ -187,7 +187,11 @@ std::unique_ptr<GraphicsPipeline> VulkanDevice::createGraphicsPipeline(const Gra
     VkPipelineDepthStencilStateCreateInfo depth{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
     depth.depthTestEnable = desc.depthTest;
     depth.depthWriteEnable = desc.depthWrite;
-    depth.depthCompareOp = VK_COMPARE_OP_LESS;
+    switch (desc.depthCompare) {
+    case DepthCompare::Less: depth.depthCompareOp = VK_COMPARE_OP_LESS; break;
+    case DepthCompare::Greater: depth.depthCompareOp = VK_COMPARE_OP_GREATER; break;
+    default: throw std::invalid_argument("Invalid depth comparison");
+    }
     VkPipelineColorBlendAttachmentState attachment{};
     attachment.colorWriteMask =
         VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;

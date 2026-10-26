@@ -1,7 +1,7 @@
 #include "RendererHarness.hpp"
 #include <GLFW/glfw3.h>
 #include <imgui.h>
-#include <glm/gtc/matrix_transform.hpp>
+#include <math.hpp>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -89,8 +89,8 @@ float halton(unsigned index, unsigned base) {
     }
     return result;
 }
-glm::mat4 shift(float pixels, std::uint32_t width) {
-    return glm::translate(glm::mat4(1), glm::vec3(2 * pixels / float(width), 0, 0));
+aeg::math::Mat4 shift(float pixels, std::uint32_t width) {
+    return aeg::math::translation(aeg::math::Vec3(2 * pixels / float(width), 0, 0));
 }
 Image shifted(const Image& source, int pixels) {
     auto image = source;
@@ -247,12 +247,12 @@ int main(int argc, char** argv) {
             std::vector<Image> raw;
             for (unsigned i = 1; i <= 8; ++i) {
                 settings.viewProjection =
-                    glm::translate(glm::mat4(1), glm::vec3(2 * (halton(i, 2) - 0.5f) / float(width),
+                    aeg::math::translation(aeg::math::Vec3(2 * (halton(i, 2) - 0.5f) / float(width),
                                                            2 * (halton(i, 3) - 0.5f) / float(height), 0));
                 frame();
                 raw.push_back(capture("raw-jitter-" + std::to_string(i)));
             }
-            settings.viewProjection = glm::mat4(1);
+            settings.viewProjection = aeg::math::identity();
             renderer.setAntialiasing({4, false, true});
             require(renderer.antialiasing() == aeg::render::AntialiasingSettings{1, false, true},
                     "TAA did not force 1x MSAA");
@@ -307,7 +307,7 @@ int main(int argc, char** argv) {
                     "failed upload lost temporal/display state");
             renderer.uploadModel(source);
             require(renderer.temporalFrameCount() == 0, "successful upload did not invalidate history");
-            settings.model = settings.viewProjection = glm::mat4(1);
+            settings.model = settings.viewProjection = aeg::math::identity();
             advance(24);
             require(capture("upload-reset").rgb == accumulated.rgb, "successful upload did not restart the sequence");
             renderer.setAntialiasing({4, true, true});
@@ -329,11 +329,11 @@ int main(int argc, char** argv) {
             frame();
             require(renderer.temporalFrameCount() == 1, "background discontinuity did not reset history");
             advance(1);
-            settings.viewProjection = glm::perspective(0.9f, float(width) / float(height), 0.1f, 10.0f) *
-                                      glm::lookAt(glm::vec3(0, 0, 2), glm::vec3(0), glm::vec3(0, 1, 0));
+            settings.viewProjection = aeg::math::perspective(0.9f, float(width) / float(height), 0.1f, 10.0f, {true, false}) *
+                                      aeg::math::look_at(aeg::math::Vec3(0, 0, 2), aeg::math::Vec3(0), aeg::math::Vec3(0, 1, 0));
             frame();
             require(renderer.temporalFrameCount() == 1, "projection type change did not reset history");
-            settings.viewProjection = glm::mat4(1);
+            settings.viewProjection = aeg::math::identity();
             frame();
             require(renderer.temporalFrameCount() == 1, "return to orthographic did not reset history");
             settings.background = {0, 0, 0, 1};
@@ -355,9 +355,9 @@ int main(int argc, char** argv) {
             const auto modelError = rampError(capture("ramp-model"), shifted(rampStatic, 2));
             std::cout << "TAA reprojection mean errors: camera " << cameraError << ", model " << modelError << '\n';
             require(cameraError < 0.75 && modelError < 0.75, "camera/model reprojection left a textured history lag");
-            const auto projection = glm::perspective(0.9f, float(width) / float(height), 0.1f, 10.0f);
-            const auto perspective = projection * glm::lookAt(glm::vec3(0, 0, 2), glm::vec3(0), glm::vec3(0, 1, 0));
-            settings.model = glm::mat4(1);
+            const auto projection = aeg::math::perspective(0.9f, float(width) / float(height), 0.1f, 10.0f, {true, false});
+            const auto perspective = projection * aeg::math::look_at(aeg::math::Vec3(0, 0, 2), aeg::math::Vec3(0), aeg::math::Vec3(0, 1, 0));
+            settings.model = aeg::math::identity();
             settings.viewProjection = perspective;
             frame();
             require(renderer.temporalFrameCount() == 1, "perspective ramp did not reset orthographic history");
@@ -369,7 +369,7 @@ int main(int argc, char** argv) {
                 rampError(capture("ramp-perspective-camera"), shifted(perspectiveStatic, 4));
             // At z=0.5 the camera gives clipW=1.5; convert a -2px shift to world x.
             settings.model =
-                glm::translate(glm::mat4(1), glm::vec3(-4.0f * 1.5f / (float(width) * projection[0][0]), 0, 0));
+                aeg::math::translation(aeg::math::Vec3(-4.0f * 1.5f / (float(width) * projection[0][0]), 0, 0));
             advance(1);
             const auto perspectiveModelError =
                 rampError(capture("ramp-perspective-model"), shifted(perspectiveStatic, 2));
@@ -377,7 +377,7 @@ int main(int argc, char** argv) {
                       << perspectiveModelError << '\n';
             require(perspectiveCameraError < 0.75 && perspectiveModelError < 0.75,
                     "perspective camera/model reprojection left a textured history lag");
-            settings.model = settings.viewProjection = glm::mat4(1);
+            settings.model = settings.viewProjection = aeg::math::identity();
             renderer.setAntialiasing({});
             renderer.uploadModel(triangle(true));
             frame();

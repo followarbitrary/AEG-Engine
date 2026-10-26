@@ -1,5 +1,6 @@
 add_library(aeg_camera STATIC
     public/OrbitCamera.hpp
+    public/RenderCamera.hpp
     private/OrbitCamera.cpp)
 add_library(aeg::camera ALIAS aeg_camera)
 target_include_directories(aeg_camera

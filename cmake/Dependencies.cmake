@@ -9,8 +9,6 @@ set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
-set(GLM_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(GLM_BUILD_LIBRARY OFF CACHE BOOL "" FORCE)
 set(ASSIMP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(ASSIMP_BUILD_ASSIMP_TOOLS OFF CACHE BOOL "" FORCE)
 set(ASSIMP_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
@@ -30,14 +28,6 @@ FetchContent_Declare(glfw
     BINARY_DIR "${CMAKE_BINARY_DIR}/_deps/glfw-build"
     URL https://codeload.github.com/glfw/glfw/tar.gz/refs/tags/3.4
     URL_HASH SHA256=c038d34200234d071fae9345bc455e4a8f2f544ab60150765d7704e08f3dac01
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
-FetchContent_Declare(glm
-    SUBBUILD_DIR "${CMAKE_BINARY_DIR}/_deps/glm-subbuild"
-    DOWNLOAD_DIR "${PROJECT_SOURCE_DIR}/build/downloads"
-    DOWNLOAD_NAME glm.tar.gz
-    BINARY_DIR "${CMAKE_BINARY_DIR}/_deps/glm-build"
-    URL https://codeload.github.com/g-truc/glm/tar.gz/refs/tags/1.0.1
-    URL_HASH SHA256=9f3174561fd26904b23f0db5e560971cbf9b3cbda0b280f04d5c379d03bf234c
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
 FetchContent_Declare(assimp
     SUBBUILD_DIR "${CMAKE_BINARY_DIR}/_deps/assimp-subbuild"
@@ -64,7 +54,7 @@ FetchContent_Declare(stb
     URL_HASH SHA256=a6c31950b3bdf05eb92258768ba2a11bd44449490574b1aac67028452288c40d
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
 
-FetchContent_MakeAvailable(glfw glm assimp imgui stb)
+FetchContent_MakeAvailable(glfw assimp imgui stb)
 include("${CMAKE_CURRENT_LIST_DIR}/ApplyAssimpMmdPatch.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/ApplyImGuiVulkanPatch.cmake")
 

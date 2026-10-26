@@ -85,8 +85,8 @@ void mapped(const ModelData& value, std::size_t index, const fs::path& image) {
             used = true;
             for (const auto& vertex : mesh.vertices)
                 require(std::abs(vertex.tangent.w) == 1 &&
-                            std::abs(glm::length(glm::vec3(vertex.tangent)) - 1) < 0.001f &&
-                            std::abs(glm::dot(vertex.normal, glm::vec3(vertex.tangent))) < 0.001f,
+                            std::abs(aeg::math::length(aeg::math::Vec3(vertex.tangent)) - 1) < 0.001f &&
+                            std::abs(aeg::math::dot(vertex.normal, aeg::math::Vec3(vertex.tangent))) < 0.001f,
                         "common material preparation builds finite orthogonal EMD tangent frames");
         }
     require(used, "expected EMD material is visible geometry");

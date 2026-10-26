@@ -6,6 +6,7 @@
 #include <bit>
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <functional>
 #include <iostream>
@@ -55,8 +56,9 @@ void frames(const ModelData& model, bool usable = true) {
                 require(v.tangent.w == 0, "unusable UV basis requests geometric-normal fallback");
                 continue;
             }
-            require(close(glm::length(glm::vec3(v.tangent)), 1) &&
-                        std::abs(glm::dot(v.normal, glm::vec3(v.tangent))) < 0.001f && std::abs(v.tangent.w) == 1,
+            require(close(aeg::math::length(aeg::math::Vec3(v.tangent)), 1) &&
+                        std::abs(aeg::math::dot(v.normal, aeg::math::Vec3(v.tangent))) < 0.001f &&
+                        std::abs(v.tangent.w) == 1,
                     "usable tangent is unit, perpendicular to the normal and signed");
         }
 }
@@ -199,10 +201,23 @@ void formatIndependentAssignment() {
 }
 
 bool sameFloat(float a, float b) { return std::bit_cast<std::uint32_t>(a) == std::bit_cast<std::uint32_t>(b); }
-template <glm::length_t Size> bool sameVector(const glm::vec<Size, float>& a, const glm::vec<Size, float>& b) {
-    for (glm::length_t i = 0; i < Size; ++i)
+template <typename Vector> bool sameVector(const Vector& a, const Vector& b) {
+    for (std::size_t i = 0; i < Vector::component_count; ++i)
         if (!sameFloat(a[i], b[i])) return false;
     return true;
+}
+void semanticVectorComparison() {
+    aeg::math::Vec3 a{1, 2, 3}, b{1, 2, 3};
+    const float poison = std::numeric_limits<float>::quiet_NaN();
+    // Vec3's fourth lane is object padding, never a geometry component.
+    std::memcpy(reinterpret_cast<unsigned char*>(&a) + 3 * sizeof(float), &poison, sizeof(poison));
+    const float otherPadding = -100;
+    std::memcpy(reinterpret_cast<unsigned char*>(&b) + 3 * sizeof(float), &otherPadding, sizeof(otherPadding));
+    require(sameVector(a, b), "transaction comparisons ignore Vec3 padding");
+    require(a == b && aeg::math::is_finite(a) && close(aeg::math::length(a), std::sqrt(14.0f)),
+            "geometry equality, finiteness and length ignore Vec3 padding");
+    b.z = 4;
+    require(!sameVector(a, b), "transaction comparisons include every semantic Vec3 component");
 }
 bool sameImage(const aeg::assets::ImageData& a, const aeg::assets::ImageData& b) {
     return a.width == b.width && a.height == b.height && a.rgba == b.rgba;
@@ -367,7 +382,7 @@ void assignmentFailures() {
         if (failure == 1) mesh.indices.pop_back();
         if (failure == 2) mesh.materialIndex = 0xffffffffu;
         if (failure == 3) mesh.vertices[0].position.x = std::numeric_limits<float>::infinity();
-        if (failure == 4) mesh.vertices[0].normal = glm::vec3(0);
+        if (failure == 4) mesh.vertices[0].normal = aeg::math::Vec3(0);
         if (failure == 5) mesh.vertices[0].uv.x = std::numeric_limits<float>::quiet_NaN();
         if (failure == 6) mesh.vertices.clear();
         if (failure == 7) mesh.indices.clear();
@@ -384,6 +399,7 @@ void assignmentFailures() {
 int main() {
     int failures = 0;
     const std::vector<std::pair<const char*, std::function<void()>>> tests{
+        {"semantic vector rollback comparisons", semanticVectorComparison},
         {"normal image and scale imports", importedImages},
         {"finite normal scales", normalScales},
         {"normal material fallbacks", materialFallbacks},

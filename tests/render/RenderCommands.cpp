@@ -1,6 +1,8 @@
 #include <Renderer.hpp>
 #include "../rhi/fake/FakeDevice.hpp"
 #include <iostream>
+#include <cstring>
+#include <array>
 
 namespace {
 void require(bool condition, const char* message) {
@@ -252,6 +254,91 @@ int main(int argc, char** argv) {
                 "Plain single-sample output is not the scene color attachment");
         renderer.frameSubmitted();
         require(renderer.temporalFrameCount() == 0, "Non-temporal frame advanced history");
+        // Pin the shader ABI independently from the private uniform declaration.
+        require(device.uniform->bytes.size() == 384, "Scene uniform ABI must be 384 bytes");
+        const auto uploaded = [&]<class T>(std::size_t offset) {
+            T value{};
+            std::memcpy(&value, device.uniform->bytes.data() + offset, sizeof(T));
+            return value;
+        };
+        const auto& vertexInput = pass(scene, 0).pipeline;
+        require(vertexInput.vertexStride == 64 && vertexInput.attributes.size() == 4,
+                "Scene vertex ABI stride or attribute count changed");
+        constexpr std::array<unsigned, 4> offsets{0, 16, 32, 48};
+        constexpr std::array formats{rhi::VertexFormat::Float3, rhi::VertexFormat::Float3,
+                                     rhi::VertexFormat::Float2, rhi::VertexFormat::Float4};
+        for (unsigned i = 0; i < 4; ++i)
+            require(vertexInput.attributes[i].location == i && vertexInput.attributes[i].offset == offsets[i] &&
+                        vertexInput.attributes[i].format == formats[i], "Scene vertex attribute ABI changed");
+        require(pass(scene, 0).clears.at(1).depth == 1 && vertexInput.depthCompare == rhi::DepthCompare::Less,
+                "Normal Z must clear one and compare Less");
+        const auto originalPass = pass(scene, 0).pass;
+        const auto originalFrame = pass(scene, 0).framebuffer.attachments;
+        for (const bool yDown : {false, true})
+            for (const bool reversed : {false, true}) {
+                const math::ClipSpaceConvention convention{yDown, reversed};
+                const camera::RenderCamera camera{math::look_at({1, 2, 4}, {0, 0, 0}, {0, 1, 0}),
+                    math::perspective(0.9f, 17.0f / 13, 0.1f, 100, convention), convention};
+                settings.set_camera(camera);
+                tests::FakeCommands conventions;
+                renderer.recordFrame(conventions, settings);
+                auto expected = settings.viewProjection;
+                if (!yDown) {
+                    auto reflection = math::identity();
+                    reflection[1][1] = -1;
+                    expected = reflection * expected;
+                }
+                require(uploaded.template operator()<math::Mat4>(0) == expected &&
+                            uploaded.template operator()<math::Mat4>(304) == expected,
+                        "Renderer did not canonicalize incoming projection Y exactly once");
+                require(uploaded.template operator()<math::Vec4>(160) == math::Vec4(1, reversed ? 1.0f : 0.0f,
+                                                                                  1, reversed ? 1.0f : 0.0f),
+                        "Uploaded clip metadata does not describe canonical current/previous matrices");
+                const auto& recorded = pass(conventions, 0);
+                require(recorded.pass == originalPass && recorded.framebuffer.attachments == originalFrame,
+                        "Depth convention switch replaced a framebuffer-compatible scene pass");
+                require(recorded.clears.at(1).depth == (reversed ? 0.0f : 1.0f) &&
+                            recorded.pipeline.depthCompare == (reversed ? rhi::DepthCompare::Greater
+                                                                        : rhi::DepthCompare::Less),
+                        "Reversed Z clear and pipeline comparison disagree");
+                renderer.frameSubmitted();
+            }
+        renderer.setAntialiasing({1, true, true});
+        const auto temporalValid = [](const tests::FakeCommands& commands) {
+            for (const auto& bytes : commands.constants)
+                if (bytes.size() == 16) {
+                    std::uint32_t value{};
+                    std::memcpy(&value, bytes.data() + 12, sizeof(value));
+                    return value;
+                }
+            throw std::runtime_error("Temporal push constants missing");
+        };
+        tests::FakeCommands historyFirst;
+        renderer.recordFrame(historyFirst, settings);
+        require(temporalValid(historyFirst) == 0, "First temporal frame used stale history");
+        renderer.frameSubmitted();
+        settings.model = math::translation({0.1f, 0, 0});
+        settings.viewProjection = math::translation({0.02f, -0.03f, 0}) * settings.viewProjection;
+        const auto previousProjection = uploaded.template operator()<math::Mat4>(304);
+        tests::FakeCommands historySecond;
+        renderer.recordFrame(historySecond, settings);
+        require(temporalValid(historySecond) == 1 &&
+                    uploaded.template operator()<math::Mat4>(176) == previousProjection,
+                "Temporal history lost the previous canonical projection");
+        renderer.frameSubmitted();
+        for (const bool toggleY : {true, false}) {
+            const auto next = math::ClipSpaceConvention{
+                toggleY ? !settings.clipSpace.y_down : settings.clipSpace.y_down,
+                toggleY ? settings.clipSpace.reversed_z : !settings.clipSpace.reversed_z};
+            settings.set_camera({math::identity(), math::perspective(0.9f, 17.0f / 13, 0.1f, 100, next), next});
+            tests::FakeCommands changed;
+            renderer.recordFrame(changed, settings);
+            require(temporalValid(changed) == 0, "Clip convention change sampled stale temporal history");
+            require(uploaded.template operator()<math::Mat4>(176) == uploaded.template operator()<math::Mat4>(304),
+                    "History reset did not replace previous matrix with current canonical matrix");
+            renderer.frameSubmitted();
+            require(renderer.temporalFrameCount() == 1, "Clip convention change did not reset history count");
+        }
         std::cout << "PASS backend-independent Renderer commands and temporal submission contracts\n";
         return 0;
     } catch (const std::exception& error) {

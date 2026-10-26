@@ -67,7 +67,7 @@ void Renderer::Impl::createDescriptors() {
     sceneDescriptor = device.createBindingSet(*sceneLayout, writes);
     pipelineLayout =
         device.createPipelineLayout({{sceneLayout.get(), materialLayout.get()}, sizeof(MaterialPush), Fragment});
-    postLayout = device.createPipelineLayout({{postSetLayout.get()}, sizeof(glm::vec2), Fragment});
+    postLayout = device.createPipelineLayout({{postSetLayout.get()}, sizeof(aeg::math::Vec2), Fragment});
     if (temporalSupported) {
         temporalSetLayout = device.createBindingLayout({{{0, CombinedTextureSampler, Fragment},
                                                          {1, CombinedTextureSampler, Fragment},

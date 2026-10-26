@@ -43,6 +43,7 @@ struct VertexAttribute {
     std::uint32_t location{}, offset{};
     VertexFormat format{VertexFormat::Float3};
 };
+enum class DepthCompare { Less, Greater };
 struct GraphicsPipelineDesc {
     RenderPass* pass{};
     PipelineLayout* layout{};
@@ -53,6 +54,7 @@ struct GraphicsPipelineDesc {
     std::uint32_t samples{1};
     std::uint32_t colorAttachmentCount{1};
     bool depthTest{}, depthWrite{};
+    DepthCompare depthCompare{DepthCompare::Less};
 };
 class GraphicsPipeline {
 public:
