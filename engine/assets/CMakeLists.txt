@@ -2,9 +2,12 @@ add_library(aeg_assets STATIC
     public/ModelData.hpp
     public/ModelImporter.hpp
     public/MaterialTextures.hpp
+    public/MaterialProperties.hpp
     private/ModelData.cpp
     private/ModelImporter.cpp
     private/material/MaterialTextures.cpp
+    private/material/MaterialProperties.cpp
+    private/material/ImportedAlpha.cpp
     private/material/NormalMapDiscovery.cpp
     private/material/effects/EffectNormalTexture.cpp
     private/mmd/MmdEffectNormals.cpp

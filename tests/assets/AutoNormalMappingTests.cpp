@@ -106,7 +106,7 @@ bool sameImage(const ImageData& a, const ImageData& b) {
 }
 bool sameMaterial(const MaterialData& a, const MaterialData& b) {
     return a.name == b.name && a.baseColor == b.baseColor && sameImage(a.texture, b.texture) &&
-           a.hasTexture == b.hasTexture && a.alphaMasked == b.alphaMasked && a.alphaCutoff == b.alphaCutoff &&
+           a.hasTexture == b.hasTexture && a.alphaMode == b.alphaMode && a.alphaCutoff == b.alphaCutoff &&
            sameImage(a.normalTexture, b.normalTexture) && a.hasNormalMap == b.hasNormalMap &&
            a.normalScale == b.normalScale && a.normalTextureSource == b.normalTextureSource &&
            a.baseTexturePath == b.baseTexturePath && a.normalTextureDeclared == b.normalTextureDeclared;

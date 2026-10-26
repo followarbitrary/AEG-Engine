@@ -27,12 +27,12 @@ static_assert(offsetof(SceneUniform, currentViewProjection) == 304 && offsetof(S
 struct MaterialPush {
     aeg::math::Vec4 color{1};
     float alphaCutoff{0.5f};
-    std::uint32_t alphaMasked{};
+    std::uint32_t alphaMode{};
     float normalScale{1};
     std::uint32_t hasNormalMap{};
 };
 static_assert(std::is_standard_layout_v<MaterialPush> && std::is_trivially_copyable_v<MaterialPush>);
 static_assert(alignof(MaterialPush) == 16 && sizeof(MaterialPush) == 32 && offsetof(MaterialPush, color) == 0);
-static_assert(offsetof(MaterialPush, alphaCutoff) == 16 && offsetof(MaterialPush, alphaMasked) == 20);
+static_assert(offsetof(MaterialPush, alphaCutoff) == 16 && offsetof(MaterialPush, alphaMode) == 20);
 static_assert(offsetof(MaterialPush, normalScale) == 24 && offsetof(MaterialPush, hasNormalMap) == 28);
 }

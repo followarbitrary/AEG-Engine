@@ -55,12 +55,12 @@ struct Renderer::Impl {
     void createDescriptors();
     void createScenePass(ScenePipeline& target);
     void createPostPass();
-    std::unique_ptr<rhi::GraphicsPipeline> createPipeline(rhi::RenderPass& pass, rhi::PipelineLayout& layout,
-                                                          std::uint32_t samples, bool scene, detail::ShaderId vertexId,
-                                                          detail::ShaderId fragmentId,
-                                                          std::uint32_t colorAttachmentCount = 1,
-                                                          rhi::DepthCompare depthCompare = rhi::DepthCompare::Less);
-    ScenePipeline& scenePipeline(std::uint32_t samples, bool temporal = false, bool reversed = false);
+    std::unique_ptr<rhi::GraphicsPipeline>
+    createPipeline(rhi::RenderPass& pass, rhi::PipelineLayout& layout, std::uint32_t samples, bool scene,
+                   detail::ShaderId vertexId, detail::ShaderId fragmentId, std::uint32_t colorAttachmentCount = 1,
+                   rhi::DepthCompare depthCompare = rhi::DepthCompare::Less, bool transparent = false);
+    ScenePipeline& scenePipeline(std::uint32_t samples, bool temporal = false, bool reversed = false,
+                                 bool transparent = false);
     void resetTemporalHistory() noexcept;
     void invalidateOutput() noexcept;
     std::unique_ptr<ViewportTargets> createViewport(std::uint32_t width, std::uint32_t height,

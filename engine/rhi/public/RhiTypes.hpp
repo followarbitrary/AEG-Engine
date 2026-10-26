@@ -74,10 +74,12 @@ struct TextureSupport {
     std::uint32_t sampleMask{};
     Extent2D maximumExtent{};
     bool linearFiltering{};
+    bool colorBlending{};
 };
 struct DeviceCapabilities {
     std::uint32_t maximumImageDimension{1}, maximumFramebufferDimension{1}, maximumColorAttachments{1};
     Format depthFormat{Format::Undefined};
+    bool independentBlend{};
 };
 struct ClearValue {
     std::array<float, 4> color{};

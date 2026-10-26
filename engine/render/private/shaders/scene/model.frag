@@ -28,7 +28,7 @@ layout(set = 1, binding = 1) uniform sampler2D normalTexture;
 layout(push_constant) uniform Material {
     vec4 baseColor;
     float alphaCutoff;
-    uint alphaMasked;
+    uint alphaMode;
     float normalScale;
     uint hasNormalMap;
 }
@@ -36,7 +36,9 @@ material;
 #include "normal_mapping.glsl"
 void main() {
     vec4 base = texture(baseTexture, uv) * material.baseColor;
-    if (material.alphaMasked != 0 && base.a < material.alphaCutoff) discard;
+    if (material.alphaMode == 1 && base.a < material.alphaCutoff) discard;
+    float opacity = material.alphaMode == 2 ? clamp(base.a, 0.0, 1.0) : 1.0;
+    if (material.alphaMode == 2 && opacity <= 0.0) discard;
     vec3 n = normalize(normal);
     if (material.hasNormalMap != 0 && scene.parameters.z > 0.5 &&
         scene.parameters.w > 0.0 && scene.parameters.y < 0.5)
@@ -45,8 +47,14 @@ void main() {
     if (!gl_FrontFacing) n = -n;
     float diffuse = max(dot(n, -normalize(scene.lightDirection.xyz)), 0.0);
     float lighting = scene.parameters.y > 0.5 ? 1.0 : scene.parameters.x + (1.0 - scene.parameters.x) * diffuse;
-    outColor = vec4(base.rgb * lighting, 1.0);
+    outColor = vec4(base.rgb * lighting, opacity);
 #ifdef AEG_TAA
+    if (material.alphaMode == 2) {
+        // Blended surfaces do not own a single opaque depth or motion vector.
+        // This attachment is unblended; mark the covered pixels as reactive.
+        outMotionDepth = vec4(0.0, 0.0, -1.0, -2.0);
+        return;
+    }
     float currentNdcDepth = currentClip.z / currentClip.w;
     float currentDepth = scene.temporalInfo.z > 0.5 ? currentClip.w
         : (scene.clipConvention.y > 0.5 ? 1.0 - currentNdcDepth : currentNdcDepth);

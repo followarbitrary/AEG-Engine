@@ -82,4 +82,17 @@ void validate(const RenderPassDesc& desc) {
             throw std::invalid_argument("Invalid multisample resolve attachment");
     }
 }
+void validate(const GraphicsPipelineDesc& desc, bool independentBlend) {
+    samples(desc.samples);
+    if (!desc.colorAttachmentCount ||
+        (!desc.colorBlends.empty() && desc.colorBlends.size() != desc.colorAttachmentCount))
+        throw std::invalid_argument("Pipeline blend states must match the color attachment count");
+    for (const auto mode : desc.colorBlends)
+        if (mode != BlendMode::Opaque && mode != BlendMode::Alpha)
+            throw std::invalid_argument("Invalid color blend mode");
+    if (!independentBlend && !desc.colorBlends.empty())
+        for (const auto mode : desc.colorBlends)
+            if (mode != desc.colorBlends.front())
+                throw std::invalid_argument("Different attachment blending requires independent blend support");
+}
 }

@@ -3,6 +3,7 @@
 #include <iostream>
 #include <cstring>
 #include <array>
+#include <limits>
 
 namespace {
 void require(bool condition, const char* message) {
@@ -160,11 +161,150 @@ TemporalAttachments temporalAttachments(const tests::FakeCommands& commands, tes
     require(fxaaOutput(commands, 2, result.currentColor) == finalOutput, "Final output does not use FXAA framebuffer");
     return result;
 }
+void transparencyContracts() {
+    tests::FakeDevice device;
+    render::Renderer renderer(device);
+    renderer.resizeViewport(32, 32);
+    assets::ModelData model;
+    for (unsigned i = 0; i < 4; ++i) {
+        auto& material = model.materials.emplace_back();
+        material.baseColor = {static_cast<float>(i + 1), 0, 0, 0.5f};
+        material.alphaMode = i == 0 ? assets::AlphaMode::Mask : assets::AlphaMode::Blend;
+        auto& mesh = model.meshes.emplace_back();
+        const float z = -2.0f * static_cast<float>(i == 0 ? 1 : i);
+        mesh.vertices = {{{-1, -1, z}, {0, 0, 1}, {}}, {{1, -1, z}, {0, 0, 1}, {}}, {{0, 1, z}, {0, 0, 1}, {}}};
+        mesh.indices = {0, 1, 2};
+        mesh.materialIndex = i;
+    }
+    // Near transparent meshes deliberately precede far meshes in the source.
+    std::rotate(model.meshes.begin(), model.meshes.begin() + 1, model.meshes.end());
+    renderer.uploadModel(model);
+    for (const auto aa : {render::AntialiasingSettings{}, render::AntialiasingSettings{4, true, false},
+                          render::AntialiasingSettings{1, true, true}}) {
+        renderer.setAntialiasing(aa);
+        for (const bool perspective : {false, true})
+            for (const bool yDown : {false, true})
+                for (const bool reversed : {false, true})
+                    for (const float zScale : {1.0f, -1.0f}) {
+                        render::RenderSettings settings;
+                        const math::ClipSpaceConvention convention{yDown, reversed};
+                        const auto projection = perspective ? math::perspective(1, 1, 0.1f, 100, convention)
+                                                            : math::orthographic(-3, 3, -3, 3, 0.1f, 100, convention);
+                        settings.set_camera({math::look_at({0, 0, 10}, {0, 0, 0}, {0, 1, 0}), projection, convention});
+                        settings.model = math::scale({1, 1, zScale});
+                        tests::FakeCommands commands;
+                        renderer.recordFrame(commands, settings);
+                        const auto& draws = pass(commands, 0).draws;
+                        require(draws.size() == 4, "Transparency lost a mesh draw");
+                        for (unsigned i = 0; i < draws.size(); ++i) {
+                            const auto& draw = draws[i];
+                            require(draw.pipeline.depthTest && draw.pipeline.depthWrite == (i == 0),
+                                    "Transparent draws must test opaque depth without writing it");
+                            require(draw.pipeline.depthCompare ==
+                                        (reversed ? rhi::DepthCompare::Greater : rhi::DepthCompare::Less),
+                                    "Transparent comparison disagrees with the depth convention");
+                            const std::vector<rhi::BlendMode> blends =
+                                aa.taa ? std::vector{i == 0 ? rhi::BlendMode::Opaque : rhi::BlendMode::Alpha,
+                                                     rhi::BlendMode::Opaque}
+                                       : std::vector{i == 0 ? rhi::BlendMode::Opaque : rhi::BlendMode::Alpha};
+                            require(draw.pipeline.colorBlends == blends,
+                                    "Color blending or unblended temporal metadata changed");
+                            require(draw.constants.size() == 32, "Transparency changed the material push ABI");
+                            float identity{};
+                            std::memcpy(&identity, draw.constants.data(), sizeof(identity));
+                            const float expected = i == 0 ? 1.0f : zScale > 0 ? 5.0f - i : 1.0f + i;
+                            require(identity == expected, "Transparent meshes are not stably sorted far to near");
+                            std::uint32_t mode{};
+                            std::memcpy(&mode, draw.constants.data() + 20, sizeof(mode));
+                            require(mode ==
+                                        std::to_underlying(i == 0 ? assets::AlphaMode::Mask : assets::AlphaMode::Blend),
+                                    "Material alpha mode no longer occupies offset20");
+                        }
+                        renderer.frameSubmitted();
+                    }
+    }
+    renderer.setAntialiasing({});
+    const auto verifyRetained = [&] {
+        tests::FakeCommands commands;
+        renderer.recordFrame(commands, {});
+        require(pass(commands, 0).draws.size() == 4, "Invalid alpha upload replaced the previous model");
+        renderer.frameSubmitted();
+    };
+    for (const float alpha : {-0.1f, 1.1f, std::numeric_limits<float>::quiet_NaN()}) {
+        auto invalid = model;
+        invalid.materials[0].baseColor.w = alpha;
+        rejects([&] { renderer.uploadModel(invalid); }, "Invalid opacity was uploaded");
+        verifyRetained();
+    }
+    for (const float cutoff : {-0.1f, std::numeric_limits<float>::infinity()}) {
+        auto invalid = model;
+        invalid.materials[0].alphaCutoff = cutoff;
+        rejects([&] { renderer.uploadModel(invalid); }, "Invalid alpha cutoff was uploaded");
+        verifyRetained();
+    }
+    auto invalid = model;
+    invalid.materials[0].alphaMode = static_cast<assets::AlphaMode>(99);
+    rejects([&] { renderer.uploadModel(invalid); }, "Invalid alpha mode was uploaded");
+    verifyRetained();
+    invalid = model;
+    invalid.meshes[0].vertices[0].position.x = std::numeric_limits<float>::infinity();
+    rejects([&] { renderer.uploadModel(invalid); }, "Nonfinite sort center was uploaded");
+    verifyRetained();
+    tests::FakeDevice limited;
+    limited.caps.independentBlend = false;
+    render::Renderer fallback(limited);
+    require(!fallback.supportsTemporalAA(), "TAA ignored missing independent blend support");
+    fallback.uploadModel(model);
+    rejects([&] { fallback.setAntialiasing({1, false, true}); }, "Unsupported independent blending enabled TAA");
+    tests::FakeCommands fallbackDraw;
+    fallback.recordFrame(fallbackDraw, {});
+    require(pass(fallbackDraw, 0).draws.size() == 4, "Missing independent blending disabled ordinary transparency");
+    tests::FakeDevice pipelineDevice;
+    render::Renderer transactional(pipelineDevice);
+    auto opaqueModel = model;
+    for (auto& material : opaqueModel.materials) material.alphaMode = assets::AlphaMode::Opaque;
+    transactional.uploadModel(opaqueModel);
+    tests::FakeCommands before;
+    transactional.recordFrame(before, {});
+    transactional.frameSubmitted();
+    const auto displayed = transactional.outputTexture();
+    const auto verifyOpaqueRetained = [&] {
+        tests::FakeCommands commands;
+        transactional.recordFrame(commands, {});
+        for (const auto& draw : pass(commands, 0).draws)
+            require(draw.pipeline.depthWrite, "Failed transparent upload replaced the old opaque model");
+        require(transactional.outputTexture() == displayed, "Failed transparent upload discarded displayed output");
+        transactional.frameSubmitted();
+    };
+    pipelineDevice.failPipeline = true;
+    rejects([&] { transactional.uploadModel(model); }, "Transparent pipeline allocation failure was deferred");
+    verifyOpaqueRetained();
+    pipelineDevice.colorBlending = false;
+    rejects([&] { transactional.uploadModel(model); }, "Unsupported transparent pipeline was committed");
+    verifyOpaqueRetained();
+    pipelineDevice.colorBlending = true;
+    // Prepare the opaque temporal pipeline, leaving only its transparent variant lazy.
+    transactional.setAntialiasing({1, false, true});
+    transactional.setAntialiasing({});
+    transactional.uploadModel(model);
+    tests::FakeCommands blended;
+    transactional.recordFrame(blended, {});
+    transactional.frameSubmitted();
+    const auto blendOutput = transactional.outputTexture();
+    pipelineDevice.failPipeline = true;
+    rejects([&] { transactional.setAntialiasing({1, false, true}); }, "Transparent AA pipeline failure was deferred");
+    require(!transactional.antialiasing().taa && transactional.outputTexture() == blendOutput,
+            "Failed transparent AA replacement changed AA settings or displayed output");
+    tests::FakeCommands recovered;
+    transactional.recordFrame(recovered, {});
+    require(pass(recovered, 0).draws.size() == 4, "Failed transparent AA replacement lost the model");
+}
 }
 int main(int argc, char** argv) {
     if (argc != 2) return 1;
     try {
         using namespace aeg;
+        transparencyContracts();
         tests::FakeDevice device;
         render::Renderer renderer(device);
         renderer.resizeViewport(17, 13);
@@ -265,11 +405,12 @@ int main(int argc, char** argv) {
         require(vertexInput.vertexStride == 64 && vertexInput.attributes.size() == 4,
                 "Scene vertex ABI stride or attribute count changed");
         constexpr std::array<unsigned, 4> offsets{0, 16, 32, 48};
-        constexpr std::array formats{rhi::VertexFormat::Float3, rhi::VertexFormat::Float3,
-                                     rhi::VertexFormat::Float2, rhi::VertexFormat::Float4};
+        constexpr std::array formats{rhi::VertexFormat::Float3, rhi::VertexFormat::Float3, rhi::VertexFormat::Float2,
+                                     rhi::VertexFormat::Float4};
         for (unsigned i = 0; i < 4; ++i)
             require(vertexInput.attributes[i].location == i && vertexInput.attributes[i].offset == offsets[i] &&
-                        vertexInput.attributes[i].format == formats[i], "Scene vertex attribute ABI changed");
+                        vertexInput.attributes[i].format == formats[i],
+                    "Scene vertex attribute ABI changed");
         require(pass(scene, 0).clears.at(1).depth == 1 && vertexInput.depthCompare == rhi::DepthCompare::Less,
                 "Normal Z must clear one and compare Less");
         const auto originalPass = pass(scene, 0).pass;
@@ -278,7 +419,8 @@ int main(int argc, char** argv) {
             for (const bool reversed : {false, true}) {
                 const math::ClipSpaceConvention convention{yDown, reversed};
                 const camera::RenderCamera camera{math::look_at({1, 2, 4}, {0, 0, 0}, {0, 1, 0}),
-                    math::perspective(0.9f, 17.0f / 13, 0.1f, 100, convention), convention};
+                                                  math::perspective(0.9f, 17.0f / 13, 0.1f, 100, convention),
+                                                  convention};
                 settings.set_camera(camera);
                 tests::FakeCommands conventions;
                 renderer.recordFrame(conventions, settings);
@@ -291,15 +433,15 @@ int main(int argc, char** argv) {
                 require(uploaded.template operator()<math::Mat4>(0) == expected &&
                             uploaded.template operator()<math::Mat4>(304) == expected,
                         "Renderer did not canonicalize incoming projection Y exactly once");
-                require(uploaded.template operator()<math::Vec4>(160) == math::Vec4(1, reversed ? 1.0f : 0.0f,
-                                                                                  1, reversed ? 1.0f : 0.0f),
+                require(uploaded.template operator()<math::Vec4>(160) ==
+                            math::Vec4(1, reversed ? 1.0f : 0.0f, 1, reversed ? 1.0f : 0.0f),
                         "Uploaded clip metadata does not describe canonical current/previous matrices");
                 const auto& recorded = pass(conventions, 0);
                 require(recorded.pass == originalPass && recorded.framebuffer.attachments == originalFrame,
                         "Depth convention switch replaced a framebuffer-compatible scene pass");
                 require(recorded.clears.at(1).depth == (reversed ? 0.0f : 1.0f) &&
-                            recorded.pipeline.depthCompare == (reversed ? rhi::DepthCompare::Greater
-                                                                        : rhi::DepthCompare::Less),
+                            recorded.pipeline.depthCompare ==
+                                (reversed ? rhi::DepthCompare::Greater : rhi::DepthCompare::Less),
                         "Reversed Z clear and pipeline comparison disagree");
                 renderer.frameSubmitted();
             }
@@ -327,9 +469,9 @@ int main(int argc, char** argv) {
                 "Temporal history lost the previous canonical projection");
         renderer.frameSubmitted();
         for (const bool toggleY : {true, false}) {
-            const auto next = math::ClipSpaceConvention{
-                toggleY ? !settings.clipSpace.y_down : settings.clipSpace.y_down,
-                toggleY ? settings.clipSpace.reversed_z : !settings.clipSpace.reversed_z};
+            const auto next =
+                math::ClipSpaceConvention{toggleY ? !settings.clipSpace.y_down : settings.clipSpace.y_down,
+                                          toggleY ? settings.clipSpace.reversed_z : !settings.clipSpace.reversed_z};
             settings.set_camera({math::identity(), math::perspective(0.9f, 17.0f / 13, 0.1f, 100, next), next});
             tests::FakeCommands changed;
             renderer.recordFrame(changed, settings);

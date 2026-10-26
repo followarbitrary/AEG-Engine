@@ -24,12 +24,13 @@ struct ImageData {
     std::uint32_t width{1}, height{1};
     std::vector<std::uint8_t> rgba{255, 255, 255, 255};
 };
+enum class AlphaMode : std::uint32_t { Opaque, Mask, Blend };
 struct MaterialData {
     std::string name;
     math::Vec4 baseColor{1};
     ImageData texture;
     bool hasTexture{false};
-    bool alphaMasked{false};
+    AlphaMode alphaMode{AlphaMode::Opaque};
     float alphaCutoff{0.5f};
     ImageData normalTexture{1, 1, {128, 128, 255, 255}}; // Linear RGB tangent-space normals.
     bool hasNormalMap{false};

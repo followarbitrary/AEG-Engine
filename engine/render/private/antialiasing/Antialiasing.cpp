@@ -22,7 +22,8 @@ void Renderer::Impl::setAntialiasing(const AntialiasingSettings& requested) {
         requested.msaaSamples != 8)
         throw std::invalid_argument("MSAA sample count must be 1, 2, 4 or 8");
     if (requested.taa && !temporalSupported)
-        throw std::runtime_error("TAA requires sampled RGBA32F motion, RGBA16F color and R32F depth attachments");
+        throw std::runtime_error("TAA requires independent attachment blending and sampled RGBA32F motion, RGBA16F "
+                                 "color and R32F depth attachments");
     AntialiasingSettings effective{1, requested.fxaa, requested.taa};
     if (!requested.taa)
         for (const auto samples : {8u, 4u, 2u, 1u})

@@ -90,22 +90,25 @@ void alphaModes() {
     for (const auto* filename : {"alpha-opaque.gltf", "alpha-default.gltf"}) {
         const auto model = aeg::assets::loadModel(fixture(filename));
         const auto& m = model.materials.at(model.meshes.at(0).materialIndex);
-        require(!m.alphaMasked && close(m.baseColor.w, 0),
+        require(m.alphaMode == aeg::assets::AlphaMode::Opaque && close(m.baseColor.w, 0),
                 "opaque mode preserves alpha factor without enabling discard");
         require(model.warnings.empty(), "opaque alpha is supported without warnings");
     }
     const auto mask = aeg::assets::loadModel(fixture("alpha-mask.gltf"));
     const auto& masked = mask.materials.at(mask.meshes.at(0).materialIndex);
-    require(masked.alphaMasked && close(masked.alphaCutoff, 0.5f) && close(masked.baseColor.w, 0.3f),
+    require(masked.alphaMode == aeg::assets::AlphaMode::Mask && close(masked.alphaCutoff, 0.5f) &&
+                close(masked.baseColor.w, 0.3f),
             "MASK uses default cutoff and preserves alpha factor");
     const auto custom = aeg::assets::loadModel(fixture("alpha-mask-custom.gltf"));
     const auto& customized = custom.materials.at(custom.meshes.at(0).materialIndex);
-    require(customized.alphaMasked && close(customized.alphaCutoff, 0.1f) && close(customized.baseColor.w, 0.3f),
+    require(customized.alphaMode == aeg::assets::AlphaMode::Mask && close(customized.alphaCutoff, 0.1f) &&
+                close(customized.baseColor.w, 0.3f),
             "MASK honors custom cutoff");
     const auto blend = aeg::assets::loadModel(fixture("alpha-blend.gltf"));
     const auto& blended = blend.materials.at(blend.meshes.at(0).materialIndex);
-    require(!blended.alphaMasked && close(blended.baseColor.w, 0.3f) && !blend.warnings.empty(),
-            "BLEND warns and uses opaque fallback");
+    require(blended.alphaMode == aeg::assets::AlphaMode::Blend && close(blended.baseColor.w, 0.3f) &&
+                blend.warnings.empty(),
+            "BLEND is supported and preserves alpha without a fallback warning");
 }
 void externalUriSpaces() {
     const auto model = aeg::assets::loadModel(fixture("uri-spaces.gltf"));
@@ -272,9 +275,9 @@ void pmxOpacity() {
     const auto& hidden = model.materials.at(model.meshes.at(1).materialIndex);
     require(close(partial.baseColor.w, 0.4f) && close(hidden.baseColor.w, 0),
             "PMX diffuse opacity is retained, including zero");
-    require(partial.alphaMasked && hidden.alphaMasked && close(partial.alphaCutoff, 0.1f) &&
-                close(hidden.alphaCutoff, 0.1f),
-            "PMX cutout metadata clips transparent texels and zero-opacity materials");
+    require(partial.alphaMode == aeg::assets::AlphaMode::Blend && hidden.alphaMode == aeg::assets::AlphaMode::Blend &&
+                close(partial.alphaCutoff, 0.1f) && close(hidden.alphaCutoff, 0.1f),
+            "PMX partial and zero opacity select blending");
     require(partial.hasTexture && partial.texture.width == 2 && partial.texture.height == 2 &&
                 partial.texture.rgba[3] == 0 && partial.texture.rgba[7] == 255 && partial.texture.rgba[11] == 255 &&
                 partial.texture.rgba[15] == 0,
@@ -282,7 +285,7 @@ void pmxOpacity() {
     bool opacityWarning = false;
     for (const auto& warning : model.warnings)
         opacityWarning |= warning.find("partial") != std::string::npos || warning.find("transluc") != std::string::npos;
-    require(opacityWarning, "PMX partial opacity warns that alpha blending is approximated");
+    require(!opacityWarning, "PMX partial opacity has no unsupported blending warning");
 }
 void pmxSignatureDetection() {
     auto temporary = std::filesystem::temp_directory_path() / "aeg-pmx-signature-";
@@ -301,7 +304,8 @@ void pmxSignatureDetection() {
     std::filesystem::copy_file(fixture("pmx-alpha.pmx"), renamed);
     const auto model = aeg::assets::loadModel(renamed);
     const auto& material = model.materials.at(model.meshes.at(0).materialIndex);
-    require(model.triangleCount() == 12 && material.alphaMasked && close(material.baseColor.w, 0.4f),
+    require(model.triangleCount() == 12 && material.alphaMode == aeg::assets::AlphaMode::Blend &&
+                close(material.baseColor.w, 0.4f),
             "signature-detected PMX uses PMX material rules regardless of extension");
     const auto invalid = temporary / "invalid.bin";
     std::filesystem::copy_file(fixture("pmx-bad-uv-header.pmx"), invalid);

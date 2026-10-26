@@ -5,6 +5,7 @@
 #include <ModelData.hpp>
 #include <ModelImporter.hpp>
 #include <MaterialTextures.hpp>
+#include <MaterialProperties.hpp>
 #include <RenderSettings.hpp>
 #include <AntialiasingSettings.hpp>
 #include <Renderer.hpp>
@@ -33,6 +34,8 @@ static_assert(
     std::is_same_v<decltype(&aeg::assets::loadModel), aeg::assets::ModelData (*)(const std::filesystem::path&)>);
 static_assert(std::is_same_v<decltype(&aeg::assets::prepareModelMaterials), void (*)(aeg::assets::ModelData&)>);
 static_assert(std::is_same_v<decltype(&aeg::assets::initializeModelMaterials), void (*)(aeg::assets::ModelData&)>);
+static_assert(std::is_same_v<decltype(&aeg::assets::setMaterialAlpha),
+                             void (*)(aeg::assets::ModelData&, std::size_t, aeg::assets::AlphaMode, float, float)>);
 static_assert(
     std::is_same_v<decltype(&aeg::assets::clearMaterialNormalMap), void (*)(aeg::assets::ModelData&, std::size_t)>);
 static_assert(std::is_same_v<decltype(&aeg::foundation::pathToUtf8), std::string (*)(const std::filesystem::path&)>);
@@ -66,6 +69,14 @@ void require(bool condition, const char* message) {
 }
 
 void publicCpuContracts() {
+    aeg::assets::ModelData alphaModel;
+    alphaModel.materials.emplace_back();
+    require(alphaModel.materials[0].alphaMode == aeg::assets::AlphaMode::Opaque,
+            "procedural materials default to opaque");
+    aeg::assets::setMaterialAlpha(alphaModel, 0, aeg::assets::AlphaMode::Blend, 0.25f);
+    require(alphaModel.materials[0].alphaMode == aeg::assets::AlphaMode::Blend &&
+                alphaModel.materials[0].baseColor.w == 0.25f,
+            "exported material alpha API changes the selected material");
     const auto path = std::filesystem::path(u8"models/\u6a21\u578b with spaces+%20.pmx");
     const auto encoded = aeg::foundation::pathToUtf8(path);
     require(aeg::foundation::pathFromUtf8(encoded) == path, "UTF-8 path round trip");

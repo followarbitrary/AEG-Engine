@@ -120,6 +120,7 @@ std::unique_ptr<Framebuffer> VulkanDevice::createFramebuffer(const FramebufferDe
     return result;
 }
 std::unique_ptr<GraphicsPipeline> VulkanDevice::createGraphicsPipeline(const GraphicsPipelineDesc& desc) {
+    validate(desc, caps.independentBlend);
     if (!desc.pass || !desc.layout || !desc.vertex || !desc.fragment)
         throw std::invalid_argument("Missing graphics pipeline resource");
     auto& pass = owned<VulkanRenderPass>(*this, *desc.pass);
@@ -188,14 +189,33 @@ std::unique_ptr<GraphicsPipeline> VulkanDevice::createGraphicsPipeline(const Gra
     depth.depthTestEnable = desc.depthTest;
     depth.depthWriteEnable = desc.depthWrite;
     switch (desc.depthCompare) {
-    case DepthCompare::Less: depth.depthCompareOp = VK_COMPARE_OP_LESS; break;
-    case DepthCompare::Greater: depth.depthCompareOp = VK_COMPARE_OP_GREATER; break;
-    default: throw std::invalid_argument("Invalid depth comparison");
+    case DepthCompare::Less:
+        depth.depthCompareOp = VK_COMPARE_OP_LESS;
+        break;
+    case DepthCompare::Greater:
+        depth.depthCompareOp = VK_COMPARE_OP_GREATER;
+        break;
+    default:
+        throw std::invalid_argument("Invalid depth comparison");
     }
     VkPipelineColorBlendAttachmentState attachment{};
     attachment.colorWriteMask =
         VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
     std::vector<VkPipelineColorBlendAttachmentState> blendAttachments(desc.colorAttachmentCount, attachment);
+    for (std::size_t i = 0; i < blendAttachments.size(); ++i) {
+        if (desc.colorBlends.empty() || desc.colorBlends[i] == BlendMode::Opaque) continue;
+        const auto format = pass.desc.attachments[pass.desc.colors[i]].format;
+        if (!textureSupport(format, TextureUsage::ColorAttachment).colorBlending)
+            throw std::invalid_argument("Color attachment format does not support blending");
+        auto& target = blendAttachments[i];
+        target.blendEnable = VK_TRUE;
+        target.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+        target.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        target.colorBlendOp = VK_BLEND_OP_ADD;
+        target.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        target.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        target.alphaBlendOp = VK_BLEND_OP_ADD;
+    }
     VkPipelineColorBlendStateCreateInfo blend{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
     blend.attachmentCount = desc.colorAttachmentCount;
     blend.pAttachments = blendAttachments.data();

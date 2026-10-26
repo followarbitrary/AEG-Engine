@@ -44,6 +44,7 @@ struct VertexAttribute {
     VertexFormat format{VertexFormat::Float3};
 };
 enum class DepthCompare { Less, Greater };
+enum class BlendMode { Opaque, Alpha };
 struct GraphicsPipelineDesc {
     RenderPass* pass{};
     PipelineLayout* layout{};
@@ -55,7 +56,10 @@ struct GraphicsPipelineDesc {
     std::uint32_t colorAttachmentCount{1};
     bool depthTest{}, depthWrite{};
     DepthCompare depthCompare{DepthCompare::Less};
+    // Empty means Opaque for every color attachment; otherwise one entry per attachment.
+    std::vector<BlendMode> colorBlends;
 };
+void validate(const GraphicsPipelineDesc& desc, bool independentBlend);
 class GraphicsPipeline {
 public:
     virtual ~GraphicsPipeline() = default;

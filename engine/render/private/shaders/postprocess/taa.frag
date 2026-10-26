@@ -20,6 +20,11 @@ void main() {
     vec3 minimumColor = current;
     vec3 maximumColor = current;
     vec4 selectedMotion = texelFetch(motionDepth, pixel, 0);
+    outColor = vec4(current, 1.0);
+    if (selectedMotion.w < -1.5) {
+        outDepth = -1.0;
+        return;
+    }
     bool foreground = selectedMotion.w >= 0.0;
 
     for (int y = -1; y <= 1; ++y) {
@@ -29,6 +34,12 @@ void main() {
             minimumColor = min(minimumColor, color);
             maximumColor = max(maximumColor, color);
             vec4 motion = texelFetch(motionDepth, neighbor, 0);
+            if (motion.w < -1.5) {
+                // Keep current transparent composition and prevent stale opaque
+                // history from leaking through jittered silhouette neighbors.
+                outDepth = -1.0;
+                return;
+            }
             // A neighboring foreground sample preserves jittered silhouette coverage.
             if (motion.w >= 0.0 && (!foreground || motion.w < selectedMotion.w)) {
                 selectedMotion = motion;
@@ -37,7 +48,6 @@ void main() {
         }
     }
 
-    outColor = vec4(current, 1.0);
     outDepth = foreground ? selectedMotion.w : -1.0;
     if (!foreground || temporal.historyValid == 0 || selectedMotion.z < 0.0) return;
 

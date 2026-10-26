@@ -224,7 +224,7 @@ bool sameImage(const aeg::assets::ImageData& a, const aeg::assets::ImageData& b)
 }
 bool sameMaterial(const aeg::assets::MaterialData& a, const aeg::assets::MaterialData& b) {
     return a.name == b.name && sameVector(a.baseColor, b.baseColor) && sameImage(a.texture, b.texture) &&
-           a.hasTexture == b.hasTexture && a.alphaMasked == b.alphaMasked && sameFloat(a.alphaCutoff, b.alphaCutoff) &&
+           a.hasTexture == b.hasTexture && a.alphaMode == b.alphaMode && sameFloat(a.alphaCutoff, b.alphaCutoff) &&
            sameImage(a.normalTexture, b.normalTexture) && a.hasNormalMap == b.hasNormalMap &&
            sameFloat(a.normalScale, b.normalScale) && a.normalTextureSource == b.normalTextureSource;
 }
@@ -278,7 +278,7 @@ void assignmentIsolation() {
             require(sameMesh(model.meshes[i], before.meshes[i]), "normal assignment preserves unrelated meshes");
     require(sameImage(model.materials[index].texture, before.materials[index].texture) &&
                 sameVector(model.materials[index].baseColor, before.materials[index].baseColor) &&
-                model.materials[index].alphaMasked == before.materials[index].alphaMasked,
+                model.materials[index].alphaMode == before.materials[index].alphaMode,
             "normal assignment preserves diffuse and alpha material policy");
     auto seam = load("normal-mirrored-uv.gltf");
     const auto seamIndex = seam.meshes[0].materialIndex;

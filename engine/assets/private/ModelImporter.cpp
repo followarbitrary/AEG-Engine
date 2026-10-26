@@ -4,6 +4,7 @@
 #include "ResourcePath.hpp"
 #include "assimp/AssimpFileSystem.hpp"
 #include "image/ImageDecoder.hpp"
+#include "material/ImportedAlpha.hpp"
 #include "mmd/MmdEffectNormals.hpp"
 #include "pmx/PmxValidation.hpp"
 #include <assimp/Importer.hpp>
@@ -31,8 +32,12 @@ bool finite(const math::Vec3& value) {
 }
 bool finite(const math::Vec4& value) { return finite(math::Vec3(value)) && std::isfinite(value.w); }
 
-std::unordered_set<std::string> transformedObjNormals(const std::vector<std::filesystem::path>& openedFiles) {
-    std::unordered_set<std::string> transformed;
+struct ObjTextureOptions {
+    std::unordered_set<std::string> transformedNormals;
+    std::unordered_set<std::string> unsupportedOpacity;
+};
+ObjTextureOptions readObjTextureOptions(const std::vector<std::filesystem::path>& openedFiles) {
+    ObjTextureOptions options;
     for (const auto& filename : openedFiles) {
         std::ifstream file(filename, std::ios::binary);
         if (!file) continue;
@@ -54,6 +59,15 @@ std::unordered_set<std::string> transformedObjNormals(const std::vector<std::fil
                 materialName = first == std::string::npos
                                    ? AI_DEFAULT_MATERIAL_NAME
                                    : materialName.substr(first, materialName.find_last_not_of(" \t\r") - first + 1);
+            } else if (directive == "map_d" && !materialName.empty()) {
+                // Assimp discards MTL map options. Composing a transformed,
+                // clamped or channel-selected opacity map into the base image
+                // would silently change its sampling semantics.
+                std::string first;
+                if (fields >> first && first.starts_with('-'))
+                    options.unsupportedOpacity.insert(materialName);
+                else
+                    options.unsupportedOpacity.erase(materialName);
             } else if ((directive == "norm" || directive == "map_kn") && !materialName.empty()) {
                 bool hasTransform = false;
                 std::string option;
@@ -75,13 +89,13 @@ std::unordered_set<std::string> transformedObjNormals(const std::vector<std::fil
                     }
                 }
                 if (hasTransform)
-                    transformed.insert(materialName);
+                    options.transformedNormals.insert(materialName);
                 else
-                    transformed.erase(materialName);
+                    options.transformedNormals.erase(materialName);
             }
         }
     }
-    return transformed;
+    return options;
 }
 }
 ModelData loadModel(const std::filesystem::path& input) {
@@ -107,7 +121,7 @@ ModelData loadModel(const std::filesystem::path& input) {
     if (!scene || !scene->mRootNode || (scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE))
         throw std::runtime_error("Cannot import " + foundation::pathToUtf8(path.filename()) + ": " +
                                  importer.GetErrorString());
-    const auto objNormalTransforms = transformedObjNormals(openedObjFiles);
+    const auto objTextureOptions = readObjTextureOptions(openedObjFiles);
     ModelData model;
     model.name = foundation::pathToUtf8(path.filename());
     model.source = path;
@@ -124,33 +138,6 @@ ModelData loadModel(const std::filesystem::path& input) {
         if (source.Get(AI_MATKEY_BASE_COLOR, color) != AI_SUCCESS) source.Get(AI_MATKEY_COLOR_DIFFUSE, color);
         material.baseColor = {color.r, color.g, color.b, color.a};
         if (!finite(material.baseColor)) throw std::runtime_error("Model contains a non-finite material color");
-        if (pmx) {
-            // Assimp's MMD importer stores diffuse RGB and opacity separately.
-            // Cutouts also apply to texture alpha when diffuse opacity is one.
-            float opacity = 1;
-            source.Get(AI_MATKEY_OPACITY, opacity);
-            if (!std::isfinite(opacity) || opacity < 0 || opacity > 1)
-                throw std::runtime_error("PMX material contains an invalid opacity");
-            material.baseColor.w = opacity;
-            material.alphaMasked = true;
-            material.alphaCutoff = 0.1f;
-            if (opacity > 0 && opacity < 1)
-                model.warnings.push_back("PMX material '" + material.name +
-                                         "' uses partial opacity; using alpha cutout (blending unavailable)");
-        }
-        aiString alphaMode;
-        if (source.Get(AI_MATKEY_GLTF_ALPHAMODE, alphaMode) == AI_SUCCESS) {
-            const std::string_view mode(alphaMode.C_Str());
-            if (mode == "MASK") {
-                material.alphaMasked = true;
-                source.Get(AI_MATKEY_GLTF_ALPHACUTOFF, material.alphaCutoff);
-                if (!std::isfinite(material.alphaCutoff) || material.alphaCutoff < 0)
-                    throw std::runtime_error("Model contains an invalid alpha cutoff");
-            } else if (mode == "BLEND") {
-                model.warnings.push_back("Material '" + material.name +
-                                         "' uses unsupported BLEND alpha; using opaque fallback");
-            }
-        }
         aiString texture;
         if (source.GetTexture(aiTextureType_BASE_COLOR, 0, &texture) == AI_SUCCESS ||
             source.GetTexture(aiTextureType_DIFFUSE, 0, &texture) == AI_SUCCESS) {
@@ -163,6 +150,8 @@ ModelData loadModel(const std::filesystem::path& input) {
                                          "' unavailable; using white: " + e.what());
             }
         }
+        detail::applyImportedAlpha(*scene, source, i, material, model, pmx,
+                                   objTextureOptions.unsupportedOpacity.contains(material.name));
         // HEIGHT contains scalar bump data, including OBJ map_bump/bump. It
         // must never be decoded as an RGB tangent-space normal texture.
         if (obj && source.GetTextureCount(aiTextureType_HEIGHT) > 0)
@@ -179,7 +168,7 @@ ModelData loadModel(const std::filesystem::path& input) {
             if (mapping != aiTextureMapping_UV || uvIndex != 0) {
                 model.warnings.push_back("Normal texture for material '" + material.name +
                                          "' requires unsupported texture coordinates; only UV0 is supported");
-            } else if (objNormalTransforms.contains(material.name) ||
+            } else if (objTextureOptions.transformedNormals.contains(material.name) ||
                        source.Get(AI_MATKEY_UVTRANSFORM(aiTextureType_NORMALS, 0), transform) == AI_SUCCESS) {
                 model.warnings.push_back("Normal texture for material '" + material.name +
                                          "' uses an unsupported UV transform; keeping vertex normals");

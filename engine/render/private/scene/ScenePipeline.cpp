@@ -4,7 +4,7 @@ namespace aeg::render {
 std::unique_ptr<rhi::GraphicsPipeline>
 Renderer::Impl::createPipeline(rhi::RenderPass& pass, rhi::PipelineLayout& layout, std::uint32_t samples, bool scene,
                                detail::ShaderId vertexId, detail::ShaderId fragmentId,
-                               std::uint32_t colorAttachmentCount, rhi::DepthCompare depthCompare) {
+                               std::uint32_t colorAttachmentCount, rhi::DepthCompare depthCompare, bool transparent) {
     const auto vertexCode = detail::embeddedShader(vertexId);
     const auto fragmentCode = detail::embeddedShader(fragmentId);
     auto vertex = device.createShader({rhi::ShaderStage::Vertex, rhi::ShaderFormat::Spirv, vertexCode});
@@ -16,8 +16,11 @@ Renderer::Impl::createPipeline(rhi::RenderPass& pass, rhi::PipelineLayout& layou
     desc.fragment = fragment.get();
     desc.samples = samples;
     desc.colorAttachmentCount = colorAttachmentCount;
-    desc.depthTest = desc.depthWrite = scene;
+    desc.depthTest = scene;
+    desc.depthWrite = scene && !transparent;
     desc.depthCompare = depthCompare;
+    desc.colorBlends.assign(colorAttachmentCount, rhi::BlendMode::Opaque);
+    if (transparent) desc.colorBlends[0] = rhi::BlendMode::Alpha;
     if (scene) {
         desc.vertexStride = sizeof(Vertex);
         desc.attributes = {{0, static_cast<std::uint32_t>(offsetof(Vertex, position)), rhi::VertexFormat::Float3},
@@ -28,7 +31,7 @@ Renderer::Impl::createPipeline(rhi::RenderPass& pass, rhi::PipelineLayout& layou
     return device.createGraphicsPipeline(desc);
 }
 
-ScenePipeline& Renderer::Impl::scenePipeline(std::uint32_t samples, bool temporal, bool reversed) {
+ScenePipeline& Renderer::Impl::scenePipeline(std::uint32_t samples, bool temporal, bool reversed, bool transparent) {
     auto& cached = temporal ? temporalScene : scenePipelines[std::countr_zero(samples)];
     if (!cached) {
         auto candidate = std::make_unique<ScenePipeline>();
@@ -37,13 +40,14 @@ ScenePipeline& Renderer::Impl::scenePipeline(std::uint32_t samples, bool tempora
         createScenePass(*candidate);
         cached = std::move(candidate);
     }
-    auto& pipeline = reversed ? cached->greater : cached->less;
+    auto& pipeline = transparent ? (reversed ? cached->blendGreater : cached->blendLess)
+                                 : (reversed ? cached->greater : cached->less);
     if (!pipeline)
-        pipeline = createPipeline(
-            *cached->pass, *pipelineLayout, samples, true,
-            temporal ? detail::ShaderId::ModelTaaVertex : detail::ShaderId::ModelVertex,
-            temporal ? detail::ShaderId::ModelTaaFragment : detail::ShaderId::ModelFragment, temporal ? 2u : 1u,
-            reversed ? rhi::DepthCompare::Greater : rhi::DepthCompare::Less);
+        pipeline = createPipeline(*cached->pass, *pipelineLayout, samples, true,
+                                  temporal ? detail::ShaderId::ModelTaaVertex : detail::ShaderId::ModelVertex,
+                                  temporal ? detail::ShaderId::ModelTaaFragment : detail::ShaderId::ModelFragment,
+                                  temporal ? 2u : 1u, reversed ? rhi::DepthCompare::Greater : rhi::DepthCompare::Less,
+                                  transparent);
     return *cached;
 }
 }

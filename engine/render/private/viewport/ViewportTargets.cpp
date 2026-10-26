@@ -4,6 +4,12 @@ namespace aeg::render {
 std::unique_ptr<ViewportTargets> Renderer::Impl::createViewport(std::uint32_t width, std::uint32_t height,
                                                                 const AntialiasingSettings& settings) {
     auto& scene = scenePipeline(settings.msaaSamples, settings.taa);
+    if (model && std::ranges::any_of(model->materials, [](const auto& material) {
+            return material.parameters.alphaMode == static_cast<std::uint32_t>(assets::AlphaMode::Blend);
+        })) {
+        scenePipeline(settings.msaaSamples, settings.taa, false, true);
+        scenePipeline(settings.msaaSamples, settings.taa, true, true);
+    }
     auto candidate = std::make_unique<ViewportTargets>();
     candidate->width = width;
     candidate->height = height;

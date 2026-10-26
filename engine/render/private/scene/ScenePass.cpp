@@ -68,7 +68,7 @@ SceneUniform Renderer::Impl::sceneUniform(const RenderSettings& settings) {
             return value;
         };
         const aeg::math::Vec2 inverse{1.0f / static_cast<float>(viewport->width),
-                                1.0f / static_cast<float>(viewport->height)};
+                                      1.0f / static_cast<float>(viewport->height)};
         auto jitter = aeg::math::identity();
         jitter[3][0] = 2 * (halton(recordingHistory.jitterIndex + 1, 2) - 0.5f) * inverse.x;
         jitter[3][1] = 2 * (halton(recordingHistory.jitterIndex + 1, 3) - 0.5f) * inverse.y;
@@ -77,8 +77,10 @@ SceneUniform Renderer::Impl::sceneUniform(const RenderSettings& settings) {
         uniform.previousViewProjection =
             recordingHistory.valid ? backendProjection(recordingHistory.previous) : currentProjection;
         uniform.previousModel = recordingHistory.valid ? recordingHistory.previous.model : settings.model;
-        uniform.clipConvention.w = (recordingHistory.valid ? recordingHistory.previous.clipSpace.reversed_z
-                                                          : settings.clipSpace.reversed_z) ? 1.0f : 0.0f;
+        uniform.clipConvention.w =
+            (recordingHistory.valid ? recordingHistory.previous.clipSpace.reversed_z : settings.clipSpace.reversed_z)
+                ? 1.0f
+                : 0.0f;
         uniform.temporalInfo = {
             inverse.x, inverse.y, perspective ? 1.0f : 0.0f,
             (recordingHistory.valid ? perspectiveProjection(recordingHistory.previous.viewProjection) : perspective)
@@ -91,6 +93,32 @@ SceneUniform Renderer::Impl::sceneUniform(const RenderSettings& settings) {
 void Renderer::Impl::drawScene(rhi::CommandList& commands, const RenderSettings& settings) {
     auto& scene = scenePipeline(aa.msaaSamples, aa.taa, settings.clipSpace.reversed_z);
     const auto uniform = sceneUniform(settings);
+    struct TransparentDraw {
+        const GpuMesh* mesh;
+        double depth;
+    };
+    std::vector<TransparentDraw> transparent;
+    if (model) {
+        const auto transform = uniform.currentViewProjection * settings.model;
+        for (const auto& mesh : model->meshes) {
+            if (model->materials[mesh.material].parameters.alphaMode !=
+                static_cast<std::uint32_t>(assets::AlphaMode::Blend))
+                continue;
+            const auto clip = transform * math::Vec4(mesh.center, 1);
+            double depth = 0;
+            if (math::is_finite(clip) && clip.w != 0) {
+                depth = static_cast<double>(clip.z) / clip.w;
+                if (settings.clipSpace.reversed_z) depth = 1 - depth;
+            }
+            transparent.push_back({&mesh, depth});
+        }
+        // Mesh-center sorting is stable for equal depths. Intersecting meshes and
+        // overlapping triangles inside one mesh still require more advanced transparency.
+        std::stable_sort(transparent.begin(), transparent.end(),
+                         [](const auto& left, const auto& right) { return left.depth > right.depth; });
+    }
+    // Finish allocations and lazy pipeline creation before beginning a command pass.
+    if (!transparent.empty()) scenePipeline(aa.msaaSamples, aa.taa, settings.clipSpace.reversed_z, true);
     std::memcpy(uniformBuffer->mapped().data(), &uniform, sizeof(uniform));
     std::array<rhi::ClearValue, 3> clears{};
     clears[0].color = {settings.background.x, settings.background.y, settings.background.z, 1};
@@ -101,15 +129,25 @@ void Renderer::Impl::drawScene(rhi::CommandList& commands, const RenderSettings&
     commands.setViewport(viewport->extent());
     commands.bindPipeline(*(settings.clipSpace.reversed_z ? scene.greater : scene.less));
     commands.bindSet(*pipelineLayout, 0, *sceneDescriptor);
-    if (model)
-        for (auto& mesh : model->meshes) {
-            auto& material = model->materials[mesh.material];
+    if (model) {
+        const auto drawMesh = [&](const GpuMesh& mesh) {
+            const auto& material = model->materials[mesh.material];
             commands.bindVertexBuffer(*mesh.vertices);
             commands.bindIndexBuffer(*mesh.indices);
             commands.bindSet(*pipelineLayout, 1, *material.descriptor);
             commands.pushConstants(*pipelineLayout, std::as_bytes(std::span(&material.parameters, 1)));
             commands.drawIndexed(mesh.indexCount);
+        };
+        for (const auto& mesh : model->meshes) {
+            if (model->materials[mesh.material].parameters.alphaMode !=
+                static_cast<std::uint32_t>(assets::AlphaMode::Blend))
+                drawMesh(mesh);
         }
+        if (!transparent.empty()) {
+            commands.bindPipeline(*(settings.clipSpace.reversed_z ? scene.blendGreater : scene.blendLess));
+            for (const auto& draw : transparent) drawMesh(*draw.mesh);
+        }
+    }
     commands.endRenderPass();
 }
 }

@@ -1,5 +1,6 @@
 #include "EditorState.hpp"
 #include <MaterialTextures.hpp>
+#include <MaterialProperties.hpp>
 #include <Utf8Path.hpp>
 #include <exception>
 #include <iostream>
@@ -15,6 +16,10 @@ std::string materialLabel(const assets::MaterialData& material, std::size_t inde
 void selectMaterial(EditorState& state, std::size_t index) {
     state.selectedMaterial = index;
     state.normalMapPath.fill('\0');
+    const auto& material = state.model.materials[index];
+    state.materialAlphaMode = material.alphaMode;
+    state.materialOpacity = material.baseColor.w;
+    state.materialAlphaCutoff = material.alphaCutoff;
     state.materialNotice.clear();
     state.materialError.clear();
     state.materialEditorInitialized = true;
@@ -43,12 +48,32 @@ void updateNormalMap(EditorState& state, render::Renderer& renderer, bool clear)
         std::cerr << state.materialError << '\n';
     }
 }
+
+void updateAlpha(EditorState& state, render::Renderer& renderer) {
+    try {
+        auto candidate = state.model;
+        assets::setMaterialAlpha(candidate, state.selectedMaterial, state.materialAlphaMode, state.materialOpacity,
+                                 state.materialAlphaCutoff);
+        std::string notice = "已应用所选材质的透明设置。";
+        renderer.uploadModel(candidate);
+        state.model = std::move(candidate);
+        state.materialNotice = std::move(notice);
+        state.materialError.clear();
+    } catch (const std::exception& error) {
+        state.materialNotice.clear();
+        state.materialError = std::string("材质修改失败，已保留当前模型：") + error.what();
+        std::cerr << state.materialError << '\n';
+    }
+}
 }
 
 void resetMaterialEditor(EditorState& state) {
     state.selectedMaterial = 0;
     state.materialEditorInitialized = false;
     state.normalMapPath.fill('\0');
+    state.materialAlphaMode = assets::AlphaMode::Opaque;
+    state.materialOpacity = 1;
+    state.materialAlphaCutoff = 0.5f;
     state.materialNotice.clear();
     state.materialError.clear();
 }
@@ -74,6 +99,20 @@ void drawMaterialSection(EditorState& state, render::Renderer& renderer) {
         }
         ImGui::EndCombo();
     }
+    const char* alphaModes[]{"不透明", "透明裁切", "半透明"};
+    auto alphaMode = static_cast<int>(state.materialAlphaMode);
+    ImGui::TextUnformatted("透明模式");
+    ImGui::SetNextItemWidth(-1);
+    if (ImGui::Combo("##Alpha mode", &alphaMode, alphaModes, 3))
+        state.materialAlphaMode = static_cast<assets::AlphaMode>(alphaMode);
+    ImGui::BeginDisabled(state.materialAlphaMode == assets::AlphaMode::Opaque);
+    ImGui::SliderFloat("不透明度###Opacity", &state.materialOpacity, 0, 1, "%.2f");
+    ImGui::EndDisabled();
+    if (state.materialAlphaMode == assets::AlphaMode::Mask)
+        ImGui::InputFloat("裁切阈值###Alpha cutoff", &state.materialAlphaCutoff, 0.01f, 0.1f, "%.3f");
+    if (state.materialAlphaMode == assets::AlphaMode::Opaque) ImGui::TextDisabled("不透明模式忽略图片和颜色的 Alpha。");
+    if (ImGui::Button("应用透明设置###Apply transparency", {-1, 0})) updateAlpha(state, renderer);
+    ImGui::Separator();
     const auto& material = state.model.materials[state.selectedMaterial];
     if (material.hasNormalMap) {
         ImGui::Text("法线贴图：%u × %u", material.normalTexture.width, material.normalTexture.height);

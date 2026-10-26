@@ -25,11 +25,16 @@ void Renderer::Impl::uploadModel(const ModelData& source) {
         const auto& material = source.materials.empty() ? fallback : source.materials[i];
         GpuMaterial gpu;
         if (!std::isfinite(material.normalScale)) throw std::runtime_error("Invalid normal texture scale");
+        if ((material.alphaMode != assets::AlphaMode::Opaque && material.alphaMode != assets::AlphaMode::Mask &&
+             material.alphaMode != assets::AlphaMode::Blend) ||
+            !math::is_finite(material.baseColor) || material.baseColor.w < 0 || material.baseColor.w > 1 ||
+            !std::isfinite(material.alphaCutoff) || material.alphaCutoff < 0)
+            throw std::runtime_error("Invalid material alpha mode, opacity or cutoff");
         gpu.image = uploadTexture(material.texture, rhi::Format::Rgba8Srgb);
         gpu.normalImage =
             uploadTexture(material.hasNormalMap ? material.normalTexture : neutralNormal, rhi::Format::Rgba8Unorm);
         gpu.parameters.color = material.baseColor;
-        gpu.parameters.alphaMasked = material.alphaMasked ? 1u : 0u;
+        gpu.parameters.alphaMode = static_cast<std::uint32_t>(material.alphaMode);
         gpu.parameters.alphaCutoff = material.alphaCutoff;
         gpu.parameters.normalScale = material.normalScale;
         gpu.parameters.hasNormalMap = material.hasNormalMap ? 1u : 0u;
@@ -47,11 +52,28 @@ void Renderer::Impl::uploadModel(const ModelData& source) {
             std::ranges::any_of(mesh.indices, [&](auto index) { return index >= mesh.vertices.size(); }))
             throw std::runtime_error("Invalid mesh indices or material");
         GpuMesh gpu;
+        math::Vec3 minimum(std::numeric_limits<float>::max()), maximum(std::numeric_limits<float>::lowest());
+        for (const auto& vertex : mesh.vertices) {
+            if (!math::is_finite(vertex.position)) throw std::runtime_error("Invalid mesh position");
+            minimum = math::min(minimum, vertex.position);
+            maximum = math::max(maximum, vertex.position);
+        }
+        gpu.center = {static_cast<float>((static_cast<double>(minimum.x) + maximum.x) * 0.5),
+                      static_cast<float>((static_cast<double>(minimum.y) + maximum.y) * 0.5),
+                      static_cast<float>((static_cast<double>(minimum.z) + maximum.z) * 0.5)};
         gpu.vertices = device.uploadBuffer(std::as_bytes(std::span(mesh.vertices)), rhi::BufferUsage::Vertex);
         gpu.indices = device.uploadBuffer(std::as_bytes(std::span(mesh.indices)), rhi::BufferUsage::Index);
         gpu.indexCount = static_cast<std::uint32_t>(mesh.indices.size());
         gpu.material = mesh.materialIndex;
         replacement->meshes.push_back(std::move(gpu));
+    }
+    if (std::ranges::any_of(replacement->materials, [](const auto& material) {
+            return material.parameters.alphaMode == static_cast<std::uint32_t>(assets::AlphaMode::Blend);
+        })) {
+        // Pipeline validation/compilation is part of the replacement transaction,
+        // so a failed transparent upload cannot discard the displayed model.
+        scenePipeline(aa.msaaSamples, aa.taa, false, true);
+        scenePipeline(aa.msaaSamples, aa.taa, true, true);
     }
     model = std::move(replacement);
     resetTemporalHistory();

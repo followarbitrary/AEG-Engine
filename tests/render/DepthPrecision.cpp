@@ -52,7 +52,7 @@ aeg::assets::ModelData layers(bool reverseOrder) {
     model.materials[0].baseColor = {1, 0, 0, 1};
     model.materials[1].baseColor = {0, 1, 0, 1};
     auto& decal = model.materials[1];
-    decal.alphaMasked = true;
+    decal.alphaMode = aeg::assets::AlphaMode::Mask;
     decal.texture = {4, 4, {}};
     for (unsigned y = 0; y < 4; ++y)
         for (unsigned x = 0; x < 4; ++x)

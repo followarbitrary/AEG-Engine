@@ -7,6 +7,7 @@ namespace aeg::render {
 struct GpuMesh {
     std::unique_ptr<rhi::Buffer> vertices, indices;
     std::uint32_t indexCount{}, material{};
+    math::Vec3 center{};
 };
 struct GpuMaterial {
     std::unique_ptr<rhi::Texture> image, normalImage;

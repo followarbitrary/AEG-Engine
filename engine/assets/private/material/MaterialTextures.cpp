@@ -2,6 +2,7 @@
 #include <Utf8Path.hpp>
 #include "geometry/TangentSpace.hpp"
 #include "image/ImageDecoder.hpp"
+#include "MaterialValidation.hpp"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -49,6 +50,7 @@ PreparedMeshes prepare(const ModelData& model, std::optional<std::size_t> select
     for (std::size_t i = 0; i < model.materials.size(); ++i) {
         if (selected && *selected != i) continue;
         const auto& material = replacement ? *replacement : model.materials[i];
+        detail::validateMaterialAlpha(material);
         if (material.hasNormalMap) {
             validateImage(material.normalTexture);
             if (!std::isfinite(material.normalScale)) throw std::runtime_error("Normal texture scale is not finite");

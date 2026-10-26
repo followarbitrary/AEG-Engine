@@ -42,6 +42,11 @@ struct BoundSetSnapshot {
     rhi::BindingSet* set{};
     std::vector<rhi::BindingWrite> writes;
 };
+struct DrawSnapshot {
+    rhi::GraphicsPipelineDesc pipeline;
+    std::vector<std::byte> constants;
+    rhi::Buffer* indices{};
+};
 struct PassSnapshot {
     rhi::RenderPass* pass{};
     rhi::RenderPassDesc description;
@@ -50,18 +55,21 @@ struct PassSnapshot {
     std::vector<BoundSetSnapshot> sets;
     std::vector<rhi::ClearValue> clears;
     rhi::GraphicsPipelineDesc pipeline;
+    std::vector<DrawSnapshot> draws;
 };
 class FakeDevice final : public rhi::Device {
 public:
-    rhi::DeviceCapabilities caps{4096, 4096, 8, rhi::Format::D32Float};
+    rhi::DeviceCapabilities caps{4096, 4096, 8, rhi::Format::D32Float, true};
     std::uint32_t samples{15};
     bool failTexture{};
+    bool failPipeline{};
+    bool colorBlending{true};
     FakeBuffer* uniform{};
     std::vector<rhi::Format> uploadedFormats;
     rhi::Texture* lastReadback{};
     const rhi::DeviceCapabilities& capabilities() const override { return caps; }
     rhi::TextureSupport textureSupport(rhi::Format, rhi::TextureUsage) const override {
-        return {true, samples, {4096, 4096}, true};
+        return {true, samples, {4096, 4096}, true, colorBlending};
     }
     std::unique_ptr<rhi::Buffer> createBuffer(const rhi::BufferDesc& desc) override {
         rhi::validate(desc);
@@ -109,6 +117,10 @@ public:
         return std::make_unique<FakeFramebuffer>(desc);
     }
     std::unique_ptr<rhi::GraphicsPipeline> createGraphicsPipeline(const rhi::GraphicsPipelineDesc& desc) override {
+        rhi::validate(desc, caps.independentBlend);
+        if (std::exchange(failPipeline, false)) throw std::runtime_error("Injected pipeline creation failure");
+        if (!colorBlending && std::ranges::find(desc.colorBlends, rhi::BlendMode::Alpha) != desc.colorBlends.end())
+            throw std::runtime_error("Unsupported color attachment blending");
         return std::make_unique<FakePipeline>(desc);
     }
     rhi::TextureReadback readback(rhi::Texture& texture, rhi::ResourceState) override {
@@ -156,17 +168,24 @@ public:
         activePass_->sets.push_back({&layout, index, &set, dynamic_cast<FakeSet&>(set).writes});
     }
     void bindVertexBuffer(rhi::Buffer&) override {}
-    void bindIndexBuffer(rhi::Buffer&) override {}
+    void bindIndexBuffer(rhi::Buffer& buffer) override { indices_ = &buffer; }
     void pushConstants(rhi::PipelineLayout&, std::span<const std::byte> bytes) override {
         constants.emplace_back(bytes.begin(), bytes.end());
+        currentConstants_.assign(bytes.begin(), bytes.end());
     }
     void draw(std::uint32_t) override {}
-    void drawIndexed(std::uint32_t) override { ++indexedDraws; }
+    void drawIndexed(std::uint32_t) override {
+        if (!activePass_) throw std::runtime_error("Fake draw outside render pass");
+        ++indexedDraws;
+        activePass_->draws.push_back({activePass_->pipeline, currentConstants_, indices_});
+    }
     void transition(rhi::Texture&, rhi::ResourceState, rhi::ResourceState) override {}
     void copyBuffer(rhi::Buffer&, rhi::Buffer&, std::size_t) override {}
     void copyTextureToBuffer(rhi::Texture&, rhi::Buffer&) override {}
 
 private:
     PassSnapshot* activePass_{};
+    rhi::Buffer* indices_{};
+    std::vector<std::byte> currentConstants_;
 };
 }

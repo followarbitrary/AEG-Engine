@@ -71,7 +71,8 @@ void drawInspectorPanel(EditorState& state, render::Renderer& renderer) {
             ImGui::BeginDisabled(!supportedTaa);
             antialiasingChanged |= ImGui::Checkbox("TAA 时域抗锯齿###TAA", &antialiasing.taa);
             ImGui::EndDisabled();
-            if (!supportedTaa) ImGui::TextWrapped("当前设备不支持 TAA 所需的纹理格式。可使用 MSAA 或 FXAA。");
+            if (!supportedTaa)
+                ImGui::TextWrapped("当前设备不支持 TAA 所需的纹理格式或独立附件混合。可使用 MSAA 或 FXAA。");
             constexpr std::array<std::uint32_t, 4> sampleCounts{1, 2, 4, 8};
             constexpr std::array<const char*, 4> sampleLabels{"关闭 (Off)", "2x", "4x", "8x"};
             const auto selected = std::find(sampleCounts.begin(), sampleCounts.end(), antialiasing.msaaSamples);

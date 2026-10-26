@@ -176,6 +176,9 @@ void VulkanDevice::selectDevice() {
     caps.maximumFramebufferDimension =
         std::min(properties.limits.maxFramebufferWidth, properties.limits.maxFramebufferHeight);
     caps.maximumColorAttachments = properties.limits.maxColorAttachments;
+    VkPhysicalDeviceFeatures features{};
+    vkGetPhysicalDeviceFeatures(physical, &features);
+    caps.independentBlend = features.independentBlend == VK_TRUE;
     for (auto format : {Format::D32Float, Format::D24UnormS8, Format::D16Unorm})
         if (textureSupport(format, TextureUsage::DepthAttachment).supported) {
             caps.depthFormat = format;
@@ -202,6 +205,9 @@ void VulkanDevice::createLogicalDevice() {
     info.pQueueCreateInfos = queues.data();
     info.enabledExtensionCount = 1;
     info.ppEnabledExtensionNames = &extension;
+    VkPhysicalDeviceFeatures features{};
+    features.independentBlend = caps.independentBlend ? VK_TRUE : VK_FALSE;
+    info.pEnabledFeatures = &features;
     check(vkCreateDevice(physical, &info, nullptr, &handle), "vkCreateDevice");
     vkGetDeviceQueue(handle, graphicsFamily, 0, &graphicsQueue);
     vkGetDeviceQueue(handle, presentFamily, 0, &presentQueue);
@@ -225,7 +231,8 @@ TextureSupport VulkanDevice::textureSupport(Format format, TextureUsage usage) c
     return {true,
             samples,
             {info.maxExtent.width, info.maxExtent.height},
-            (features.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) != 0};
+            (features.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) != 0,
+            (features.optimalTilingFeatures & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT) != 0};
 }
 VulkanDevice& nativeDevice(Device& device) {
     auto* native = dynamic_cast<VulkanDevice*>(&device);

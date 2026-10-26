@@ -1,3 +1,11 @@
+add_executable(aeg_transparency_test Transparency.cpp)
+target_link_libraries(aeg_transparency_test PRIVATE aeg::editor aeg::rhi_vulkan aeg::rhi_vulkan_gui glfw)
+target_compile_definitions(aeg_transparency_test PRIVATE AEG_TEST_FIXTURES="${PROJECT_SOURCE_DIR}/tests/fixtures")
+aeg_project_options(aeg_transparency_test)
+add_dependencies(aeg_transparency_test aeg_resources)
+add_test(NAME aeg_transparency COMMAND aeg_transparency_test "${CMAKE_BINARY_DIR}/transparency")
+set_tests_properties(aeg_transparency PROPERTIES LABELS gpu TIMEOUT 120)
+
 add_executable(aeg_clip_conventions_test ClipConventions.cpp)
 target_link_libraries(aeg_clip_conventions_test PRIVATE aeg::editor aeg::rhi_vulkan aeg::rhi_vulkan_gui glfw)
 aeg_project_options(aeg_clip_conventions_test)
@@ -86,7 +94,11 @@ foreach(fixture alpha-opaque alpha-default alpha-mask alpha-mask-custom alpha-bl
         -P "${PROJECT_SOURCE_DIR}/cmake/GpuSmoke.cmake")
     set_tests_properties("aeg_gpu_${fixture}" PROPERTIES LABELS gpu TIMEOUT 90)
 endforeach()
-foreach(fixture pmx-utf8 pmx-utf16 pmx-alpha pmx-extra-uv)
+# Partial opacity needs controlled lighting/background for a meaningful contrast check.
+add_test(NAME aeg_gpu_pmx-alpha COMMAND aeg_transparency_test
+    "${CMAKE_BINARY_DIR}/pmx-alpha-smoke" --pmx-smoke)
+set_tests_properties(aeg_gpu_pmx-alpha PROPERTIES LABELS gpu TIMEOUT 90)
+foreach(fixture pmx-utf8 pmx-utf16 pmx-extra-uv)
     add_test(NAME "aeg_gpu_${fixture}" COMMAND "${CMAKE_COMMAND}"
         "-DEDITOR=$<TARGET_FILE:aeg_editor>"
         "-DCHECKER=$<TARGET_FILE:aeg_render_check>"

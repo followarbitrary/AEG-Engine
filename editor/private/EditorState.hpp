@@ -63,6 +63,9 @@ struct EditorState {
     std::size_t selectedMaterial{0};
     bool materialEditorInitialized{false};
     std::array<char, 4096> normalMapPath{};
+    assets::AlphaMode materialAlphaMode{assets::AlphaMode::Opaque};
+    float materialOpacity{1};
+    float materialAlphaCutoff{0.5f};
     std::string materialNotice;
     std::string materialError;
     bool autoRotate{false};

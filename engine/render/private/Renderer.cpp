@@ -22,12 +22,14 @@ void Renderer::Impl::initialize() {
         !(sampleMask & 1u) || !(single.sampleMask & 1u))
         throw std::runtime_error("Scene attachments do not support single sampling");
     if (!single.linearFiltering) throw std::runtime_error("Scene format does not support linear sampling");
+    if (!color.colorBlending || !single.colorBlending)
+        throw std::runtime_error("Scene format does not support material alpha blending");
     maximumViewport = std::min({caps.maximumImageDimension, caps.maximumFramebufferDimension, color.maximumExtent.width,
                                 color.maximumExtent.height, single.maximumExtent.width, single.maximumExtent.height,
                                 depth.maximumExtent.width, depth.maximumExtent.height, 8192u});
     if (!maximumViewport) throw std::runtime_error("Invalid viewport attachment limits");
     maximumTemporalViewport = maximumViewport;
-    temporalSupported = caps.maximumColorAttachments >= 2;
+    temporalSupported = caps.maximumColorAttachments >= 2 && caps.independentBlend;
     for (const auto format : {motionFormat, historyFormat, historyDepthFormat}) {
         const auto supported = device.textureSupport(format, outputUsage);
         if (!supported.supported || !(supported.sampleMask & 1u) ||

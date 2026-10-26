@@ -48,6 +48,18 @@ int main() {
         rejects([&] { validate(invalid); });
         if (formatByteSize(Format::Rgba16Float) != 8 || formatByteSize(Format::Rgba32Float) != 16)
             throw std::runtime_error("Readback byte sizes changed");
+        GraphicsPipelineDesc pipeline;
+        pipeline.colorAttachmentCount = 2;
+        validate(pipeline, false);
+        pipeline.colorBlends = {BlendMode::Alpha, BlendMode::Opaque};
+        rejects([&] { validate(pipeline, false); });
+        validate(pipeline, true);
+        pipeline.colorBlends = {BlendMode::Alpha, BlendMode::Alpha};
+        validate(pipeline, false);
+        pipeline.colorBlends = {BlendMode::Alpha};
+        rejects([&] { validate(pipeline, true); });
+        pipeline.colorBlends = {BlendMode::Opaque, static_cast<BlendMode>(99)};
+        rejects([&] { validate(pipeline, true); });
         std::cout << "PASS standalone RHI resource contracts\n";
         return 0;
     } catch (const std::exception& error) {
