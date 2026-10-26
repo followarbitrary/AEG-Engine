@@ -55,7 +55,11 @@ void drawInspectorPanel(EditorState& state, render::Renderer& renderer) {
                 std::count_if(state.model.materials.begin(), state.model.materials.end(),
                               [](const assets::MaterialData& material) { return material.hasNormalMap; }));
             ImGui::Text("使用法线贴图的材质数：%zu", normalMapMaterialCount);
-            ImGui::SliderFloat("环境光###Ambient", &settings.ambient, 0, 1, "%.2f");
+            ImGui::SliderFloat("环境漫反射###Ambient", &settings.ambient, 0, 1, "%.2f");
+            float lightColor[]{settings.lightColor.x, settings.lightColor.y, settings.lightColor.z};
+            if (ImGui::ColorEdit3("光源颜色###Light color", lightColor))
+                settings.lightColor = {lightColor[0], lightColor[1], lightColor[2]};
+            ImGui::SliderFloat("光源强度###Light intensity", &settings.lightIntensity, 0, 10, "%.2f");
             ImGui::TextUnformatted("光照方向");
             ImGui::SetNextItemWidth(-1);
             float lightDirection[]{settings.lightDirection.x, settings.lightDirection.y, settings.lightDirection.z};

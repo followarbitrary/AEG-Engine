@@ -33,6 +33,7 @@ void Renderer::Impl::createScenePass(ScenePipeline& target) {
 
 SceneUniform Renderer::Impl::sceneUniform(const RenderSettings& settings) {
     SceneUniform uniform;
+    const bool perspective = perspectiveProjection(settings.viewProjection);
     const auto currentProjection = backendProjection(settings);
     uniform.viewProjection = currentProjection;
     uniform.model = settings.model;
@@ -41,20 +42,35 @@ SceneUniform Renderer::Impl::sceneUniform(const RenderSettings& settings) {
     uniform.previousModel = settings.model;
     uniform.clipConvention = {1, settings.clipSpace.reversed_z ? 1.0f : 0.0f, 1,
                               settings.clipSpace.reversed_z ? 1.0f : 0.0f};
-    auto light = settings.lightDirection;
-    if (aeg::math::dot(light, light) < 0.000001f) light = {0, -1, 0};
+    math::Vec3 light, towardViewer;
+    if (!math::try_normalize(settings.lightDirection, light)) light = {0, -1, 0};
+    if (!math::try_normalize(settings.cameraTowardViewer, towardViewer)) towardViewer = {0, 0, 1};
     uniform.lightDirection = aeg::math::Vec4(light, 0);
-    uniform.parameters = {
-        std::clamp(settings.ambient, 0.0f, 1.0f), settings.unlit ? 1.0f : 0.0f, settings.normalMapping ? 1.0f : 0.0f,
-        std::isfinite(settings.normalStrength) ? std::clamp(settings.normalStrength, 0.0f, 4.0f) : 1.0f};
+    uniform.cameraPosition = math::Vec4(
+        math::is_finite(settings.cameraPosition) ? settings.cameraPosition : math::Vec3{}, perspective ? 1.0f : 0.0f);
+    uniform.cameraTowardViewer = math::Vec4(towardViewer, 0);
+    // Raw settings are public: make degenerate directions and nonfinite light values deterministic.
+    const auto finiteNonnegative = [](float value) { return std::isfinite(value) ? std::max(value, 0.0f) : 0.0f; };
+    const float intensity = finiteNonnegative(settings.lightIntensity);
+    const auto radiance = [&](float component) {
+        // Bound radiance before BRDF evaluation to keep extreme public inputs finite.
+        return static_cast<float>(std::min(double(finiteNonnegative(component)) * intensity, 65504.0));
+    };
+    uniform.lightRadiance = {radiance(settings.lightColor.x), radiance(settings.lightColor.y),
+                             radiance(settings.lightColor.z), 0};
+    uniform.parameters = {std::isfinite(settings.ambient) ? std::clamp(settings.ambient, 0.0f, 1.0f) : 0.0f,
+                          settings.unlit ? 1.0f : 0.0f, settings.normalMapping ? 1.0f : 0.0f,
+                          std::isfinite(settings.normalStrength) ? std::clamp(settings.normalStrength, 0.0f, 4.0f)
+                                                                 : 1.0f};
     if (aa.taa) {
-        const bool perspective = perspectiveProjection(settings.viewProjection);
         if (recordingHistory.valid && (settings.clipSpace != recordingHistory.previous.clipSpace ||
                                        settings.unlit != recordingHistory.previous.unlit ||
                                        settings.normalMapping != recordingHistory.previous.normalMapping ||
                                        settings.normalStrength != recordingHistory.previous.normalStrength ||
                                        settings.ambient != recordingHistory.previous.ambient ||
                                        settings.lightDirection != recordingHistory.previous.lightDirection ||
+                                       settings.lightColor != recordingHistory.previous.lightColor ||
+                                       settings.lightIntensity != recordingHistory.previous.lightIntensity ||
                                        settings.background != recordingHistory.previous.background ||
                                        perspective != perspectiveProjection(recordingHistory.previous.viewProjection)))
             recordingHistory = TemporalHistory{};

@@ -19,6 +19,12 @@ void validateMaterialAlpha(AlphaMode mode, float opacity, float cutoff) {
     if (!std::isfinite(cutoff) || cutoff < 0)
         throw std::runtime_error("Material alpha cutoff must be finite and nonnegative");
 }
+void validateMaterialPbr(float metallic, float roughness) {
+    if (!std::isfinite(metallic) || metallic < 0 || metallic > 1)
+        throw std::runtime_error("Material metallic factor must be finite and in [0,1]");
+    if (!std::isfinite(roughness) || roughness < 0 || roughness > 1)
+        throw std::runtime_error("Material roughness factor must be finite and in [0,1]");
+}
 }
 void setMaterialAlpha(ModelData& model, std::size_t materialIndex, AlphaMode mode, float opacity, float cutoff) {
     if (materialIndex >= model.materials.size())
@@ -28,5 +34,13 @@ void setMaterialAlpha(ModelData& model, std::size_t materialIndex, AlphaMode mod
     material.alphaMode = mode;
     material.baseColor.w = opacity;
     material.alphaCutoff = cutoff;
+}
+void setMaterialPbr(ModelData& model, std::size_t materialIndex, float metallic, float roughness) {
+    if (materialIndex >= model.materials.size())
+        throw std::runtime_error("PBR properties reference an invalid material");
+    detail::validateMaterialPbr(metallic, roughness);
+    auto& material = model.materials[materialIndex];
+    material.metallicFactor = metallic;
+    material.roughnessFactor = roughness;
 }
 }

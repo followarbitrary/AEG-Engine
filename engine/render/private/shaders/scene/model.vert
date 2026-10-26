@@ -9,6 +9,9 @@ layout(set = 0, binding = 0) uniform Scene {
     vec4 lightDirection;
     vec4 parameters;
     vec4 clipConvention;
+    vec4 cameraPosition;
+    vec4 cameraTowardViewer;
+    vec4 lightRadiance;
 #ifdef AEG_TAA
     mat4 previousViewProjection;
     mat4 previousModel;
@@ -20,12 +23,15 @@ scene;
 layout(location = 0) out vec3 normal;
 layout(location = 1) out vec2 uv;
 layout(location = 4) out vec4 tangentFrame;
+layout(location = 5) out vec3 worldPosition;
 #ifdef AEG_TAA
 layout(location = 2) out vec4 currentClip;
 layout(location = 3) out vec4 previousClip;
 #endif
 void main() {
-    gl_Position = scene.viewProjection * scene.model * vec4(inPosition, 1.0);
+    vec4 world = scene.model * vec4(inPosition, 1.0);
+    worldPosition = world.xyz;
+    gl_Position = scene.viewProjection * world;
     normal = transpose(inverse(mat3(scene.model))) * inNormal;
     // Normals and tangents transform differently under nonuniform scaling.
     tangentFrame =

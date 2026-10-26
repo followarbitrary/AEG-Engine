@@ -1,9 +1,11 @@
 #include <Renderer.hpp>
+#include <OrbitCamera.hpp>
 #include "../rhi/fake/FakeDevice.hpp"
 #include <iostream>
 #include <cstring>
 #include <array>
 #include <limits>
+#include <cmath>
 
 namespace {
 void require(bool condition, const char* message) {
@@ -209,7 +211,7 @@ void transparencyContracts() {
                                        : std::vector{i == 0 ? rhi::BlendMode::Opaque : rhi::BlendMode::Alpha};
                             require(draw.pipeline.colorBlends == blends,
                                     "Color blending or unblended temporal metadata changed");
-                            require(draw.constants.size() == 32, "Transparency changed the material push ABI");
+                            require(draw.constants.size() == 48, "Transparency changed the material push ABI");
                             float identity{};
                             std::memcpy(&identity, draw.constants.data(), sizeof(identity));
                             const float expected = i == 0 ? 1.0f : zScale > 0 ? 5.0f - i : 1.0f + i;
@@ -299,12 +301,126 @@ void transparencyContracts() {
     transactional.recordFrame(recovered, {});
     require(pass(recovered, 0).draws.size() == 4, "Failed transparent AA replacement lost the model");
 }
+void pbrContracts() {
+    render::RenderSettings settings;
+    require(settings.lightColor == math::Vec3(1) && settings.lightIntensity == 3, "Directional light defaults changed");
+    const math::Vec3 eye{2, 3, 4}, target{-1, 0.5f, 0};
+    const auto towardViewer = math::normalize(eye - target);
+    const auto view = math::look_at(eye, target, {0, 1, 0});
+    for (const bool perspective : {false, true}) {
+        const auto projection = perspective ? math::perspective(1, 1, 0.1f, 100, {true, false})
+                                            : math::orthographic(-3, 3, -3, 3, 0.1f, 100, {true, false});
+        settings.set_camera({view, projection, {true, false}});
+        require(math::nearly_equal(settings.cameraPosition, eye, 0.00001f) &&
+                    math::nearly_equal(settings.cameraTowardViewer, towardViewer, 0.00001f),
+                "Camera eye or orthographic viewer direction is not derived from inverse view");
+        tests::FakeDevice device;
+        render::Renderer renderer(device);
+        tests::FakeCommands commands;
+        renderer.recordFrame(commands, settings);
+        math::Vec4 position, direction;
+        std::memcpy(&position, device.uniform->bytes.data() + 176, sizeof(position));
+        std::memcpy(&direction, device.uniform->bytes.data() + 192, sizeof(direction));
+        require(math::nearly_equal(math::Vec3(position), eye, 0.00001f) && position.w == float(perspective) &&
+                    math::nearly_equal(math::Vec3(direction), towardViewer, 0.00001f),
+                "Shader camera ABI does not distinguish perspective and orthographic viewing");
+    }
+    // Legal camera matrices span very different scales at the editor's zoom limits.
+    camera::OrbitCamera smallCamera;
+    const float smallExtent = 0.01f / std::sqrt(3.0f);
+    smallCamera.fit({math::Vec3(-smallExtent), math::Vec3(smallExtent)});
+    smallCamera.zoom(1e8f);
+    settings.set_camera(smallCamera.render_camera(1));
+    require(math::nearly_equal(settings.cameraPosition, smallCamera.position(), 1e-7f),
+            "Small fitted camera at minimum zoom lost its eye position");
+    const math::Vec3 distantEye{2000000, 3000000, 4000000};
+    for (const bool perspective : {false, true}) {
+        const auto projection =
+            perspective ? math::perspective(0.9f, 1.5f, 1000000, 2000000, {true, false})
+                        : math::orthographic(-1000000, 1000000, -1000000, 1000000, 1000000, 2000000, {true, false});
+        settings.set_camera({math::translation(-distantEye), projection, {true, false}});
+        require(math::nearly_equal(settings.cameraPosition, distantEye, 0.5f) &&
+                    settings.cameraTowardViewer == math::Vec3(0, 0, 1),
+                "Large-world camera or long clip range was treated as singular");
+    }
+    const auto previous = settings;
+    auto invalid = math::identity();
+    invalid[0][0] = std::numeric_limits<float>::quiet_NaN();
+    for (const auto& camera :
+         {camera::RenderCamera{math::Mat4{}, math::identity(), {}},
+          camera::RenderCamera{math::identity(), math::Mat4{}, {}}, camera::RenderCamera{invalid, math::identity(), {}},
+          camera::RenderCamera{math::identity(), invalid, {}}}) {
+        rejects([&] { settings.set_camera(camera); }, "Invalid camera was accepted");
+        require(settings.viewProjection == previous.viewProjection && settings.clipSpace == previous.clipSpace &&
+                    settings.cameraPosition == previous.cameraPosition &&
+                    settings.cameraTowardViewer == previous.cameraTowardViewer,
+                "Rejected camera partially changed render settings");
+    }
+    tests::FakeDevice device;
+    render::Renderer renderer(device);
+    assets::ModelData model;
+    auto& material = model.materials.emplace_back();
+    material.metallicFactor = 0.25f;
+    material.roughnessFactor = 0;
+    auto& mesh = model.meshes.emplace_back();
+    mesh.vertices.resize(3);
+    mesh.indices = {0, 1, 2};
+    renderer.uploadModel(model);
+    const auto verifyRetained = [&] {
+        tests::FakeCommands commands;
+        renderer.recordFrame(commands, settings);
+        const auto& constants = pass(commands, 0).draws.at(0).constants;
+        require(constants.size() == 48, "PBR material push ABI must be 48 bytes");
+        math::Vec4 factors;
+        std::memcpy(&factors, constants.data() + 32, sizeof(factors));
+        require(factors == math::Vec4(0.25f, 0, 0, 0),
+                "PBR factor ABI changed or zero roughness was destructively clamped");
+        renderer.frameSubmitted();
+    };
+    verifyRetained();
+    for (const bool metallic : {false, true})
+        for (const float bad :
+             {-0.1f, 1.1f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()}) {
+            auto badModel = model;
+            (metallic ? badModel.materials[0].metallicFactor : badModel.materials[0].roughnessFactor) = bad;
+            rejects([&] { renderer.uploadModel(badModel); }, "Invalid PBR factor was uploaded");
+            verifyRetained();
+        }
+    settings.lightColor = {0.5f, 0.25f, 1};
+    settings.lightIntensity = 2;
+    tests::FakeCommands lighting;
+    renderer.recordFrame(lighting, settings);
+    math::Vec4 radiance;
+    std::memcpy(&radiance, device.uniform->bytes.data() + 208, sizeof(radiance));
+    require(radiance == math::Vec4(1, 0.5f, 2, 0), "Directional radiance ABI lost color or intensity");
+    renderer.frameSubmitted();
+    settings.lightColor = math::Vec3(std::numeric_limits<float>::max());
+    settings.lightIntensity = std::numeric_limits<float>::max();
+    tests::FakeCommands extreme;
+    renderer.recordFrame(extreme, settings);
+    std::memcpy(&radiance, device.uniform->bytes.data() + 208, sizeof(radiance));
+    require(radiance == math::Vec4(65504, 65504, 65504, 0), "Extreme radiance escaped the finite BRDF bound");
+    renderer.frameSubmitted();
+    settings.lightDirection = {std::numeric_limits<float>::infinity(), 0, 0};
+    settings.cameraTowardViewer = {};
+    settings.cameraPosition = {std::numeric_limits<float>::quiet_NaN(), 0, 0};
+    settings.lightIntensity = std::numeric_limits<float>::quiet_NaN();
+    settings.ambient = std::numeric_limits<float>::quiet_NaN();
+    tests::FakeCommands degenerate;
+    renderer.recordFrame(degenerate, settings);
+    for (const auto offset : {128u, 144u, 176u, 192u, 208u}) {
+        math::Vec4 value;
+        std::memcpy(&value, device.uniform->bytes.data() + offset, sizeof(value));
+        require(math::is_finite(value), "Degenerate public lighting settings uploaded nonfinite shader values");
+    }
+}
 }
 int main(int argc, char** argv) {
     if (argc != 2) return 1;
     try {
         using namespace aeg;
         transparencyContracts();
+        pbrContracts();
         tests::FakeDevice device;
         render::Renderer renderer(device);
         renderer.resizeViewport(17, 13);
@@ -395,7 +511,7 @@ int main(int argc, char** argv) {
         renderer.frameSubmitted();
         require(renderer.temporalFrameCount() == 0, "Non-temporal frame advanced history");
         // Pin the shader ABI independently from the private uniform declaration.
-        require(device.uniform->bytes.size() == 384, "Scene uniform ABI must be 384 bytes");
+        require(device.uniform->bytes.size() == 432, "Scene uniform ABI must be 432 bytes");
         const auto uploaded = [&]<class T>(std::size_t offset) {
             T value{};
             std::memcpy(&value, device.uniform->bytes.data() + offset, sizeof(T));
@@ -431,7 +547,7 @@ int main(int argc, char** argv) {
                     expected = reflection * expected;
                 }
                 require(uploaded.template operator()<math::Mat4>(0) == expected &&
-                            uploaded.template operator()<math::Mat4>(304) == expected,
+                            uploaded.template operator()<math::Mat4>(352) == expected,
                         "Renderer did not canonicalize incoming projection Y exactly once");
                 require(uploaded.template operator()<math::Vec4>(160) ==
                             math::Vec4(1, reversed ? 1.0f : 0.0f, 1, reversed ? 1.0f : 0.0f),
@@ -461,11 +577,11 @@ int main(int argc, char** argv) {
         renderer.frameSubmitted();
         settings.model = math::translation({0.1f, 0, 0});
         settings.viewProjection = math::translation({0.02f, -0.03f, 0}) * settings.viewProjection;
-        const auto previousProjection = uploaded.template operator()<math::Mat4>(304);
+        const auto previousProjection = uploaded.template operator()<math::Mat4>(352);
         tests::FakeCommands historySecond;
         renderer.recordFrame(historySecond, settings);
         require(temporalValid(historySecond) == 1 &&
-                    uploaded.template operator()<math::Mat4>(176) == previousProjection,
+                    uploaded.template operator()<math::Mat4>(224) == previousProjection,
                 "Temporal history lost the previous canonical projection");
         renderer.frameSubmitted();
         for (const bool toggleY : {true, false}) {
@@ -476,7 +592,7 @@ int main(int argc, char** argv) {
             tests::FakeCommands changed;
             renderer.recordFrame(changed, settings);
             require(temporalValid(changed) == 0, "Clip convention change sampled stale temporal history");
-            require(uploaded.template operator()<math::Mat4>(176) == uploaded.template operator()<math::Mat4>(304),
+            require(uploaded.template operator()<math::Mat4>(224) == uploaded.template operator()<math::Mat4>(352),
                     "History reset did not replace previous matrix with current canonical matrix");
             renderer.frameSubmitted();
             require(renderer.temporalFrameCount() == 1, "Clip convention change did not reset history count");

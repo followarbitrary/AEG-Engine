@@ -11,7 +11,7 @@ function(aeg_compile_vulkan_shaders target_name source_root output_variable)
         add_custom_command(OUTPUT "${output}"
             COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/compiled-shaders"
             COMMAND Vulkan::glslc --target-env=vulkan1.2 "${source}" -o "${output}"
-            DEPENDS "${source}" "${source_root}/scene/normal_mapping.glsl"
+            DEPENDS "${source}" "${source_root}/scene/normal_mapping.glsl" "${source_root}/scene/pbr_lighting.glsl"
             COMMENT "Compiling ${shader} to SPIR-V" VERBATIM)
         set(header "${CMAKE_BINARY_DIR}/generated/embedded_shaders/${shader}.spv.hpp")
         string(REPLACE "." "_" symbol "${shader}")
@@ -28,7 +28,7 @@ function(aeg_compile_vulkan_shaders target_name source_root output_variable)
         add_custom_command(OUTPUT "${output}"
             COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/compiled-shaders"
             COMMAND Vulkan::glslc --target-env=vulkan1.2 -DAEG_TAA=1 "${source}" -o "${output}"
-            DEPENDS "${source}" "${source_root}/scene/normal_mapping.glsl"
+            DEPENDS "${source}" "${source_root}/scene/normal_mapping.glsl" "${source_root}/scene/pbr_lighting.glsl"
             COMMENT "Compiling temporal model.${stage} to SPIR-V" VERBATIM)
         set(header "${CMAKE_BINARY_DIR}/generated/embedded_shaders/model_taa.${stage}.spv.hpp")
         add_custom_command(OUTPUT "${header}"

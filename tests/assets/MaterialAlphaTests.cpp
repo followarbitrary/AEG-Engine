@@ -121,6 +121,8 @@ std::string snapshot(const ModelData& model) {
         addString(out, material.normalTextureSource);
         addPath(out, material.baseTexturePath);
         add(out, material.normalTextureDeclared);
+        add(out, material.metallicFactor);
+        add(out, material.roughnessFactor);
     }
     add(out, model.meshes.size());
     for (const auto& mesh : model.meshes) {
@@ -309,6 +311,10 @@ ModelData procedural() {
     model.materials.resize(2);
     model.materials[0].name = "Selected";
     model.materials[1].name = "Other";
+    model.materials[0].metallicFactor = 0.3f;
+    model.materials[0].roughnessFactor = 0.7f;
+    model.materials[1].metallicFactor = 0.8f;
+    model.materials[1].roughnessFactor = 0.2f;
     model.warnings = {"Retained notice"};
     MeshData mesh;
     mesh.vertices = {{{0, 0, 0}, {0, 0, 1}, {0, 0}}, {{1, 0, 0}, {0, 0, 1}, {1, 0}}, {{0, 1, 0}, {0, 0, 1}, {0, 1}}};

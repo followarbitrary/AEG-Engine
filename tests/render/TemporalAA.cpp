@@ -328,9 +328,10 @@ int main(int argc, char** argv) {
             frame();
             require(renderer.temporalFrameCount() == 1, "background discontinuity did not reset history");
             advance(1);
-            settings.viewProjection =
-                aeg::math::perspective(0.9f, float(width) / float(height), 0.1f, 10.0f, {true, false}) *
-                aeg::math::look_at(aeg::math::Vec3(0, 0, 2), aeg::math::Vec3(0), aeg::math::Vec3(0, 1, 0));
+            settings.set_camera(
+                {aeg::math::look_at(aeg::math::Vec3(0, 0, 2), aeg::math::Vec3(0), aeg::math::Vec3(0, 1, 0)),
+                 aeg::math::perspective(0.9f, float(width) / float(height), 0.1f, 10.0f, {true, false}),
+                 {true, false}});
             frame();
             require(renderer.temporalFrameCount() == 1, "projection type change did not reset history");
             settings.viewProjection = aeg::math::identity();

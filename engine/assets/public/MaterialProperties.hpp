@@ -9,4 +9,9 @@ namespace aeg::assets {
 // required. Failure preserves the complete model; success preserves geometry,
 // textures, normal mapping, notices, and all other materials.
 void setMaterialAlpha(ModelData& model, std::size_t materialIndex, AlphaMode mode, float opacity, float cutoff = 0.5f);
+
+// Changes only the selected material's metallic and perceptual roughness
+// factors. Both values must be finite and in [0,1], including zero roughness.
+// Failure preserves the complete model; success preserves every other field.
+void setMaterialPbr(ModelData& model, std::size_t materialIndex, float metallic, float roughness);
 }

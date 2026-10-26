@@ -5,6 +5,7 @@
 #include "assimp/AssimpFileSystem.hpp"
 #include "image/ImageDecoder.hpp"
 #include "material/ImportedAlpha.hpp"
+#include "material/MaterialValidation.hpp"
 #include "mmd/MmdEffectNormals.hpp"
 #include "pmx/PmxValidation.hpp"
 #include <assimp/Importer.hpp>
@@ -152,6 +153,14 @@ ModelData loadModel(const std::filesystem::path& input) {
         }
         detail::applyImportedAlpha(*scene, source, i, material, model, pmx,
                                    objTextureOptions.unsupportedOpacity.contains(material.name));
+        // Native PBR keys are shared across Assimp importers. glTF supplies
+        // its own defaults (1,1); legacy formats keep the material's (0,0.5).
+        source.Get(AI_MATKEY_METALLIC_FACTOR, material.metallicFactor);
+        source.Get(AI_MATKEY_ROUGHNESS_FACTOR, material.roughnessFactor);
+        detail::validateMaterialPbr(material);
+        if (source.GetTextureCount(aiTextureType_METALNESS) || source.GetTextureCount(aiTextureType_DIFFUSE_ROUGHNESS))
+            model.warnings.push_back("Material '" + material.name +
+                                     "' uses an unsupported metallic/roughness texture; using scalar factors only");
         // HEIGHT contains scalar bump data, including OBJ map_bump/bump. It
         // must never be decoded as an RGB tangent-space normal texture.
         if (obj && source.GetTextureCount(aiTextureType_HEIGHT) > 0)

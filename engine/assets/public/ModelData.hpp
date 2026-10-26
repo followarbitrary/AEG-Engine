@@ -38,6 +38,8 @@ struct MaterialData {
     std::string normalTextureSource; // Imported reference or resolved external image path; empty for memory images.
     std::filesystem::path baseTexturePath; // Resolved external base texture; empty for embedded textures.
     bool normalTextureDeclared{false};     // Native/sidecar bindings or explicit disable block filename guessing.
+    float metallicFactor{0};               // Linear [0,1]; legacy/procedural materials default to dielectric.
+    float roughnessFactor{0.5f};           // Perceptual roughness in [0,1]; shaders regularize the zero endpoint.
 };
 struct MeshData {
     std::string name;

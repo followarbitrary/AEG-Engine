@@ -1,3 +1,10 @@
+add_executable(aeg_pbr_lighting_test PbrLighting.cpp)
+target_link_libraries(aeg_pbr_lighting_test PRIVATE aeg::editor aeg::rhi_vulkan aeg::rhi_vulkan_gui glfw)
+aeg_project_options(aeg_pbr_lighting_test)
+add_dependencies(aeg_pbr_lighting_test aeg_resources)
+add_test(NAME aeg_pbr_lighting COMMAND aeg_pbr_lighting_test "${CMAKE_BINARY_DIR}/pbr-lighting")
+set_tests_properties(aeg_pbr_lighting PROPERTIES LABELS gpu TIMEOUT 120)
+
 add_executable(aeg_transparency_test Transparency.cpp)
 target_link_libraries(aeg_transparency_test PRIVATE aeg::editor aeg::rhi_vulkan aeg::rhi_vulkan_gui glfw)
 target_compile_definitions(aeg_transparency_test PRIVATE AEG_TEST_FIXTURES="${PROJECT_SOURCE_DIR}/tests/fixtures")
@@ -80,7 +87,7 @@ add_test(NAME aeg_embedded_shader_deployment COMMAND "${CMAKE_COMMAND}"
     "-DWORK_DIR=${CMAKE_BINARY_DIR}/embedded-shader-deployment"
     -P "${PROJECT_SOURCE_DIR}/cmake/EmbeddedShaderSmoke.cmake")
 set_tests_properties(aeg_embedded_shader_deployment PROPERTIES LABELS gpu TIMEOUT 240)
-foreach(fixture alpha-opaque alpha-default alpha-mask alpha-mask-custom alpha-blend uri-spaces uri-unicode)
+foreach(fixture alpha-opaque alpha-default alpha-mask alpha-mask-custom uri-spaces uri-unicode)
     set(expect_blank OFF)
     if(fixture STREQUAL "alpha-mask")
         set(expect_blank ON)
@@ -95,6 +102,9 @@ foreach(fixture alpha-opaque alpha-default alpha-mask alpha-mask-custom alpha-bl
     set_tests_properties("aeg_gpu_${fixture}" PROPERTIES LABELS gpu TIMEOUT 90)
 endforeach()
 # Partial opacity needs controlled lighting/background for a meaningful contrast check.
+add_test(NAME aeg_gpu_alpha-blend COMMAND aeg_transparency_test
+    "${CMAKE_BINARY_DIR}/gltf-alpha-smoke" --gltf-smoke)
+set_tests_properties(aeg_gpu_alpha-blend PROPERTIES LABELS gpu TIMEOUT 90)
 add_test(NAME aeg_gpu_pmx-alpha COMMAND aeg_transparency_test
     "${CMAKE_BINARY_DIR}/pmx-alpha-smoke" --pmx-smoke)
 set_tests_properties(aeg_gpu_pmx-alpha PROPERTIES LABELS gpu TIMEOUT 90)

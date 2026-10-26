@@ -1,4 +1,5 @@
 #include "RendererHarness.hpp"
+#include "PbrReference.hpp"
 #include <ModelImporter.hpp>
 #include <MaterialTextures.hpp>
 #include <Utf8Path.hpp>
@@ -91,7 +92,7 @@ double linear(unsigned char value) {
     const double srgb = double(value) / 255;
     return srgb <= 0.04045 ? srgb / 12.92 : std::pow((srgb + 0.055) / 1.055, 2.4);
 }
-// Exclude primitive/AA edges and decode the sRGB PPM before checking Lambert light.
+// Exclude primitive/AA edges and decode the sRGB PPM before checking the BRDF.
 double interior(const Image& image, float horizontalCenter = 0.5f) {
     require(image.width >= 30 && image.height >= 30, "interior fixture is too small");
     double sum{};
@@ -112,9 +113,13 @@ double interior(const Image& image, float horizontalCenter = 0.5f) {
     return sum / double(count);
 }
 constexpr float ambient = 0.12f;
+// This existing identity-projection fixture looks along +Z into the clip cube.
+// Its visible geometric normal is -Z after the renderer's two-sided policy.
+const aeg::math::Vec3 fixtureViewer{0, 0, -1};
 void expectedLight(const Image& image, aeg::math::Vec3 normal, aeg::math::Vec3 towardLight, const std::string& label,
                    float horizontalCenter = 0.5f) {
-    const double expected = ambient + (1 - ambient) * std::max(aeg::math::dot(normal, towardLight), 0.0f);
+    const double expected =
+        aeg::tests::pbrReference({1, 1, 1}, 0, 1, normal, towardLight, fixtureViewer, {2, 2, 2}, ambient)[0];
     const double actual = interior(image, horizontalCenter);
     require(std::abs(actual - expected) < 0.013, label + " has incorrect linear lighting: expected " +
                                                      std::to_string(expected) + ", got " + std::to_string(actual));
@@ -186,6 +191,8 @@ aeg::assets::ModelData plane(Sample sample = tiltedX, aeg::math::Vec3 normal = {
     mesh.indices = {0, 1, 2, 0, 2, 3};
     model.meshes.push_back(std::move(mesh));
     auto& material = model.materials.emplace_back();
+    material.metallicFactor = 0;
+    material.roughnessFactor = 1;
     material.hasNormalMap = true;
     material.normalTexture = {1, 1, {sample[0], sample[1], sample[2], 255}};
     material.normalScale = scale;
@@ -226,6 +233,9 @@ int main(int argc, char** argv) {
         require(settings.normalMapping && settings.normalStrength == 1, "normal mapping must default enabled at 1");
         settings.background = {0, 0, 0, 1};
         settings.ambient = ambient;
+        // Keep analytic white BRDF probes below the LDR attachment's clipping limit.
+        settings.lightIntensity = 2;
+        settings.cameraTowardViewer = fixtureViewer;
         std::uint32_t width = 321, height = 239;
         auto frame = [&] {
             bool drew{};
@@ -326,8 +336,10 @@ int main(int argc, char** argv) {
         for (std::size_t i = 0; i < spatialSamples.size(); ++i) {
             const auto originalNormal = mapped(spatialSamples[i], 1, {0, 0, 1}, {1, 0, 0}, {0, 1, 0}) * sign;
             const auto mirroredNormal = mapped(spatialSamples[i ^ 1], 1, {0, 0, 1}, {-1, 0, 0}, {0, 1, 0}) * sign;
-            const double originalExpected = ambient + (1 - ambient) * aeg::math::dot(originalNormal, spatialLight);
-            const double mirroredExpected = ambient + (1 - ambient) * aeg::math::dot(mirroredNormal, reflectedLight);
+            const double originalExpected = aeg::tests::pbrReference({1, 1, 1}, 0, 1, originalNormal, spatialLight,
+                                                                     fixtureViewer, {2, 2, 2}, ambient)[0];
+            const double mirroredExpected = aeg::tests::pbrReference({1, 1, 1}, 0, 1, mirroredNormal, reflectedLight,
+                                                                     fixtureViewer, {2, 2, 2}, ambient)[0];
             require(std::abs(patchLight(originalSpatial, texelCenters[i]) - originalExpected) < 0.025,
                     "2x2 normal map sampled the wrong original UV region " + std::to_string(i));
             require(std::abs(patchLight(mirroredSpatialImage, texelCenters[i]) - mirroredExpected) < 0.025,
@@ -373,8 +385,7 @@ int main(int argc, char** argv) {
             const auto eye = center + aeg::math::normalize(aeg::math::Vec3(2.5f, 1.8f, 3.5f)) * radius * 3.2f;
             auto projection = aeg::math::perspective(aeg::math::to_radians(45.0f), float(width) / float(height),
                                                      radius * 0.01f, radius * 7, {true, false});
-            settings.clipSpace = {true, false};
-            settings.viewProjection = projection * aeg::math::look_at(eye, center, aeg::math::Vec3(0, 1, 0));
+            settings.set_camera({aeg::math::look_at(eye, center, aeg::math::Vec3(0, 1, 0)), projection, {true, false}});
             settings.model = aeg::math::identity();
             settings.lightDirection = -aeg::math::normalize(aeg::math::Vec3(0.6f, 1, 0.8f));
         };
@@ -634,6 +645,8 @@ int main(int argc, char** argv) {
                        "cleared external normal assignment");
         }
         settings.model = settings.viewProjection = aeg::math::identity();
+        settings.cameraPosition = {};
+        settings.cameraTowardViewer = fixtureViewer;
         auto procedural = withoutMap(source);
         for (auto& vertex : procedural.meshes[0].vertices) vertex.tangent = aeg::math::Vec4(0);
         require(procedural.source.empty(), "procedural normal fixture unexpectedly has a source format");

@@ -77,6 +77,10 @@ void publicCpuContracts() {
     require(alphaModel.materials[0].alphaMode == aeg::assets::AlphaMode::Blend &&
                 alphaModel.materials[0].baseColor.w == 0.25f,
             "exported material alpha API changes the selected material");
+    aeg::assets::setMaterialPbr(alphaModel, 0, 0.75f, 0.2f);
+    require(alphaModel.materials[0].metallicFactor == 0.75f && alphaModel.materials[0].roughnessFactor == 0.2f &&
+                alphaModel.materials[0].baseColor.w == 0.25f,
+            "exported material PBR API preserves alpha properties");
     const auto path = std::filesystem::path(u8"models/\u6a21\u578b with spaces+%20.pmx");
     const auto encoded = aeg::foundation::pathToUtf8(path);
     require(aeg::foundation::pathFromUtf8(encoded) == path, "UTF-8 path round trip");

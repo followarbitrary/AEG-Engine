@@ -1,4 +1,5 @@
 #include "RendererHarness.hpp"
+#include "PbrReference.hpp"
 #include <ModelImporter.hpp>
 #include <OrbitCamera.hpp>
 #include <GLFW/glfw3.h>
@@ -190,8 +191,11 @@ void writeOriginalGlb(const std::filesystem::path& path) {
 } // namespace
 
 int main(int argc, char** argv) {
-    if ((argc != 2 && argc != 3) || (argc == 3 && std::string_view(argv[2]) != "--pmx-smoke") || !glfwInit()) return 1;
-    const bool pmxSmoke = argc == 3;
+    if (argc != 2 && argc != 3) return 1;
+    const bool pmxSmoke = argc == 3 && std::string_view(argv[2]) == "--pmx-smoke";
+    const bool gltfSmoke = argc == 3 && std::string_view(argv[2]) == "--gltf-smoke";
+    const bool smokeMode = pmxSmoke || gltfSmoke;
+    if ((argc == 3 && !smokeMode) || !glfwInit()) return 1;
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     auto* window = glfwCreateWindow(400, 320, "AEG transparency regression", nullptr, nullptr);
@@ -239,14 +243,25 @@ int main(int argc, char** argv) {
             for (unsigned i = 0; i < (frames ? frames : aa.taa ? 8u : 2u); ++i) frame();
             return capture();
         };
-        if (pmxSmoke) {
-            const auto model = assets::loadModel(std::filesystem::path(AEG_TEST_FIXTURES) / "pmx-alpha.pmx");
-            require(model.meshes.size() == 2, "PMX alpha fixture lost its authored material groups");
-            const auto& partial = model.materials.at(model.meshes[0].materialIndex);
-            const auto& hidden = model.materials.at(model.meshes[1].materialIndex);
-            require(partial.alphaMode == assets::AlphaMode::Blend && std::abs(partial.baseColor.w - 0.4f) < 1e-5f &&
-                        hidden.alphaMode == assets::AlphaMode::Blend && hidden.baseColor.w == 0,
-                    "PMX smoke did not import the actual partial and hidden materials");
+        if (smokeMode) {
+            const std::string label = pmxSmoke ? "PMX" : "glTF";
+            const auto model = assets::loadModel(std::filesystem::path(AEG_TEST_FIXTURES) /
+                                                 (pmxSmoke ? "pmx-alpha.pmx" : "alpha-blend.gltf"));
+            if (pmxSmoke) {
+                require(model.meshes.size() == 2, "PMX alpha fixture lost its authored material groups");
+                const auto& partial = model.materials.at(model.meshes[0].materialIndex);
+                const auto& hidden = model.materials.at(model.meshes[1].materialIndex);
+                require(partial.alphaMode == assets::AlphaMode::Blend && std::abs(partial.baseColor.w - 0.4f) < 1e-5f &&
+                            hidden.alphaMode == assets::AlphaMode::Blend && hidden.baseColor.w == 0,
+                        "PMX smoke did not import the actual partial and hidden materials");
+            } else {
+                require(model.meshes.size() == 1, "glTF alpha fixture lost its authored mesh");
+                const auto& material = model.materials.at(model.meshes[0].materialIndex);
+                require(material.alphaMode == assets::AlphaMode::Blend &&
+                            std::abs(material.baseColor.w - 0.3f) < 1e-5f && material.metallicFactor == 1 &&
+                            material.roughnessFactor == 1,
+                        "glTF smoke did not preserve authored transparency and native metallic/roughness defaults");
+            }
             width = 698;
             height = 740;
             settings.background = {1, 1, 1, 1};
@@ -255,7 +270,7 @@ int main(int argc, char** argv) {
             settings.set_camera(fitted.render_camera(float(width) / height, {true, false}));
             const auto image = show(model, {});
             require(image.rgb[0] == 255 && image.rgb[1] == 255 && image.rgb[2] == 255,
-                    "Controlled PMX smoke background was not white");
+                    "Controlled " + label + " smoke background was not white");
             std::size_t foreground{};
             std::set<std::uint32_t> colors;
             for (std::size_t i = 0; i < image.rgb.size(); i += 3) {
@@ -266,10 +281,11 @@ int main(int argc, char** argv) {
             }
             // Retain the original smoke check's 1% coverage, L1>45 contrast and
             // eight-color requirements. An unlit model and white background keep
-            // genuine alpha=.4 geometry measurable without loosening the oracle.
+            // genuine authored translucency measurable without loosening the oracle.
             require(foreground >= std::size_t(width) * height / 100 && colors.size() >= 8,
-                    "Actual translucent PMX geometry is absent or not visibly rendered");
-            std::cout << "PMX alpha smoke: " << foreground << " foreground pixels, " << colors.size() << " colors\n";
+                    "Actual translucent " + label + " geometry is absent or not visibly rendered");
+            std::cout << label << " alpha smoke: " << foreground << " foreground pixels, " << colors.size()
+                      << " colors\n";
         } else {
             const auto camera = [&](bool perspective, math::ClipSpaceConvention convention,
                                     math::Mat4 view = math::identity()) {
@@ -318,12 +334,19 @@ int main(int argc, char** argv) {
                 patch(show(single(tinted), aa), textureColor, "Opaque ignores texture alpha too");
             }
             // Calibrate the existing two-sided normal policy, then verify that
-            // Lambert lighting and the normal map are applied before alpha blending.
+            // Cook-Torrance lighting and the normal map are applied before alpha blending.
             camera(false, {true, false});
             settings.unlit = false;
             settings.ambient = 0.2f;
+            settings.lightIntensity = 2;
             settings.normalMapping = false;
-            auto litMaterial = material(red, 0.5f);
+            // Lift each channel above the near-black UNORM8 blend quantization
+            // region while retaining a colored diffuse lobe and white specular.
+            const Color litBase{0.4, 0.2, 0.1}, ambientBase{0.08, 0.04, 0.02};
+            const math::Vec3 litReflectance{0.4f, 0.2f, 0.1f};
+            auto litMaterial = material(litBase, 0.5f);
+            litMaterial.metallicFactor = 0;
+            litMaterial.roughnessFactor = 1;
             litMaterial.hasNormalMap = true;
             litMaterial.normalTexture = {1, 1, {255, 128, 128, 255}};
             auto litModel = single(litMaterial);
@@ -336,23 +359,29 @@ int main(int argc, char** argv) {
             require(std::abs(int(positive.rgb[center]) - int(negative.rgb[center])) > 40,
                     "Blended material did not respond to geometric lighting");
             const float faceSign = positive.rgb[center] > negative.rgb[center] ? 1.0f : -1.0f;
-            patch(faceSign > 0 ? positive : negative, over(red, 0.5, blue), "Lit blended geometric normal");
-            patch(faceSign > 0 ? negative : positive, over({0.2, 0, 0}, 0.5, blue), "Blended ambient light");
+            const math::Vec3 viewer{0, 0, 1};
+            const auto geometricLight =
+                tests::pbrReference(litReflectance, 0, 1, {0, 0, faceSign}, {0, 0, faceSign}, viewer, {2, 2, 2}, 0.2f);
+            patch(faceSign > 0 ? positive : negative, over(geometricLight, 0.5, blue), "Lit blended geometric normal");
+            patch(faceSign > 0 ? negative : positive, over(ambientBase, 0.5, blue), "Blended ambient light");
             settings.normalMapping = true;
             settings.lightDirection = {-faceSign, 0, 0};
             const double encodedZero = 1.0 / 255;
-            const double mappedLight = 0.2 + 0.8 / std::sqrt(1 + 2 * encodedZero * encodedZero);
+            const auto mappedNormal = math::normalize(math::Vec3(1, float(encodedZero), float(encodedZero))) * faceSign;
+            const auto mappedLight =
+                tests::pbrReference(litReflectance, 0, 1, mappedNormal, {faceSign, 0, 0}, viewer, {2, 2, 2}, 0.2f);
             std::vector<render::AntialiasingSettings> litModes{{}};
             if (renderer.supportsTemporalAA()) litModes.push_back({1, true, true});
             for (const auto aa : litModes) {
                 settings.normalStrength = 1;
-                patch(show(litModel, aa), over({mappedLight, 0, 0}, 0.5, blue), "Normal-mapped blended lighting");
+                patch(show(litModel, aa), over(mappedLight, 0.5, blue), "Normal-mapped blended lighting");
                 settings.normalStrength = 0;
-                patch(show(litModel, aa), over({0.2, 0, 0}, 0.5, blue),
+                patch(show(litModel, aa), over(ambientBase, 0.5, blue),
                       "Zero normal strength preserves blended opacity");
             }
             settings.unlit = true;
             settings.ambient = 0.28f;
+            settings.lightIntensity = 3;
             settings.normalStrength = 1;
             // View-space sorting must update for both projection kinds, every convention,
             // an opposite camera, and a model transform which exchanges the surfaces.
@@ -429,8 +458,9 @@ int main(int argc, char** argv) {
         }
         require(renderer.validationErrorCount() == 0, "Vulkan validation failed for transparency");
         renderer.waitIdle();
-        if (pmxSmoke)
-            std::cout << "PASS actual translucent PMX geometry, original visibility thresholds and validation\n";
+        if (smokeMode)
+            std::cout << "PASS actual translucent " << (pmxSmoke ? "PMX" : "glTF")
+                      << " geometry, original visibility thresholds and validation\n";
         else
             std::cout << "PASS " << captures
                       << " transparency captures: analytical blend, ordering, depth, alpha modes, "

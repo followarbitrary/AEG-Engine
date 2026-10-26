@@ -5,6 +5,13 @@ aeg_project_options(aeg_material_alpha_tests)
 add_test(NAME aeg_material_alpha_tests COMMAND aeg_material_alpha_tests)
 set_tests_properties(aeg_material_alpha_tests PROPERTIES LABELS cpu TIMEOUT 60)
 
+add_executable(aeg_material_pbr_tests MaterialPbrTests.cpp)
+target_link_libraries(aeg_material_pbr_tests PRIVATE aeg::assets)
+target_compile_definitions(aeg_material_pbr_tests PRIVATE AEG_TEST_FIXTURES="${PROJECT_SOURCE_DIR}/tests/fixtures")
+aeg_project_options(aeg_material_pbr_tests)
+add_test(NAME aeg_material_pbr_tests COMMAND aeg_material_pbr_tests)
+set_tests_properties(aeg_material_pbr_tests PROPERTIES LABELS cpu TIMEOUT 60)
+
 add_executable(aeg_assets_tests ModelImporterTests.cpp)
 target_link_libraries(aeg_assets_tests PRIVATE aeg::assets)
 target_compile_definitions(aeg_assets_tests PRIVATE

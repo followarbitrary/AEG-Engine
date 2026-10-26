@@ -51,6 +51,7 @@ PreparedMeshes prepare(const ModelData& model, std::optional<std::size_t> select
         if (selected && *selected != i) continue;
         const auto& material = replacement ? *replacement : model.materials[i];
         detail::validateMaterialAlpha(material);
+        detail::validateMaterialPbr(material);
         if (material.hasNormalMap) {
             validateImage(material.normalTexture);
             if (!std::isfinite(material.normalScale)) throw std::runtime_error("Normal texture scale is not finite");

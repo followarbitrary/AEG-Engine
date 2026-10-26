@@ -73,6 +73,8 @@ ModelData model(const fs::path& directory, const fs::path& base = "Body.png", st
     result.source = directory / "Scene.future-format";
     auto& material = result.materials.emplace_back();
     material.name = std::move(name);
+    material.metallicFactor = 0.3f;
+    material.roughnessFactor = 0.7f;
     material.baseTexturePath = base.empty() ? fs::path{} : directory / base;
     material.hasTexture = !base.empty();
     auto& mesh = result.meshes.emplace_back();
@@ -109,7 +111,8 @@ bool sameMaterial(const MaterialData& a, const MaterialData& b) {
            a.hasTexture == b.hasTexture && a.alphaMode == b.alphaMode && a.alphaCutoff == b.alphaCutoff &&
            sameImage(a.normalTexture, b.normalTexture) && a.hasNormalMap == b.hasNormalMap &&
            a.normalScale == b.normalScale && a.normalTextureSource == b.normalTextureSource &&
-           a.baseTexturePath == b.baseTexturePath && a.normalTextureDeclared == b.normalTextureDeclared;
+           a.baseTexturePath == b.baseTexturePath && a.normalTextureDeclared == b.normalTextureDeclared &&
+           a.metallicFactor == b.metallicFactor && a.roughnessFactor == b.roughnessFactor;
 }
 bool sameModel(const ModelData& a, const ModelData& b) {
     if (a.name != b.name || a.source != b.source || a.warnings != b.warnings || a.bounds.min != b.bounds.min ||

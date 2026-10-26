@@ -24,6 +24,9 @@ void Renderer::Impl::uploadModel(const ModelData& source) {
     for (std::size_t i = 0; i < materialCount; ++i) {
         const auto& material = source.materials.empty() ? fallback : source.materials[i];
         GpuMaterial gpu;
+        if (!std::isfinite(material.metallicFactor) || material.metallicFactor < 0 || material.metallicFactor > 1 ||
+            !std::isfinite(material.roughnessFactor) || material.roughnessFactor < 0 || material.roughnessFactor > 1)
+            throw std::runtime_error("Invalid material metallic or roughness factor");
         if (!std::isfinite(material.normalScale)) throw std::runtime_error("Invalid normal texture scale");
         if ((material.alphaMode != assets::AlphaMode::Opaque && material.alphaMode != assets::AlphaMode::Mask &&
              material.alphaMode != assets::AlphaMode::Blend) ||
@@ -38,6 +41,7 @@ void Renderer::Impl::uploadModel(const ModelData& source) {
         gpu.parameters.alphaCutoff = material.alphaCutoff;
         gpu.parameters.normalScale = material.normalScale;
         gpu.parameters.hasNormalMap = material.hasNormalMap ? 1u : 0u;
+        gpu.parameters.pbrFactors = {material.metallicFactor, material.roughnessFactor, 0, 0};
         const std::array writes{rhi::BindingWrite{0, nullptr, gpu.image.get(), sampler.get()},
                                 rhi::BindingWrite{1, nullptr, gpu.normalImage.get(), sampler.get()}};
         gpu.descriptor = device.createBindingSet(*materialLayout, writes);

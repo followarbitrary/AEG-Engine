@@ -20,6 +20,8 @@ void selectMaterial(EditorState& state, std::size_t index) {
     state.materialAlphaMode = material.alphaMode;
     state.materialOpacity = material.baseColor.w;
     state.materialAlphaCutoff = material.alphaCutoff;
+    state.materialMetallic = material.metallicFactor;
+    state.materialRoughness = material.roughnessFactor;
     state.materialNotice.clear();
     state.materialError.clear();
     state.materialEditorInitialized = true;
@@ -65,6 +67,22 @@ void updateAlpha(EditorState& state, render::Renderer& renderer) {
         std::cerr << state.materialError << '\n';
     }
 }
+
+void updatePbr(EditorState& state, render::Renderer& renderer) {
+    try {
+        auto candidate = state.model;
+        assets::setMaterialPbr(candidate, state.selectedMaterial, state.materialMetallic, state.materialRoughness);
+        std::string notice = "已应用所选材质的 PBR 参数。";
+        renderer.uploadModel(candidate);
+        state.model = std::move(candidate);
+        state.materialNotice = std::move(notice);
+        state.materialError.clear();
+    } catch (const std::exception& error) {
+        state.materialNotice.clear();
+        state.materialError = std::string("材质修改失败，已保留当前模型：") + error.what();
+        std::cerr << state.materialError << '\n';
+    }
+}
 }
 
 void resetMaterialEditor(EditorState& state) {
@@ -74,6 +92,8 @@ void resetMaterialEditor(EditorState& state) {
     state.materialAlphaMode = assets::AlphaMode::Opaque;
     state.materialOpacity = 1;
     state.materialAlphaCutoff = 0.5f;
+    state.materialMetallic = 0;
+    state.materialRoughness = 0.5f;
     state.materialNotice.clear();
     state.materialError.clear();
 }
@@ -99,6 +119,11 @@ void drawMaterialSection(EditorState& state, render::Renderer& renderer) {
         }
         ImGui::EndCombo();
     }
+    ImGui::TextUnformatted("PBR 材质");
+    ImGui::SliderFloat("金属度###Metallic", &state.materialMetallic, 0, 1, "%.2f");
+    ImGui::SliderFloat("粗糙度###Roughness", &state.materialRoughness, 0, 1, "%.2f");
+    if (ImGui::Button("应用 PBR 参数###Apply PBR", {-1, 0})) updatePbr(state, renderer);
+    ImGui::Separator();
     const char* alphaModes[]{"不透明", "透明裁切", "半透明"};
     auto alphaMode = static_cast<int>(state.materialAlphaMode);
     ImGui::TextUnformatted("透明模式");

@@ -226,7 +226,8 @@ bool sameMaterial(const aeg::assets::MaterialData& a, const aeg::assets::Materia
     return a.name == b.name && sameVector(a.baseColor, b.baseColor) && sameImage(a.texture, b.texture) &&
            a.hasTexture == b.hasTexture && a.alphaMode == b.alphaMode && sameFloat(a.alphaCutoff, b.alphaCutoff) &&
            sameImage(a.normalTexture, b.normalTexture) && a.hasNormalMap == b.hasNormalMap &&
-           sameFloat(a.normalScale, b.normalScale) && a.normalTextureSource == b.normalTextureSource;
+           sameFloat(a.normalScale, b.normalScale) && a.normalTextureSource == b.normalTextureSource &&
+           sameFloat(a.metallicFactor, b.metallicFactor) && sameFloat(a.roughnessFactor, b.roughnessFactor);
 }
 bool sameMesh(const aeg::assets::MeshData& a, const aeg::assets::MeshData& b) {
     if (a.name != b.name || a.indices != b.indices || a.materialIndex != b.materialIndex || a.hasUV0 != b.hasUV0 ||

@@ -66,6 +66,8 @@ struct EditorState {
     assets::AlphaMode materialAlphaMode{assets::AlphaMode::Opaque};
     float materialOpacity{1};
     float materialAlphaCutoff{0.5f};
+    float materialMetallic{0};
+    float materialRoughness{0.5f};
     std::string materialNotice;
     std::string materialError;
     bool autoRotate{false};
