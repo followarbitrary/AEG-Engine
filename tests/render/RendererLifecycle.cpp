@@ -1,5 +1,5 @@
 #include <ModelImporter.hpp>
-#include <VulkanRenderer.hpp>
+#include "RendererHarness.hpp"
 #include <OrbitCamera.hpp>
 #include <GLFW/glfw3.h>
 #include <imgui.h>
@@ -33,12 +33,13 @@ int main(int argc, char** argv) {
     int result = 0;
     try {
         const std::filesystem::path runtime(argv[1]), fixture(argv[2]), output(argv[3]);
-        aeg::render::VulkanRenderer renderer(window, runtime / "shaders", true);
+        aeg::tests::TestRenderer renderer(window, runtime / "shaders", true);
         auto source = aeg::assets::loadModel(runtime / "assets/models/demo.obj");
         renderer.uploadModel(source);
         aeg::camera::OrbitCamera camera;
         camera.fit(source.bounds);
         aeg::render::RenderSettings settings;
+        ImTextureID viewportId{};
         auto render = [&](std::uint32_t width, std::uint32_t height) {
             bool drew = false;
             for (int retry = 0; retry < 5 && !drew; ++retry) {
@@ -49,7 +50,11 @@ int main(int argc, char** argv) {
                     ImGui::SetNextWindowPos({40, 60}, ImGuiCond_Always);
                     ImGui::SetNextWindowSize({500, 400}, ImGuiCond_Always);
                     ImGui::Begin("Scaled viewport");
-                    ImGui::Image(renderer.viewportTexture(), {400, 300});
+                    const auto currentId = renderer.viewportTexture();
+                    if (viewportId && viewportId != currentId)
+                        throw std::runtime_error("viewport replacement changed the stable GUI texture ID");
+                    viewportId = currentId;
+                    ImGui::Image(currentId, {400, 300});
                     ImGui::End();
                     drew = true;
                 });

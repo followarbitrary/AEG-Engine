@@ -1,27 +1,20 @@
 #pragma once
-#include "vulkan/VulkanResources.hpp"
+#include <RhiBinding.hpp>
 #include "SceneUniform.hpp"
+#include <memory>
 #include <vector>
-
 namespace aeg::render {
 struct GpuMesh {
-    detail::Buffer vertices, indices;
+    std::unique_ptr<rhi::Buffer> vertices, indices;
     std::uint32_t indexCount{}, material{};
 };
-
 struct GpuMaterial {
-    detail::Image image, normalImage;
-    VkDescriptorSet descriptor{};
+    std::unique_ptr<rhi::Texture> image, normalImage;
     MaterialPush parameters;
+    std::unique_ptr<rhi::BindingSet> descriptor;
 };
-
 struct GpuModel {
-    VkDevice device{};
-    VkDescriptorPool pool{};
     std::vector<GpuMesh> meshes;
     std::vector<GpuMaterial> materials;
-    ~GpuModel() {
-        if (pool) vkDestroyDescriptorPool(device, pool, nullptr);
-    }
 };
 }

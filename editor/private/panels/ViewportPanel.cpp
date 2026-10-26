@@ -21,7 +21,7 @@ foundation::Bounds transformedBounds(const foundation::Bounds& bounds, const glm
 
 }
 
-void drawViewportPanel(EditorState& state, render::VulkanRenderer& renderer) {
+void drawViewportPanel(EditorState& state, render::Renderer& renderer, EditorGraphics& graphics) {
     auto& viewportWidth = state.viewportWidth;
     auto& viewportHeight = state.viewportHeight;
     auto& viewportDrag = state.viewportDrag;
@@ -36,13 +36,13 @@ void drawViewportPanel(EditorState& state, render::VulkanRenderer& renderer) {
     if (ImGui::Begin(viewportWindow, nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
         const auto available = ImGui::GetContentRegionAvail();
         if (available.x >= 1 && available.y >= 1) {
-            viewportWidth = static_cast<std::uint32_t>(
-                std::max(1.0f, std::floor(available.x * io.DisplayFramebufferScale.x)));
-            viewportHeight = static_cast<std::uint32_t>(
-                std::max(1.0f, std::floor(available.y * io.DisplayFramebufferScale.y)));
+            viewportWidth =
+                static_cast<std::uint32_t>(std::max(1.0f, std::floor(available.x * io.DisplayFramebufferScale.x)));
+            viewportHeight =
+                static_cast<std::uint32_t>(std::max(1.0f, std::floor(available.y * io.DisplayFramebufferScale.y)));
             renderer.resizeViewport(viewportWidth, viewportHeight);
             const auto imagePosition = ImGui::GetCursorScreenPos();
-            ImGui::Image(renderer.viewportTexture(), available);
+            ImGui::Image(graphics.viewportTexture(), available);
             // Image has no active ID. Own the gesture so ImGui's window-move
             // ID cannot consume drags over the scene, while other widgets
             // still block camera input.
@@ -77,7 +77,6 @@ void drawViewportPanel(EditorState& state, render::VulkanRenderer& renderer) {
         frameRequested = false;
     }
     settings.viewProjection =
-        camera.projection(static_cast<float>(viewportWidth) / static_cast<float>(viewportHeight)) *
-        camera.view();
+        camera.projection(static_cast<float>(viewportWidth) / static_cast<float>(viewportHeight)) * camera.view();
 }
 }

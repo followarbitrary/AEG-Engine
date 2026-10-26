@@ -17,7 +17,6 @@ void initializeEditorWindow(WindowLifetime& lifetime, const EditorOptions& optio
     glfwSetErrorCallback([](int code, const char* text) { std::cerr << "GLFW " << code << ": " << text << '\n'; });
     if (!glfwInit()) throw std::runtime_error("GLFW 初始化失败。");
     lifetime.initialized = true;
-    if (!glfwVulkanSupported()) throw std::runtime_error("未找到 Vulkan 加载器或兼容的驱动程序。");
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_VISIBLE, options.hidden ? GLFW_FALSE : GLFW_TRUE);
     glfwWindowHint(GLFW_FOCUSED, options.hidden ? GLFW_FALSE : GLFW_TRUE);

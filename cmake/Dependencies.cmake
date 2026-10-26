@@ -66,6 +66,7 @@ FetchContent_Declare(stb
 
 FetchContent_MakeAvailable(glfw glm assimp imgui stb)
 include("${CMAKE_CURRENT_LIST_DIR}/ApplyAssimpMmdPatch.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/ApplyImGuiVulkanPatch.cmake")
 
 if(MINGW)
     # Assimp 5.4.3 exports a blanket -Bstatic plus manual stdc++/winpthread
@@ -87,18 +88,22 @@ if(MINGW)
         PATHS "${aeg_mingw_bin}" NO_DEFAULT_PATH NO_CACHE)
 endif()
 
-add_library(aeg_imgui STATIC
+add_library(aeg_imgui_core STATIC
     "${imgui_SOURCE_DIR}/imgui.cpp"
     "${imgui_SOURCE_DIR}/imgui_draw.cpp"
     "${imgui_SOURCE_DIR}/imgui_tables.cpp"
-    "${imgui_SOURCE_DIR}/imgui_widgets.cpp"
-    "${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp"
-    "${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp")
-target_include_directories(aeg_imgui SYSTEM PUBLIC "${imgui_SOURCE_DIR}" "${imgui_SOURCE_DIR}/backends")
-target_link_libraries(aeg_imgui PRIVATE glfw Vulkan::Vulkan)
-target_compile_definitions(aeg_imgui PUBLIC GLFW_INCLUDE_NONE)
+    "${imgui_SOURCE_DIR}/imgui_widgets.cpp")
+target_include_directories(aeg_imgui_core SYSTEM PUBLIC "${imgui_SOURCE_DIR}")
+add_library(aeg_imgui_glfw STATIC "${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp")
+target_include_directories(aeg_imgui_glfw SYSTEM PUBLIC "${imgui_SOURCE_DIR}/backends")
+target_link_libraries(aeg_imgui_glfw PUBLIC aeg_imgui_core PRIVATE glfw)
+target_compile_definitions(aeg_imgui_glfw PUBLIC GLFW_INCLUDE_NONE)
+
+add_library(aeg_imgui_vulkan STATIC "${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp")
+target_include_directories(aeg_imgui_vulkan SYSTEM PUBLIC "${imgui_SOURCE_DIR}/backends")
+target_link_libraries(aeg_imgui_vulkan PUBLIC aeg_imgui_core PRIVATE Vulkan::Vulkan)
 if(WIN32)
     # ImGui 1.91 disables native IME integration for non-MSVC unless opted in.
-    target_compile_definitions(aeg_imgui PRIVATE IMGUI_ENABLE_WIN32_DEFAULT_IME_FUNCTIONS)
-    target_link_libraries(aeg_imgui PUBLIC imm32)
+    target_compile_definitions(aeg_imgui_core PRIVATE IMGUI_ENABLE_WIN32_DEFAULT_IME_FUNCTIONS)
+    target_link_libraries(aeg_imgui_core PUBLIC imm32)
 endif()

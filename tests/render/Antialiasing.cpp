@@ -1,4 +1,4 @@
-#include <VulkanRenderer.hpp>
+#include "RendererHarness.hpp"
 #include <GLFW/glfw3.h>
 #include <imgui.h>
 #include <algorithm>
@@ -31,8 +31,7 @@ Image readPpm(const std::filesystem::path& path) {
     unsigned maximum = 0;
     Image image;
     input >> magic >> image.width >> image.height >> maximum;
-    require(magic == "P6" && maximum == 255 && image.width && image.height,
-            "invalid AA PPM header: " + path.string());
+    require(magic == "P6" && maximum == 255 && image.width && image.height, "invalid AA PPM header: " + path.string());
     require(input.get() == '\n', "missing AA PPM header terminator");
     image.rgb.resize(static_cast<std::size_t>(image.width) * image.height * 3);
     input.read(reinterpret_cast<char*>(image.rgb.data()), static_cast<std::streamsize>(image.rgb.size()));
@@ -50,8 +49,7 @@ void sameExtent(const Image& actual, const Image& expected) {
 void stableFlatImage(const Image& actual, const Image& expected) {
     sameExtent(actual, expected);
     for (std::size_t i = 0; i < actual.rgb.size(); ++i)
-        require(std::abs(int(actual.rgb[i]) - int(expected.rgb[i])) <= 1,
-                "AA changed an empty, constant-color scene");
+        require(std::abs(int(actual.rgb[i]) - int(expected.rgb[i])) <= 1, "AA changed an empty, constant-color scene");
 }
 
 std::size_t intermediatePixels(const Image& image) {
@@ -150,7 +148,7 @@ int main(int argc, char** argv) {
     try {
         const std::filesystem::path runtime(argv[1]), output(argv[2]);
         std::filesystem::create_directories(output);
-        aeg::render::VulkanRenderer renderer(window, runtime / "shaders", true);
+        aeg::tests::TestRenderer renderer(window, runtime / "shaders", true);
         const auto mask = renderer.supportedMsaaSamples();
         require((mask & 1u) && !(mask & ~15u), "invalid supported MSAA mask");
         require(renderer.antialiasing() == aeg::render::AntialiasingSettings{}, "AA must default to Off");
@@ -158,6 +156,7 @@ int main(int argc, char** argv) {
         settings.unlit = true;
         settings.background = {0.125f, 0.25f, 0.5f, 1};
         constexpr std::uint32_t width = 321, height = 239;
+        ImTextureID viewportId{};
 
         auto render = [&](std::uint32_t w, std::uint32_t h, aeg::render::AntialiasingSettings aa,
                           bool setDuringUi = false) {
@@ -172,13 +171,17 @@ int main(int argc, char** argv) {
                     ImGui::SetNextWindowSize({510, 410}, ImGuiCond_Always);
                     ImGui::Begin("AA scaled viewport");
                     // Both target changes precede recording this descriptor in ImGui.
-                    ImGui::Image(renderer.viewportTexture(), {457, 337});
+                    const auto currentId = renderer.viewportTexture();
+                    require(!viewportId || viewportId == currentId, "AA change replaced the stable GUI texture ID");
+                    viewportId = currentId;
+                    ImGui::Image(currentId, {457, 337});
                     ImGui::End();
                     drew = true;
                 });
             }
             require(drew, "no frame rendered after window/viewport resize");
-            require(renderer.antialiasing() == aeg::render::AntialiasingSettings{expectedSamples(mask, aa.msaaSamples), aa.fxaa},
+            require(renderer.antialiasing() ==
+                        aeg::render::AntialiasingSettings{expectedSamples(mask, aa.msaaSamples), aa.fxaa},
                     "effective MSAA/FXAA setting or unsupported-count fallback is wrong");
         };
         auto capture = [&](const std::string& name, std::uint32_t w = 321, std::uint32_t h = 239) {
@@ -259,8 +262,8 @@ int main(int argc, char** argv) {
 
         // Repeat target replacement with FXAA on/off, every supported count,
         // scaled ImGui sampling, one-pixel axes, odd extents and swapchain resize.
-        constexpr std::array<std::array<std::uint32_t, 2>, 6> sizes{{
-            {93, 71}, {1, 1}, {1, 37}, {41, 1}, {3, 5}, {319, 181}}};
+        constexpr std::array<std::array<std::uint32_t, 2>, 6> sizes{
+            {{93, 71}, {1, 1}, {1, 37}, {41, 1}, {3, 5}, {319, 181}}};
         std::size_t iteration = 0;
         for (int cycle = 0; cycle < 2; ++cycle)
             for (const auto samples : {1u, 2u, 4u, 8u}) {
@@ -281,7 +284,8 @@ int main(int argc, char** argv) {
         renderer.uploadModel(invisible);
         render(width, height, {8, true});
         const auto emptyReplacement = capture("replaced-offscreen");
-        require(std::all_of(emptyReplacement.rgb.begin(), emptyReplacement.rgb.end(), [](auto value) { return value == 0; }),
+        require(std::all_of(emptyReplacement.rgb.begin(), emptyReplacement.rgb.end(),
+                            [](auto value) { return value == 0; }),
                 "replaced model left stale pixels in the postprocessed output");
         renderer.uploadModel(source);
         render(width, height, {});

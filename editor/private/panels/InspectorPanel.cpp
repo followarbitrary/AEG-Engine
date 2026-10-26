@@ -5,7 +5,7 @@
 #include <iostream>
 
 namespace aeg::editor {
-void drawInspectorPanel(EditorState& state, render::VulkanRenderer& renderer) {
+void drawInspectorPanel(EditorState& state, render::Renderer& renderer) {
     auto& transform = state.transform;
     auto& autoRotate = state.autoRotate;
     auto& settings = state.settings;

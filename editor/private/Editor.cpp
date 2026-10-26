@@ -14,7 +14,7 @@
 #include <string>
 
 namespace aeg::editor {
-int runEditor(const EditorOptions& options) {
+int runEditor(const EditorOptions& options, const EditorBackendFactory& factory) {
     WindowLifetime lifetime;
     initializeEditorWindow(lifetime, options);
     configureStyle();
@@ -22,7 +22,8 @@ int runEditor(const EditorOptions& options) {
     std::cout << "Font: " << foundation::pathToUtf8(font.source) << '\n';
 
     // This scope makes backend teardown precede the ImGui context and native window.
-    render::VulkanRenderer renderer(lifetime.window, options.resourceDirectory / "shaders", options.validation);
+    EditorGraphics graphics(lifetime.window, options.resourceDirectory / "shaders", factory, options.validation);
+    auto& renderer = graphics.renderer();
     renderer.setAntialiasing({options.msaaSamples, options.fxaa, options.taa});
     EditorState state;
     state.antialiasing = renderer.antialiasing();
@@ -37,14 +38,15 @@ int runEditor(const EditorOptions& options) {
         std::cerr << state.antialiasingNotice << '\n';
     }
     std::cout << "Antialiasing: MSAA " << state.antialiasing.msaaSamples << "x | FXAA "
-              << (state.antialiasing.fxaa ? "on" : "off") << " | TAA " << (state.antialiasing.taa ? "on" : "off") << '\n';
+              << (state.antialiasing.fxaa ? "on" : "off") << " | TAA " << (state.antialiasing.taa ? "on" : "off")
+              << '\n';
     std::cout << "GPU: " << renderer.deviceName() << '\n';
     state.model =
         assets::loadModel(options.initialModel.empty() ? options.resourceDirectory / "assets" / "models" / "demo.obj"
                                                        : options.initialModel);
     renderer.uploadModel(state.model);
-    std::cout << "Model: " << foundation::pathToUtf8(state.model.source) << " (" << state.model.vertexCount() << " vertices, "
-              << state.model.triangleCount() << " triangles)\n";
+    std::cout << "Model: " << foundation::pathToUtf8(state.model.source) << " (" << state.model.vertexCount()
+              << " vertices, " << state.model.triangleCount() << " triangles)\n";
     state.camera.fit(state.model.bounds);
     renderer.resetTemporalHistory();
     const auto initialPath = foundation::pathToUtf8(state.model.source);
@@ -68,14 +70,14 @@ int runEditor(const EditorOptions& options) {
         if (state.autoRotate)
             state.transform.rotation.y = std::fmod(state.transform.rotation.y + elapsed * 22.0f, 360.0f);
         bool builtUi = false;
-        renderer.drawFrame(state.settings, [&] {
+        graphics.drawFrame(state.settings, [&] {
             builtUi = true;
             drawWorkspace(renderer);
             drawScenePanel(state);
             drawImportPanel(state);
             // The inspector applies AA before the viewport records its image descriptor.
             drawInspectorPanel(state, renderer);
-            drawViewportPanel(state, renderer);
+            drawViewportPanel(state, renderer, graphics);
         });
         if (builtUi) ++state.frames;
     }

@@ -20,7 +20,7 @@ void selectMaterial(EditorState& state, std::size_t index) {
     state.materialEditorInitialized = true;
 }
 
-void updateNormalMap(EditorState& state, render::VulkanRenderer& renderer, bool clear) {
+void updateNormalMap(EditorState& state, render::Renderer& renderer, bool clear) {
     try {
         if (!clear && !state.normalMapPath[0]) throw std::runtime_error("请输入 RGB 法线贴图路径。");
         auto candidate = state.model;
@@ -53,7 +53,7 @@ void resetMaterialEditor(EditorState& state) {
     state.materialError.clear();
 }
 
-void drawMaterialSection(EditorState& state, render::VulkanRenderer& renderer) {
+void drawMaterialSection(EditorState& state, render::Renderer& renderer) {
     if (!ImGui::CollapsingHeader("材质###Materials", ImGuiTreeNodeFlags_DefaultOpen)) return;
     if (state.model.materials.empty()) {
         ImGui::TextUnformatted("当前模型没有可编辑材质。");

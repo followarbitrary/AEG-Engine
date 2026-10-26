@@ -108,7 +108,7 @@ void printHelp() {
 }
 }
 
-int runCommandLine(int argc, char** argv) {
+int runCommandLine(int argc, char** argv, const editor::EditorBackendFactory& factory) {
 #ifdef _WIN32
     ConsoleUtf8 consoleUtf8;
 #endif
@@ -161,7 +161,7 @@ int runCommandLine(int argc, char** argv) {
                 options.capturePath = foundation::pathFromUtf8(value);
         }
         options.resourceDirectory = executableDirectory(argv[0]);
-        return editor::runEditor(options);
+        return editor::runEditor(options, factory);
     } catch (const std::exception& error) {
         std::cerr << "AEG 错误：" << error.what() << '\n';
         return 1;

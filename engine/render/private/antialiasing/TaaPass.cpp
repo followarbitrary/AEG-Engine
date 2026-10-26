@@ -1,54 +1,44 @@
-#include "VulkanRendererImpl.hpp"
+#include "RendererImpl.hpp"
 
 namespace aeg::render {
-void VulkanRenderer::Impl::resetTemporalHistory() noexcept {
-    temporalHistory.valid = false;
-    temporalHistory.frames = 0;
-    temporalHistory.readIndex = 1;
-    temporalHistory.jitterIndex = 0;
+void Renderer::Impl::resetTemporalHistory() noexcept {
+    temporalHistory = TemporalHistory{};
+    pendingFrame = false;
+    pendingOutput.reset();
 }
 
-bool VulkanRenderer::Impl::perspectiveProjection(const glm::mat4& matrix) {
+bool Renderer::Impl::perspectiveProjection(const glm::mat4& matrix) {
     return glm::dot(glm::vec3(matrix[0][3], matrix[1][3], matrix[2][3]),
                     glm::vec3(matrix[0][3], matrix[1][3], matrix[2][3])) > 1e-12f;
 }
 
-void VulkanRenderer::Impl::drawTemporal() {
+void Renderer::Impl::drawTemporal(rhi::CommandList& commands) {
     if (!aa.taa) return;
-    const auto writeIndex = 1u - temporalHistory.readIndex;
-    VkRenderPassBeginInfo pass{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
-    pass.renderPass = temporalPass;
-    pass.framebuffer = viewport->temporalFrames[writeIndex];
-    pass.renderArea = {{0, 0}, {viewport->width, viewport->height}};
-    vkCmdBeginRenderPass(command, &pass, VK_SUBPASS_CONTENTS_INLINE);
-    VkViewport target{0, 0, static_cast<float>(viewport->width), static_cast<float>(viewport->height), 0, 1};
-    VkRect2D scissor{{0, 0}, {viewport->width, viewport->height}};
-    vkCmdSetViewport(command, 0, 1, &target);
-    vkCmdSetScissor(command, 0, 1, &scissor);
-    vkCmdBindPipeline(command, VK_PIPELINE_BIND_POINT_GRAPHICS, temporalPipeline);
-    vkCmdBindDescriptorSets(command, VK_PIPELINE_BIND_POINT_GRAPHICS, temporalLayout, 0, 1,
-                            &viewport->temporalDescriptors[temporalHistory.readIndex], 0, nullptr);
-    const TemporalPush push{{1.0f / static_cast<float>(viewport->width),
-                              1.0f / static_cast<float>(viewport->height)},
-        std::min(0.9f, static_cast<float>(temporalHistory.frames) / (static_cast<float>(temporalHistory.frames) + 1)),
-        temporalHistory.valid ? 1u : 0u};
-    vkCmdPushConstants(command, temporalLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push), &push);
-    vkCmdDraw(command, 3, 1, 0, 0);
-    vkCmdEndRenderPass(command);
+    if (!viewport->historyInitialized) {
+        // The first temporal pass binds both history images, even when it
+        // ignores their contents. Only a successful submit initializes them.
+        for (std::size_t i = 0; i < 2; ++i)
+            for (const auto& image : {viewport->historyColor[i], viewport->historyDepth[i]})
+                commands.transition(*image, rhi::ResourceState::Undefined, rhi::ResourceState::Sampled);
+    }
+    const auto writeIndex = 1u - recordingHistory.readIndex;
+    commands.beginRenderPass(*temporalPass, *viewport->temporalFrames[writeIndex], viewport->extent(), {});
+    commands.setViewport(viewport->extent());
+    commands.bindPipeline(*temporalPipeline);
+    commands.bindSet(*temporalLayout, 0, *viewport->temporalDescriptors[recordingHistory.readIndex]);
+    const TemporalPush push{
+        {1.0f / static_cast<float>(viewport->width), 1.0f / static_cast<float>(viewport->height)},
+        std::min(0.9f, static_cast<float>(recordingHistory.frames) / (static_cast<float>(recordingHistory.frames) + 1)),
+        recordingHistory.valid ? 1u : 0u};
+    commands.pushConstants(*temporalLayout, std::as_bytes(std::span(&push, 1)));
+    commands.draw(3);
+    commands.endRenderPass();
 }
 
-void VulkanRenderer::Impl::pointFinalDescriptorAtTemporalOutput() {
-    if (!aa.taa) return;
-    // Image has recorded only this stable descriptor handle. The previous
-    // frame fence is complete; updating its view here cannot invalidate it.
-    const VkDescriptorImageInfo image{viewportSampler, viewport->historyColor[1u - temporalHistory.readIndex].view,
-                                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-    VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-    write.dstSet = aa.fxaa ? viewport->postDescriptor : viewport->descriptor;
-    write.dstBinding = 0;
-    write.descriptorCount = 1;
-    write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    write.pImageInfo = &image;
-    vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+void Renderer::Impl::pointFinalDescriptorAtTemporalOutput() {
+    if (!aa.taa || !aa.fxaa) return;
+    const std::array writes{rhi::BindingWrite{0, nullptr, viewport->historyColor[1u - recordingHistory.readIndex].get(),
+                                              viewportSampler.get()}};
+    viewport->postDescriptor->update(writes);
 }
 }

@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 #include <filesystem>
+#include <EditorBackend.hpp>
 
 namespace aeg::editor {
 struct EditorOptions {
@@ -15,5 +16,5 @@ struct EditorOptions {
     bool validation{true};
     bool hidden{false};
 };
-int runEditor(const EditorOptions& options);
+int runEditor(const EditorOptions& options, const EditorBackendFactory& factory);
 }

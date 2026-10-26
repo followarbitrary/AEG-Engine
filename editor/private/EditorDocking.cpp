@@ -19,7 +19,7 @@ void dockLayout(ImGuiID dockId) {
 }
 }
 
-void drawWorkspace(render::VulkanRenderer& renderer) {
+void drawWorkspace(render::Renderer& renderer) {
     const auto& io = ImGui::GetIO();
     const auto* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowPos(viewport->WorkPos);
@@ -28,8 +28,8 @@ void drawWorkspace(render::VulkanRenderer& renderer) {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     ImGui::Begin("AEG 工作区###AEG Workspace", nullptr,
                  ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
-                     ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus |
-                     ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoDocking);
+                     ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNavFocus |
+                     ImGuiWindowFlags_MenuBar | ImGuiWindowFlags_NoDocking);
     ImGui::PopStyleVar();
     if (ImGui::BeginMenuBar()) {
         ImGui::TextColored({0.40f, 0.79f, 0.95f, 1}, "AEG");

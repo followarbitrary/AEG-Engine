@@ -1,8 +1,9 @@
 add_executable(aeg_editor
     private/main.cpp
+    private/GraphicsBackend.cpp
     private/CommandLine.cpp)
 target_include_directories(aeg_editor PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/private")
-target_link_libraries(aeg_editor PRIVATE aeg::editor aeg::foundation)
+target_link_libraries(aeg_editor PRIVATE aeg::editor aeg::foundation aeg::rhi_vulkan aeg::rhi_vulkan_gui)
 if(WIN32)
     target_link_libraries(aeg_editor PRIVATE shell32)
 endif()

@@ -1,6 +1,6 @@
 # AEG Engine
 
-基于 **C++23、Vulkan 1.2、Dear ImGui** 的 Windows 桌面模型查看器，也是一个可继续扩展的引擎起点。CPU 模型导入、轨道相机、Vulkan 渲染器和编辑器界面分开组织；默认直接打开随程序附带的演示模型。
+基于 **C++23、Vulkan 1.2、Dear ImGui** 的 Windows 桌面模型查看器，也是一个可继续扩展的引擎起点。CPU 模型导入、轨道相机、通用 Renderer、RHI、Vulkan 后端和编辑器界面分开组织；默认直接打开随程序附带的演示模型。
 
 ## 环境要求
 
@@ -155,7 +155,7 @@ glTF 的 OPAQUE 会忽略 alpha，MASK 使用模型指定的 cutoff（默认 0.5
 
 ## 已验证的里程碑
 
-2026-10-26 在本机 MSVC 19.51 / RTX 5070 / Vulkan SDK 1.4.357.0 上完成 Debug、Release 编译。完整 CTest **24/24 通过**，包含公开接口、相机、模型导入、法线贴图、自动查找、MMD 效果绑定、字体七个 CPU 目标，以及 **17 项真实 GPU 测试**。原有 **33 项模型/相机用例及 8 项字体用例**保留，法线导入与通用材质接口新增 13 组用例，自动查找新增 15 组用例，EMD/FX 绑定新增 14 组用例。Release 和 MinGW 的七个 CPU 目标也通过验证。CPU 回归覆盖左右拖动时模型表面的投影运动方向，以及 PMX 编码、坐标/绕序、UV、材质、中文路径、透明裁切和错误输入；字体回归检查中文实际字形、Unicode 字体路径、字体数据所有权和无效字体诊断；GPU 测试另检查 PMX 场景确实可见。
+2026-10-26 在本机 MSVC 19.51 / RTX 5070 / Vulkan SDK 1.4.357.0 上完成 Debug、Release 和 MinGW 编译。完整 Debug CTest **26/26 通过**，包含公开接口、相机、模型导入、法线贴图、自动查找、MMD 效果绑定、字体、RHI 描述校验及模拟渲染命令九个 CPU 目标，以及 **17 项真实 GPU 测试**。原有 **33 项模型/相机用例及 8 项字体用例**保留，法线导入与通用材质接口新增 13 组用例，自动查找新增 15 组用例，EMD/FX 绑定新增 14 组用例。Release 和 MinGW 的九个 CPU 目标也通过验证。CPU 回归覆盖左右拖动时模型表面的投影运动方向，以及 PMX 编码、坐标/绕序、UV、材质、中文路径、透明裁切和错误输入；字体回归检查中文实际字形、Unicode 字体路径、字体数据所有权和无效字体诊断；GPU 测试另检查 PMX 场景确实可见。
 
 GPU 测试检查场景截图确实包含模型，覆盖 OPAQUE/MASK 材质、含空格及中文资源 URI、窗口与视口反复缩放、导入替换失败后画面保持不变，以及 ImGui 初始化失败时的资源回收。测试同时检查 Vulkan 同步验证及退出阶段的错误输出。测试使用隐藏窗口；`-GpuTests` 仍需要可用的 Windows 桌面和 Vulkan 驱动。
 
@@ -186,10 +186,14 @@ EMD 真实窗口验证确认了声明图片自动加载、手动清除/覆盖以
 | `engine/foundation/` | `aeg::foundation` | `aeg::foundation`，Bounds、UTF-8 路径处理 |
 | `engine/camera/` | `aeg::camera` | `aeg::camera`，轨道相机 |
 | `engine/assets/` | `aeg::assets` | `aeg::assets`，CPU 模型数据、Assimp 导入、纹理解码、PMX 校验 |
-| `engine/render/` | `aeg::render` | `aeg::render`，Vulkan 设备、交换链、场景、视口、抗锯齿、截图 |
-| `editor/` | `aeg::editor` | `aeg::editor`，窗口、主循环、停靠、各面板与字体 |
-| `apps/editor/private/` | `aeg_editor` | 全局 main、`aeg::app` 命令行入口 |
-| `tests/{foundation,camera,assets,render,editor}/` | 对应测试目标 | 与功能目录对应的 CPU/GPU 回归；数据保留在 `tests/fixtures/` |
+| `engine/rhi/` | `aeg::rhi` | `aeg::rhi`，设备、资源、绑定、管线、命令、交换链的通用接口与描述校验 |
+| `engine/rhi/vulkan/` | `aeg::rhi_vulkan` | `aeg::rhi::vulkan`，Vulkan 设备、内存、同步、交换链及着色器编译适配 |
+| `engine/gui/` | `aeg::gui` | `aeg::gui`，ImGui 绘制及纹理注册适配接口 |
+| `engine/rhi/vulkan/private/imgui/` | `aeg::rhi_vulkan_gui` | Vulkan ImGui 适配实现，可访问后端内部原生句柄 |
+| `engine/render/` | `aeg::render` | `aeg::render`，通过 RHI 实现场景、材质、视口、抗锯齿、截图 |
+| `editor/` | `aeg::editor` | `aeg::editor`，窗口、帧协调、GUI 纹理生命周期、停靠、面板与字体 |
+| `apps/editor/private/` | `aeg_editor` | 全局 main、`aeg::app` 命令行入口与 Vulkan 工厂装配 |
+| `tests/{foundation,camera,assets,rhi,render,editor}/` | 对应测试目标 | 与功能目录对应的 CPU/GPU 回归；数据保留在 `tests/fixtures/` |
 | `assets/` | 运行时复制 | 离线演示模型与纹理 |
 
 各模块都有自己的 `CMakeLists.txt`。公开头文件直接位于 `public/`，内部头文件与源文件位于 `private/`。例如：
@@ -198,20 +202,21 @@ EMD 真实窗口验证确认了声明图片自动加载、手动清除/覆盖以
 engine/render/
 ├─ CMakeLists.txt
 ├─ public/
-│  ├─ VulkanRenderer.hpp
+│  ├─ Renderer.hpp
 │  ├─ RenderSettings.hpp
 │  └─ AntialiasingSettings.hpp
 └─ private/
-   ├─ VulkanRenderer.cpp
-   ├─ VulkanRendererImpl.hpp
-   ├─ vulkan/
+   ├─ Renderer.cpp
+   ├─ RendererImpl.hpp
    ├─ scene/
    ├─ viewport/
    ├─ antialiasing/
    └─ shaders/{scene,postprocess}/
 ```
 
-`VulkanRenderer.cpp` 保留初始化、帧提交和销毁的协调；设备、交换链、资源、管线、场景、视口和各抗锯齿通道的实现分别位于对应文件。GLSL 也随渲染模块组织，编译后的运行时文件名和目录保持一致。
+RHI 的十个公开头文件平铺在 `engine/rhi/public/`，只依赖 C++ 标准库，不包含 Vulkan、GLFW、ImGui、Windows、GLM 或模型数据类型。Vulkan 资源、命令与呈现实现分别放在 `engine/rhi/vulkan/private/{device,resources,bindings,pipelines,commands,presentation}/`。模型和材质上传、场景绘制、视口、MSAA／TAA／FXAA 与截图转换均通过真实 RHI 对象和命令实现，通用 Renderer 不调用 Vulkan，也不持有 ImGui 或窗口对象。
+
+ImGui 分成 core、GLFW 平台和 Vulkan 绘制三个目标。应用入口在创建窗口后通过工厂回调装配 Vulkan 设备、交换链和 GUI 适配器；`EditorGraphics` 协调等待与获取图像、UI 构建、场景与后处理、UI 绘制、提交及呈现。只有成功提交才推进 TAA 历史，呈现要求重建不会回滚已提交帧。GUI 使用稳定的纹理注册标识，并保留输出图像所有权直到注册更新或移除。GLSL 保留在渲染模块，Vulkan 编译命令归后端适配器，运行时路径仍为 `shaders/`。
 
 使用模块时链接其 CMake 目标，通过扁平头文件名引用公开接口：
 
@@ -222,15 +227,23 @@ target_link_libraries(my_tool PRIVATE aeg::camera aeg::render)
 ```cpp
 #include <OrbitCamera.hpp>
 #include <ModelImporter.hpp>
-#include <VulkanRenderer.hpp>
+#include <Renderer.hpp>
 
 aeg::camera::OrbitCamera camera;
 auto model = aeg::assets::loadModel(path);
 ```
 
-CMake 仅导出各模块的 `public/`；`private/` 只供模块自身使用。公开接口测试不获得任何模块的 private 搜索路径，10 个公开头文件也分别通过独立编译检查。字体白盒测试单独获得 `editor/private/fonts/`，该目录不会传递给应用程序。GPU 测试链接同一个渲染库，统一复用其实现。`aeg_core_tests` 保留为相机、模型导入与法线贴图导入测试的构建聚合目标。
+CMake 仅导出各模块的 `public/`；Vulkan GUI 桥接与核心后端属于同一后端模块，内部共用私有互操作声明。RHI 的十个头文件分别接受独立编译检查，公开接口测试不获得模块的 private 搜索路径。字体白盒测试单独获得 `editor/private/fonts/`，该目录不会传递给应用程序。GPU 测试复用产品的 `EditorGraphics`、Renderer 和 Vulkan 后端；测试辅助类只提供调用转发，不重编另一份渲染实现。`aeg_core_tests` 保留为相机、模型导入与法线贴图导入测试的构建聚合目标。
 
-重构前后相同输入的 TAA 与 MSAA+FXAA 场景截图逐字节一致；导入、相机与抗锯齿行为继续通过现有回归验证。
+可单独验证不需要图形 SDK 的 RHI 接口（需要可用 C++23 编译器与 Ninja）：
+
+```powershell
+cmake -S tests/rhi/standalone -B build/rhi-standalone -G Ninja
+cmake --build build/rhi-standalone
+ctest --test-dir build/rhi-standalone --output-on-failure
+```
+
+模拟 RHI 命令测试只链接通用 Renderer，检查场景→TAA→FXAA 顺序、材质颜色空间、未提交帧不推进历史、重复提交通知、替换失败回退、历史重置保留最后画面及缩放后拒绝过期截图。真实 GPU 回归继续保留法线贴图、AA、重投影与生命周期的像素和错误路径断言。
 
 固定依赖版本及 SHA256 校验在 `cmake/Dependencies.cmake`：
 
@@ -245,5 +258,7 @@ CMake 仅导出各模块的 `public/`；`private/` 只供模块自身使用。�
 依赖源码缓存于 `build/_deps/*-src`，Debug 与 Release 使用独立编译目录。第三方许可证保留在各依赖源码目录中；发布二进制时需同时提供相应许可证。
 
 项目通过 `cmake/ApplyAssimpMmdPatch.cmake` 自动应用针对固定版本的 MMD 修正：附加 UV 索引以及场景转换前的网格、材质、贴图和骨骼引用检查。补丁有明确源码锚点并可重复配置；更换 Assimp 版本时需要一并检查补丁。回归 PMX 均由 `tests/fixtures/generate_pmx.py` 生成，为项目原创小模型。
+
+`cmake/ApplyImGuiVulkanPatch.cmake` 为固定版本 ImGui 的字体上传暂存资源增加异常清理。字体暂存内存分配、映射或刷新失败时，会释放已创建的缓冲和内存，再由适配器清理其余初始化状态。补丁校验完整原始／修改后源码哈希，可重复配置；升级 ImGui 时需重新核对。实际 Vulkan 错误注入覆盖描述符布局创建及上述三个字体上传失败位置，均验证退出清理无存活资源。
 
 若出现 Vulkan 初始化错误，先检查显卡驱动与 SDK；验证层诊断输出在终端。若编译器或 SDK 路径改变，可删除对应的 `build/debug` 或 `build/release` 目录后重新配置，保留共享源码缓存即可。

@@ -6,7 +6,8 @@
 #include <MaterialTextures.hpp>
 #include <RenderSettings.hpp>
 #include <AntialiasingSettings.hpp>
-#include <VulkanRenderer.hpp>
+#include <Renderer.hpp>
+#include <EditorBackend.hpp>
 #include <Editor.hpp>
 
 #include <cmath>
@@ -30,15 +31,16 @@ static_assert(std::is_same_v<decltype(&aeg::foundation::pathToUtf8), std::string
 static_assert(std::is_same_v<decltype(&aeg::foundation::pathFromUtf8), std::filesystem::path (*)(std::string_view)>);
 static_assert(std::is_same_v<decltype(&aeg::camera::OrbitCamera::fit),
                              void (aeg::camera::OrbitCamera::*)(const aeg::foundation::Bounds&)>);
-static_assert(std::is_same_v<decltype(&aeg::render::VulkanRenderer::uploadModel),
-                             void (aeg::render::VulkanRenderer::*)(const aeg::assets::ModelData&)>);
-static_assert(std::is_same_v<decltype(&aeg::render::VulkanRenderer::setAntialiasing),
-                             void (aeg::render::VulkanRenderer::*)(const aeg::render::AntialiasingSettings&)>);
+static_assert(std::is_same_v<decltype(&aeg::render::Renderer::uploadModel),
+                             void (aeg::render::Renderer::*)(const aeg::assets::ModelData&)>);
+static_assert(std::is_same_v<decltype(&aeg::render::Renderer::setAntialiasing),
+                             void (aeg::render::Renderer::*)(const aeg::render::AntialiasingSettings&)>);
 static_assert(
-    std::is_same_v<decltype(&aeg::render::VulkanRenderer::drawFrame),
-                   void (aeg::render::VulkanRenderer::*)(aeg::render::RenderSettings&, const std::function<void()>&)>);
-static_assert(std::is_same_v<decltype(&aeg::editor::runEditor), int (*)(const aeg::editor::EditorOptions&)>);
-static_assert(!std::is_copy_constructible_v<aeg::render::VulkanRenderer>);
+    std::is_same_v<decltype(&aeg::render::Renderer::recordFrame),
+                   void (aeg::render::Renderer::*)(aeg::rhi::CommandList&, const aeg::render::RenderSettings&)>);
+static_assert(std::is_same_v<decltype(&aeg::editor::runEditor),
+                             int (*)(const aeg::editor::EditorOptions&, const aeg::editor::EditorBackendFactory&)>);
+static_assert(!std::is_copy_constructible_v<aeg::render::Renderer>);
 
 void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);

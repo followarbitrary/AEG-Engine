@@ -42,7 +42,7 @@ void drawImportPanel(EditorState& state) {
     ImGui::End();
 }
 
-void processImports(EditorState& state, render::VulkanRenderer& renderer) {
+void processImports(EditorState& state, render::Renderer& renderer) {
     auto& model = state.model;
     auto& imports = state.imports;
     auto& importPath = state.importPath;

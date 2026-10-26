@@ -1,5 +1,5 @@
 add_executable(aeg_normal_mapping_test NormalMapping.cpp)
-target_link_libraries(aeg_normal_mapping_test PRIVATE aeg::render glfw)
+target_link_libraries(aeg_normal_mapping_test PRIVATE aeg::editor aeg::rhi_vulkan aeg::rhi_vulkan_gui glfw)
 target_compile_definitions(aeg_normal_mapping_test PRIVATE AEG_TEST_FIXTURES="${PROJECT_SOURCE_DIR}/tests/fixtures")
 aeg_project_options(aeg_normal_mapping_test)
 add_dependencies(aeg_normal_mapping_test aeg_resources)
@@ -8,7 +8,7 @@ add_test(NAME aeg_normal_mapping COMMAND aeg_normal_mapping_test
 set_tests_properties(aeg_normal_mapping PROPERTIES LABELS gpu TIMEOUT 90)
 
 add_executable(aeg_temporal_aa_test TemporalAA.cpp)
-target_link_libraries(aeg_temporal_aa_test PRIVATE aeg::render glfw)
+target_link_libraries(aeg_temporal_aa_test PRIVATE aeg::editor aeg::rhi_vulkan aeg::rhi_vulkan_gui glfw)
 aeg_project_options(aeg_temporal_aa_test)
 add_dependencies(aeg_temporal_aa_test aeg_resources)
 add_test(NAME aeg_temporal_aa COMMAND aeg_temporal_aa_test
@@ -16,7 +16,7 @@ add_test(NAME aeg_temporal_aa COMMAND aeg_temporal_aa_test
 set_tests_properties(aeg_temporal_aa PROPERTIES LABELS gpu TIMEOUT 90)
 
 add_executable(aeg_antialiasing_test Antialiasing.cpp)
-target_link_libraries(aeg_antialiasing_test PRIVATE aeg::render glfw)
+target_link_libraries(aeg_antialiasing_test PRIVATE aeg::editor aeg::rhi_vulkan aeg::rhi_vulkan_gui glfw)
 aeg_project_options(aeg_antialiasing_test)
 add_dependencies(aeg_antialiasing_test aeg_resources)
 add_test(NAME aeg_antialiasing COMMAND aeg_antialiasing_test
@@ -29,14 +29,14 @@ aeg_project_options(aeg_render_check)
 # Keep loader-symbol failure injection in the executable. The renderer itself
 # is compiled once into aeg_render and linked by every GPU test.
 add_executable(aeg_backend_failure_test BackendFailure.cpp)
-target_link_libraries(aeg_backend_failure_test PRIVATE aeg::render Vulkan::Vulkan glfw)
+target_link_libraries(aeg_backend_failure_test PRIVATE aeg::editor aeg::rhi_vulkan aeg::rhi_vulkan_gui Vulkan::Vulkan glfw)
 aeg_project_options(aeg_backend_failure_test)
 add_dependencies(aeg_backend_failure_test aeg_resources)
 add_test(NAME aeg_backend_failure COMMAND aeg_backend_failure_test "$<TARGET_FILE_DIR:aeg_editor>/shaders")
 set_tests_properties(aeg_backend_failure PROPERTIES LABELS gpu TIMEOUT 60)
 
 add_executable(aeg_renderer_lifecycle_test RendererLifecycle.cpp)
-target_link_libraries(aeg_renderer_lifecycle_test PRIVATE aeg::render aeg::camera glfw)
+target_link_libraries(aeg_renderer_lifecycle_test PRIVATE aeg::editor aeg::rhi_vulkan aeg::rhi_vulkan_gui aeg::camera glfw)
 aeg_project_options(aeg_renderer_lifecycle_test)
 add_dependencies(aeg_renderer_lifecycle_test aeg_resources)
 add_test(NAME aeg_renderer_lifecycle COMMAND aeg_renderer_lifecycle_test

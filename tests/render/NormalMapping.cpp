@@ -1,4 +1,4 @@
-#include <VulkanRenderer.hpp>
+#include "RendererHarness.hpp"
 #include <ModelImporter.hpp>
 #include <MaterialTextures.hpp>
 #include <Utf8Path.hpp>
@@ -221,7 +221,7 @@ int main(int argc, char** argv) {
     try {
         const std::filesystem::path runtime(argv[1]), output(argv[2]);
         std::filesystem::create_directories(output);
-        aeg::render::VulkanRenderer renderer(window, runtime / "shaders", true);
+        aeg::tests::TestRenderer renderer(window, runtime / "shaders", true);
         aeg::render::RenderSettings settings;
         require(settings.normalMapping && settings.normalStrength == 1, "normal mapping must default enabled at 1");
         settings.background = {0, 0, 0, 1};

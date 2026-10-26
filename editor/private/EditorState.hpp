@@ -5,7 +5,7 @@
 #include <ModelData.hpp>
 #include <OrbitCamera.hpp>
 #include <RenderSettings.hpp>
-#include <VulkanRenderer.hpp>
+#include <Renderer.hpp>
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <imgui.h>
@@ -78,12 +78,12 @@ struct EditorState {
 void initializeEditorWindow(WindowLifetime& lifetime, const EditorOptions& options);
 void bindImportQueue(GLFWwindow* window, ImportQueue& imports);
 void configureStyle();
-void drawWorkspace(render::VulkanRenderer& renderer);
-void processImports(EditorState& state, render::VulkanRenderer& renderer);
+void drawWorkspace(render::Renderer& renderer);
+void processImports(EditorState& state, render::Renderer& renderer);
 void drawScenePanel(EditorState& state);
 void drawImportPanel(EditorState& state);
 void resetMaterialEditor(EditorState& state);
-void drawMaterialSection(EditorState& state, render::VulkanRenderer& renderer);
-void drawInspectorPanel(EditorState& state, render::VulkanRenderer& renderer);
-void drawViewportPanel(EditorState& state, render::VulkanRenderer& renderer);
+void drawMaterialSection(EditorState& state, render::Renderer& renderer);
+void drawInspectorPanel(EditorState& state, render::Renderer& renderer);
+void drawViewportPanel(EditorState& state, render::Renderer& renderer, EditorGraphics& graphics);
 }

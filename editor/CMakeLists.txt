@@ -1,9 +1,12 @@
 add_library(aeg_editor_module STATIC
     public/Editor.hpp
+    public/EditorBackend.hpp
     private/Editor.cpp
     private/EditorWindow.cpp
     private/EditorStyle.cpp
     private/EditorDocking.cpp
+    private/graphics/EditorGraphics.cpp
+    private/platform/NativeWindow.cpp
     private/panels/ScenePanel.cpp
     private/panels/ImportPanel.cpp
     private/panels/InspectorPanel.cpp
@@ -15,5 +18,6 @@ target_include_directories(aeg_editor_module
     PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/public"
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/private")
 target_link_libraries(aeg_editor_module
-    PRIVATE aeg::foundation aeg::camera aeg::assets aeg::render aeg_imgui glfw)
+    PUBLIC aeg::render aeg::gui
+    PRIVATE aeg::foundation aeg::camera aeg::assets aeg_imgui_glfw glfw)
 aeg_project_options(aeg_editor_module)
