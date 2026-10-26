@@ -6,6 +6,8 @@ void Renderer::Impl::uploadModel(const ModelData& source) {
     device.waitIdle();
     // Build a complete replacement first. Allocation errors preserve the old model.
     auto replacement = std::make_unique<GpuModel>();
+    replacement->minimum = math::Vec3(std::numeric_limits<float>::max());
+    replacement->maximum = math::Vec3(std::numeric_limits<float>::lowest());
     const auto materialCount = std::max<std::size_t>(1, source.materials.size());
     if (materialCount > std::numeric_limits<std::uint32_t>::max() / 2) throw std::runtime_error("Too many materials");
     replacement->materials.reserve(materialCount);
@@ -65,6 +67,8 @@ void Renderer::Impl::uploadModel(const ModelData& source) {
         gpu.center = {static_cast<float>((static_cast<double>(minimum.x) + maximum.x) * 0.5),
                       static_cast<float>((static_cast<double>(minimum.y) + maximum.y) * 0.5),
                       static_cast<float>((static_cast<double>(minimum.z) + maximum.z) * 0.5)};
+        replacement->minimum = math::min(replacement->minimum, minimum);
+        replacement->maximum = math::max(replacement->maximum, maximum);
         gpu.vertices = device.uploadBuffer(std::as_bytes(std::span(mesh.vertices)), rhi::BufferUsage::Vertex);
         gpu.indices = device.uploadBuffer(std::as_bytes(std::span(mesh.indices)), rhi::BufferUsage::Index);
         gpu.indexCount = static_cast<std::uint32_t>(mesh.indices.size());

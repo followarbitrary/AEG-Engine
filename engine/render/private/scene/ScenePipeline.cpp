@@ -27,6 +27,9 @@ Renderer::Impl::createPipeline(rhi::RenderPass& pass, rhi::PipelineLayout& layou
                            {1, static_cast<std::uint32_t>(offsetof(Vertex, normal)), rhi::VertexFormat::Float3},
                            {2, static_cast<std::uint32_t>(offsetof(Vertex, uv)), rhi::VertexFormat::Float2},
                            {3, static_cast<std::uint32_t>(offsetof(Vertex, tangent)), rhi::VertexFormat::Float4}};
+        if (vertexId == detail::ShaderId::ShadowVertex)
+            std::erase_if(desc.attributes,
+                          [](const auto& attribute) { return attribute.location == 1 || attribute.location == 3; });
     }
     return device.createGraphicsPipeline(desc);
 }

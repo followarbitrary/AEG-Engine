@@ -10,23 +10,7 @@ layout(location = 2) in vec4 currentClip;
 layout(location = 3) in vec4 previousClip;
 layout(location = 1) out vec4 outMotionDepth;
 #endif
-layout(set = 0, binding = 0) uniform Scene {
-    mat4 viewProjection;
-    mat4 model;
-    vec4 lightDirection;
-    vec4 parameters;
-    vec4 clipConvention;
-    vec4 cameraPosition;
-    vec4 cameraTowardViewer;
-    vec4 lightRadiance;
-#ifdef AEG_TAA
-    mat4 previousViewProjection;
-    mat4 previousModel;
-    mat4 currentViewProjection;
-    vec4 temporalInfo;
-#endif
-}
-scene;
+#include "scene_uniform.glsl"
 layout(set = 1, binding = 0) uniform sampler2D baseTexture;
 layout(set = 1, binding = 1) uniform sampler2D normalTexture;
 layout(push_constant) uniform Material {
@@ -40,25 +24,39 @@ layout(push_constant) uniform Material {
 material;
 #include "normal_mapping.glsl"
 #include "pbr_lighting.glsl"
+#include "punctual_lighting.glsl"
+#include "shadow_sampling.glsl"
 void main() {
+    vec2 shadowGradient = shadowDepthGradient(worldPosition);
     vec4 base = texture(baseTexture, uv) * material.baseColor;
     if (material.alphaMode == 1 && base.a < material.alphaCutoff) discard;
     float opacity = material.alphaMode == 2 ? clamp(base.a, 0.0, 1.0) : 1.0;
     if (material.alphaMode == 2 && opacity <= 0.0) discard;
     vec3 n = safePbrDirection(normal, vec3(0.0, 0.0, 1.0));
+    vec3 geometricNormal = n;
     if (material.hasNormalMap != 0 && scene.parameters.z > 0.5 && scene.parameters.w > 0.0 && scene.parameters.y < 0.5)
         n = applyNormalMap(n, tangentFrame, texture(normalTexture, uv).rgb, material.normalScale, scene.parameters.w);
     // A reflected model reverses winding while inverse-transpose normals retain
     // their authored outward direction. Compensate before two-sided shading.
     bool mirroredModel = determinant(mat3(scene.model)) < 0.0;
-    if (gl_FrontFacing == mirroredModel) n = -n;
+    if (gl_FrontFacing == mirroredModel) {
+        n = -n;
+        geometricNormal = -geometricNormal;
+    }
     vec3 color = base.rgb;
     if (scene.parameters.y < 0.5) {
         vec3 v = scene.cameraPosition.w > 0.5
                      ? safePbrDirection(scene.cameraPosition.xyz - worldPosition, scene.cameraTowardViewer.xyz)
                      : scene.cameraTowardViewer.xyz;
-        color = pbrLighting(base.rgb, material.pbrFactors.x, material.pbrFactors.y, n, -scene.lightDirection.xyz, v,
-                            scene.lightRadiance.rgb, scene.parameters.x);
+        color = scene.parameters.x * clamp(base.rgb, vec3(0.0), vec3(1.0)) * (1.0 - material.pbrFactors.x);
+        for (int i = 0; i < int(scene.lightInfo.x); ++i) {
+            vec3 towardLight, radiance;
+            if (!punctualLight(scene.lights[i], worldPosition, towardLight, radiance)) continue;
+            float visibility = shadowVisibility(worldPosition, geometricNormal, towardLight, uint(i), shadowGradient);
+            color +=
+                pbrDirectLighting(base.rgb, material.pbrFactors.x, material.pbrFactors.y, n, towardLight, v, radiance) *
+                visibility;
+        }
     }
     outColor = vec4(color, opacity);
 #ifdef AEG_TAA

@@ -70,6 +70,9 @@ struct EditorState {
     float materialRoughness{0.5f};
     std::string materialNotice;
     std::string materialError;
+    std::uint32_t selectedLight{0};
+    int newLightType{1};
+    std::string shadowError;
     bool autoRotate{false};
     bool frameRequested{false};
     bool sceneRendered{false};
@@ -88,6 +91,7 @@ void drawScenePanel(EditorState& state);
 void drawImportPanel(EditorState& state);
 void resetMaterialEditor(EditorState& state);
 void drawMaterialSection(EditorState& state, render::Renderer& renderer);
+void drawLightingSection(EditorState& state, render::Renderer& renderer);
 void drawInspectorPanel(EditorState& state, render::Renderer& renderer);
 void drawViewportPanel(EditorState& state, render::Renderer& renderer, EditorGraphics& graphics);
 }

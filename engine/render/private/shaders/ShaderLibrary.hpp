@@ -10,7 +10,9 @@ enum class ShaderId {
     FxaaFragment,
     TaaFragment,
     ModelTaaVertex,
-    ModelTaaFragment
+    ModelTaaFragment,
+    ShadowVertex,
+    ShadowFragment
 };
 
 [[nodiscard]] std::span<const std::byte> embeddedShader(ShaderId shader);

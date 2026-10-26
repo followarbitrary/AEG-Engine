@@ -43,34 +43,7 @@ void drawInspectorPanel(EditorState& state, render::Renderer& renderer) {
             }
         }
         drawMaterialSection(state, renderer);
-        if (ImGui::CollapsingHeader("光照###Lighting", ImGuiTreeNodeFlags_DefaultOpen)) {
-            ImGui::Checkbox("无光照材质###Unlit materials", &settings.unlit);
-            ImGui::BeginDisabled(settings.unlit);
-            ImGui::Checkbox("使用法线贴图###Normal mapping", &settings.normalMapping);
-            ImGui::BeginDisabled(!settings.normalMapping);
-            ImGui::SliderFloat("法线强度###Normal strength", &settings.normalStrength, 0, 4, "%.2f");
-            ImGui::EndDisabled();
-            ImGui::EndDisabled();
-            const auto normalMapMaterialCount = static_cast<std::size_t>(
-                std::count_if(state.model.materials.begin(), state.model.materials.end(),
-                              [](const assets::MaterialData& material) { return material.hasNormalMap; }));
-            ImGui::Text("使用法线贴图的材质数：%zu", normalMapMaterialCount);
-            ImGui::SliderFloat("环境漫反射###Ambient", &settings.ambient, 0, 1, "%.2f");
-            float lightColor[]{settings.lightColor.x, settings.lightColor.y, settings.lightColor.z};
-            if (ImGui::ColorEdit3("光源颜色###Light color", lightColor))
-                settings.lightColor = {lightColor[0], lightColor[1], lightColor[2]};
-            ImGui::SliderFloat("光源强度###Light intensity", &settings.lightIntensity, 0, 10, "%.2f");
-            ImGui::TextUnformatted("光照方向");
-            ImGui::SetNextItemWidth(-1);
-            float lightDirection[]{settings.lightDirection.x, settings.lightDirection.y, settings.lightDirection.z};
-            if (ImGui::SliderFloat3("##LightDirection", lightDirection, -1, 1, "%.2f"))
-                settings.lightDirection = {lightDirection[0], lightDirection[1], lightDirection[2]};
-            if (math::dot(settings.lightDirection, settings.lightDirection) < 0.0001f)
-                settings.lightDirection = {0, -1, 0};
-            float background[]{settings.background.x, settings.background.y, settings.background.z};
-            if (ImGui::ColorEdit3("背景###Background", background))
-                settings.background = {background[0], background[1], background[2], settings.background.w};
-        }
+        drawLightingSection(state, renderer);
         if (ImGui::CollapsingHeader("抗锯齿###Antialiasing", ImGuiTreeNodeFlags_DefaultOpen)) {
             ImGui::BeginDisabled(!supportedTaa);
             antialiasingChanged |= ImGui::Checkbox("TAA 时域抗锯齿###TAA", &antialiasing.taa);

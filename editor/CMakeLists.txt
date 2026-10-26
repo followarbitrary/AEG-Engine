@@ -11,6 +11,7 @@ add_library(aeg_editor_module STATIC
     private/panels/ImportPanel.cpp
     private/panels/InspectorPanel.cpp
     private/panels/MaterialPanel.cpp
+    private/panels/LightPanel.cpp
     private/panels/ViewportPanel.cpp
     private/fonts/EditorFont.cpp)
 add_library(aeg::editor ALIAS aeg_editor_module)

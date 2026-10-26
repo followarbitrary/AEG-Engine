@@ -22,6 +22,12 @@ foreach(header IN LISTS aeg_rhi_public_headers)
 endforeach()
 
 if(TARGET aeg_render)
+    add_executable(aeg_shadow_commands_test ../render/ShadowCommands.cpp)
+    target_link_libraries(aeg_shadow_commands_test PRIVATE aeg::render)
+    aeg_project_options(aeg_shadow_commands_test)
+    add_test(NAME aeg_shadow_commands COMMAND aeg_shadow_commands_test)
+    set_tests_properties(aeg_shadow_commands PROPERTIES LABELS cpu)
+
     add_executable(aeg_render_command_tests ../render/RenderCommands.cpp)
     target_link_libraries(aeg_render_command_tests PRIVATE aeg::render)
     aeg_project_options(aeg_render_command_tests)

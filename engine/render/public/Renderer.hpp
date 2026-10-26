@@ -2,6 +2,7 @@
 #include <AntialiasingSettings.hpp>
 #include <ModelData.hpp>
 #include <RenderSettings.hpp>
+#include <ShadowSettings.hpp>
 #include <RhiDevice.hpp>
 #include <filesystem>
 #include <memory>
@@ -17,6 +18,10 @@ public:
     [[nodiscard]] AntialiasingSettings antialiasing() const;
     [[nodiscard]] std::uint32_t supportedMsaaSamples() const;
     [[nodiscard]] bool supportsTemporalAA() const;
+    void setShadows(const ShadowSettings& settings);
+    [[nodiscard]] ShadowSettings shadows() const;
+    [[nodiscard]] bool supportsShadows() const;
+    [[nodiscard]] std::uint32_t maximumShadowResolution() const;
     void resetTemporalHistory();
     [[nodiscard]] std::uint32_t temporalFrameCount() const;
     void resizeViewport(std::uint32_t width, std::uint32_t height);

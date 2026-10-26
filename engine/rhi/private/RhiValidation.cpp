@@ -51,7 +51,7 @@ void validate(const TextureDesc& desc) {
         throw std::invalid_argument("Color format cannot be a depth attachment");
 }
 void validate(const RenderPassDesc& desc) {
-    if (desc.attachments.empty() || desc.colors.empty() ||
+    if (desc.attachments.empty() || (desc.colors.empty() && !desc.depth) ||
         (!desc.resolves.empty() && desc.resolves.size() != desc.colors.size()))
         throw std::invalid_argument("Invalid render pass attachment counts");
     std::set<std::uint32_t> used;
@@ -73,8 +73,10 @@ void validate(const RenderPassDesc& desc) {
             throw std::invalid_argument("Mismatched color sample counts");
         colorSamples = color.samples;
     }
-    if (desc.depth && claim(*desc.depth, true).samples != colorSamples)
-        throw std::invalid_argument("Mismatched depth sample count");
+    if (desc.depth) {
+        const auto depthSamples = claim(*desc.depth, true).samples;
+        if (colorSamples && depthSamples != colorSamples) throw std::invalid_argument("Mismatched depth sample count");
+    }
     for (std::size_t i = 0; i < desc.resolves.size(); ++i) {
         if (desc.resolves[i] == unusedAttachment) continue;
         const auto& resolve = claim(desc.resolves[i], false);
@@ -84,8 +86,7 @@ void validate(const RenderPassDesc& desc) {
 }
 void validate(const GraphicsPipelineDesc& desc, bool independentBlend) {
     samples(desc.samples);
-    if (!desc.colorAttachmentCount ||
-        (!desc.colorBlends.empty() && desc.colorBlends.size() != desc.colorAttachmentCount))
+    if (!desc.colorBlends.empty() && desc.colorBlends.size() != desc.colorAttachmentCount)
         throw std::invalid_argument("Pipeline blend states must match the color attachment count");
     for (const auto mode : desc.colorBlends)
         if (mode != BlendMode::Opaque && mode != BlendMode::Alpha)

@@ -15,6 +15,8 @@ struct GpuMaterial {
     std::unique_ptr<rhi::BindingSet> descriptor;
 };
 struct GpuModel {
+    // Retain bounds computed from validated vertices rather than import metadata.
+    math::Vec3 minimum{}, maximum{};
     std::vector<GpuMesh> meshes;
     std::vector<GpuMaterial> materials;
 };

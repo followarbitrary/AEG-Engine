@@ -1,6 +1,7 @@
 #pragma once
 #include <RhiDevice.hpp>
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <stdexcept>
 #include <string>
@@ -17,8 +18,13 @@ struct FakeBuffer final : rhi::Buffer {
 };
 struct FakeTexture final : rhi::Texture {
     rhi::TextureDesc desc;
+    std::vector<std::byte> uploaded;
     explicit FakeTexture(rhi::TextureDesc value) : desc(value) {}
     const rhi::TextureDesc& description() const override { return desc; }
+};
+struct FakeSampler final : rhi::Sampler {
+    rhi::SamplerDesc desc;
+    explicit FakeSampler(rhi::SamplerDesc value) : desc(value) {}
 };
 struct FakePass final : rhi::RenderPass {
     rhi::RenderPassDesc desc;
@@ -63,12 +69,25 @@ public:
     std::uint32_t samples{15};
     bool failTexture{};
     bool failPipeline{};
+    bool failBindingSet{};
+    bool failWaitIdle{};
     bool colorBlending{true};
+    // Independent sampled-depth capabilities: D32, D16, D24. Ordinary scene
+    // depth support keeps the historical fake-device behavior.
+    std::array<bool, 3> depthSampledSupport{true, true, true};
+    std::array<rhi::Extent2D, 3> depthSampledMaximum{rhi::Extent2D{4096, 4096}, rhi::Extent2D{4096, 4096},
+                                                     rhi::Extent2D{4096, 4096}};
     FakeBuffer* uniform{};
     std::vector<rhi::Format> uploadedFormats;
     rhi::Texture* lastReadback{};
     const rhi::DeviceCapabilities& capabilities() const override { return caps; }
-    rhi::TextureSupport textureSupport(rhi::Format, rhi::TextureUsage) const override {
+    rhi::TextureSupport textureSupport(rhi::Format format, rhi::TextureUsage usage) const override {
+        if (rhi::isDepthFormat(format) &&
+            rhi::contains(usage, rhi::TextureUsage::DepthAttachment | rhi::TextureUsage::Sampled)) {
+            const auto index = format == rhi::Format::D32Float ? 0u : format == rhi::Format::D16Unorm ? 1u : 2u;
+            return {depthSampledSupport[index], depthSampledSupport[index] ? 1u : 0u, depthSampledMaximum[index], false,
+                    false};
+        }
         return {true, samples, {4096, 4096}, true, colorBlending};
     }
     std::unique_ptr<rhi::Buffer> createBuffer(const rhi::BufferDesc& desc) override {
@@ -87,12 +106,15 @@ public:
         if (std::exchange(failTexture, false)) throw std::runtime_error("Injected texture allocation failure");
         return std::make_unique<FakeTexture>(desc);
     }
-    std::unique_ptr<rhi::Texture> uploadTexture(const rhi::TextureDesc& desc, std::span<const std::byte>) override {
+    std::unique_ptr<rhi::Texture> uploadTexture(const rhi::TextureDesc& desc,
+                                                std::span<const std::byte> pixels) override {
         uploadedFormats.push_back(desc.format);
-        return createTexture(desc);
+        auto texture = createTexture(desc);
+        dynamic_cast<FakeTexture&>(*texture).uploaded.assign(pixels.begin(), pixels.end());
+        return texture;
     }
-    std::unique_ptr<rhi::Sampler> createSampler(const rhi::SamplerDesc&) override {
-        return std::make_unique<EmptyResource<rhi::Sampler>>();
+    std::unique_ptr<rhi::Sampler> createSampler(const rhi::SamplerDesc& desc) override {
+        return std::make_unique<FakeSampler>(desc);
     }
     std::unique_ptr<rhi::Shader> createShader(const rhi::ShaderDesc&) override {
         return std::make_unique<EmptyResource<rhi::Shader>>();
@@ -102,6 +124,7 @@ public:
     }
     std::unique_ptr<rhi::BindingSet> createBindingSet(rhi::BindingLayout&,
                                                       std::span<const rhi::BindingWrite> writes) override {
+        if (std::exchange(failBindingSet, false)) throw std::runtime_error("Injected descriptor allocation failure");
         auto set = std::make_unique<FakeSet>();
         set->update(writes);
         return set;
@@ -130,7 +153,9 @@ public:
                 std::vector<std::byte>(static_cast<std::size_t>(desc.extent.width) * desc.extent.height *
                                        rhi::formatByteSize(desc.format))};
     }
-    void waitIdle() override {}
+    void waitIdle() override {
+        if (std::exchange(failWaitIdle, false)) throw std::runtime_error("Injected device wait failure");
+    }
     const std::string& deviceName() const override {
         static const std::string name{"Fake RHI"};
         return name;
@@ -147,7 +172,9 @@ public:
                          std::span<const rhi::ClearValue> clears) override {
         if (activePass_) throw std::runtime_error("Nested fake render pass");
         const auto& desc = dynamic_cast<FakePass&>(pass).desc;
-        passes.push_back(desc.depth ? "scene" : desc.colors.size() == 2 ? "taa" : "fxaa");
+        passes.push_back(desc.depth                ? (desc.colors.empty() ? "shadow" : "scene")
+                         : desc.colors.size() == 2 ? "taa"
+                                                   : "fxaa");
         recordedPasses.push_back({&pass, desc, dynamic_cast<FakeFramebuffer&>(framebuffer).desc, {}, {}});
         activePass_ = &recordedPasses.back();
         activePass_->clears.assign(clears.begin(), clears.end());

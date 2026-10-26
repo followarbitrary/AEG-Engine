@@ -3,6 +3,7 @@
 #include "scene/GpuModel.hpp"
 #include "scene/ScenePipeline.hpp"
 #include "scene/SceneUniform.hpp"
+#include "shadow/ShadowResources.hpp"
 #include "viewport/ViewportTargets.hpp"
 #include "antialiasing/TemporalHistory.hpp"
 #include "shaders/ShaderLibrary.hpp"
@@ -33,10 +34,16 @@ struct Renderer::Impl {
     AntialiasingSettings aa;
     std::uint32_t sampleMask{1}, maximumViewport{1}, maximumTemporalViewport{1};
     bool temporalSupported{};
+    ShadowSettings shadowSettings;
+    bool shadowSupported{};
+    std::uint32_t maximumShadow{};
+    rhi::Format shadowFormat{rhi::Format::Undefined};
     TemporalHistory temporalHistory, recordingHistory;
-    std::unique_ptr<rhi::BindingLayout> sceneLayout, materialLayout, postSetLayout, temporalSetLayout;
+    std::unique_ptr<rhi::BindingLayout> sceneLayout, materialLayout, shadowSetLayout, postSetLayout, temporalSetLayout;
     std::unique_ptr<rhi::Sampler> sampler, viewportSampler, pointSampler;
     std::unique_ptr<rhi::Buffer> uniformBuffer;
+    std::unique_ptr<rhi::Texture> fallbackShadowTexture;
+    std::unique_ptr<rhi::BindingSet> fallbackShadowDescriptor;
     std::unique_ptr<rhi::BindingSet> sceneDescriptor;
     std::unique_ptr<rhi::PipelineLayout> pipelineLayout, postLayout, temporalLayout;
     std::unique_ptr<rhi::RenderPass> postPass, temporalPass;
@@ -44,6 +51,7 @@ struct Renderer::Impl {
     std::array<std::unique_ptr<ScenePipeline>, 4> scenePipelines;
     std::unique_ptr<ScenePipeline> temporalScene;
     std::unique_ptr<GpuModel> model;
+    std::unique_ptr<ShadowResources> shadow;
     std::unique_ptr<ViewportTargets> viewport;
     std::shared_ptr<rhi::Texture> submittedOutput, pendingOutput;
     RenderSettings pendingSettings;
@@ -53,6 +61,10 @@ struct Renderer::Impl {
     ~Impl() noexcept;
     void initialize();
     void createDescriptors();
+    void initializeShadowSupport();
+    void setShadows(const ShadowSettings& settings);
+    void configureShadowUniform(SceneUniform& uniform, const RenderSettings& settings);
+    void drawShadow(rhi::CommandList& commands, const SceneUniform& uniform);
     void createScenePass(ScenePipeline& target);
     void createPostPass();
     std::unique_ptr<rhi::GraphicsPipeline>
@@ -70,7 +82,7 @@ struct Renderer::Impl {
     void uploadModel(const ModelData& source);
     static bool perspectiveProjection(const aeg::math::Mat4& matrix);
     SceneUniform sceneUniform(const RenderSettings& settings);
-    void drawScene(rhi::CommandList& commands, const RenderSettings& settings);
+    void drawScene(rhi::CommandList& commands, const RenderSettings& settings, const SceneUniform& uniform);
     void drawTemporal(rhi::CommandList& commands);
     void pointFinalDescriptorAtTemporalOutput();
     void drawFxaa(rhi::CommandList& commands);

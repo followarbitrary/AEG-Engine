@@ -338,7 +338,7 @@ int main(int argc, char** argv) {
             camera(false, {true, false});
             settings.unlit = false;
             settings.ambient = 0.2f;
-            settings.lightIntensity = 2;
+            settings.lights[0].intensity = 2;
             settings.normalMapping = false;
             // Lift each channel above the near-black UNORM8 blend quantization
             // region while retaining a colored diffuse lobe and white specular.
@@ -351,9 +351,9 @@ int main(int argc, char** argv) {
             litMaterial.normalTexture = {1, 1, {255, 128, 128, 255}};
             auto litModel = single(litMaterial);
             for (auto& vertex : litModel.meshes[0].vertices) vertex.tangent = {1, 0, 0, 1};
-            settings.lightDirection = {0, 0, -1};
+            settings.lights[0].direction = {0, 0, -1};
             const auto positive = show(litModel, {});
-            settings.lightDirection = {0, 0, 1};
+            settings.lights[0].direction = {0, 0, 1};
             const auto negative = show(litModel, {});
             const auto center = (std::size_t(height / 2) * width + width / 2) * 3;
             require(std::abs(int(positive.rgb[center]) - int(negative.rgb[center])) > 40,
@@ -365,7 +365,7 @@ int main(int argc, char** argv) {
             patch(faceSign > 0 ? positive : negative, over(geometricLight, 0.5, blue), "Lit blended geometric normal");
             patch(faceSign > 0 ? negative : positive, over(ambientBase, 0.5, blue), "Blended ambient light");
             settings.normalMapping = true;
-            settings.lightDirection = {-faceSign, 0, 0};
+            settings.lights[0].direction = {-faceSign, 0, 0};
             const double encodedZero = 1.0 / 255;
             const auto mappedNormal = math::normalize(math::Vec3(1, float(encodedZero), float(encodedZero))) * faceSign;
             const auto mappedLight =
@@ -381,7 +381,7 @@ int main(int argc, char** argv) {
             }
             settings.unlit = true;
             settings.ambient = 0.28f;
-            settings.lightIntensity = 3;
+            settings.lights[0].intensity = 3;
             settings.normalStrength = 1;
             // View-space sorting must update for both projection kinds, every convention,
             // an opposite camera, and a model transform which exchanges the surfaces.

@@ -133,8 +133,8 @@ int main(int argc, char** argv) {
         render::RenderSettings settings;
         settings.background = {0, 0, 0, 1};
         settings.ambient = 0;
-        settings.lightIntensity = 1;
-        settings.lightDirection = -normal;
+        settings.lights[0].intensity = 1;
+        settings.lights[0].direction = -normal;
         settings.normalMapping = false;
         auto frame = [&] {
             bool drew{};
@@ -169,8 +169,8 @@ int main(int argc, char** argv) {
             settings.set_camera({math::look_at(eye, eye + forward, {0, 1, 0}), projection, convention});
         };
         auto expected = [&](float metallic, float roughness, math::Vec3 n = normal, math::Vec3 towardViewer = normal) {
-            return tests::pbrReference(base, metallic, roughness, n, -settings.lightDirection, towardViewer,
-                                       settings.lightColor * settings.lightIntensity, settings.ambient);
+            return tests::pbrReference(base, metallic, roughness, n, -settings.lights[0].direction, towardViewer,
+                                       settings.lights[0].color * settings.lights[0].intensity, settings.ambient);
         };
 
         setCamera(false);
@@ -179,16 +179,16 @@ int main(int argc, char** argv) {
         for (const float metallic : {0.0f, 0.35f, 1.0f})
             for (const float roughness : {0.0f, 0.045f, 0.2f, 0.5f, 1.0f}) {
                 const double r = std::max(double(roughness), 0.045);
-                settings.lightIntensity = float(std::min(1.0, 2 * std::numbers::pi * r * r * r * r));
+                settings.lights[0].intensity = float(std::min(1.0, 2 * std::numbers::pi * r * r * r * r));
                 pixel(show(plane(metallic, roughness)), expected(metallic, roughness),
                       "Normal-incidence metallic=" + std::to_string(metallic) +
                           " roughness=" + std::to_string(roughness));
             }
 
-        settings.lightIntensity = 1;
+        settings.lights[0].intensity = 1;
         const auto angledView = math::normalize(math::Vec3{0.6f, 0, 0.8f});
         setCamera(false, {true, false}, center + angledView * 3, -angledView);
-        settings.lightDirection = -math::normalize(math::Vec3{-0.5f, 0.2f, 1});
+        settings.lights[0].direction = -math::normalize(math::Vec3{-0.5f, 0.2f, 1});
         for (const float metallic : {0.0f, 0.45f, 1.0f})
             for (const float roughness : {0.2f, 0.65f, 1.0f})
                 pixel(show(plane(metallic, roughness)), expected(metallic, roughness, normal, angledView),
@@ -196,44 +196,44 @@ int main(int argc, char** argv) {
 
         const auto grazingView = math::normalize(math::Vec3{1, 0, 0.12f});
         setCamera(false, {true, false}, center + grazingView * 3, -grazingView);
-        settings.lightDirection = -math::normalize(math::Vec3{-1, 0, 0.2f});
-        settings.lightIntensity = 0.4f;
+        settings.lights[0].direction = -math::normalize(math::Vec3{-1, 0, 0.2f});
+        settings.lights[0].intensity = 0.4f;
         for (const float metallic : {0.0f, 1.0f})
             for (const float roughness : {0.6f, 0.9f})
                 pixel(show(plane(metallic, roughness)), expected(metallic, roughness, normal, grazingView),
                       "Grazing-angle Smith masking and Fresnel");
 
         setCamera(false);
-        settings.lightDirection = -math::normalize(math::Vec3{0.4f, -0.2f, 1});
-        settings.lightColor = {0.2f, 0.5f, 0.9f};
+        settings.lights[0].direction = -math::normalize(math::Vec3{0.4f, -0.2f, 1});
+        settings.lights[0].color = {0.2f, 0.5f, 0.9f};
         for (const float intensity : {0.0f, 0.25f, 1.5f}) {
-            settings.lightIntensity = intensity;
+            settings.lights[0].intensity = intensity;
             pixel(show(plane(0.3f, 0.7f)), expected(0.3f, 0.7f), "Linear colored directional radiance");
         }
-        settings.lightDirection = {-1, 0, 0};
-        settings.lightIntensity = 1;
+        settings.lights[0].direction = {-1, 0, 0};
+        settings.lights[0].intensity = 1;
         pixel(show(plane(0.3f, 0.7f, {1, 0, 0})), {0, 0, 0},
               "Exactly grazing shading normal has no direct contribution");
-        settings.lightDirection = -normal;
-        settings.lightColor = math::Vec3{std::numeric_limits<float>::max()};
-        settings.lightIntensity = std::numeric_limits<float>::max();
+        settings.lights[0].direction = -normal;
+        settings.lights[0].color = math::Vec3{std::numeric_limits<float>::max()};
+        settings.lights[0].intensity = std::numeric_limits<float>::max();
         pixel(show(plane(0.0f, 0.045f)), {1, 1, 1}, "Finite extreme radiance saturates without NaN artifacts");
-        settings.lightColor = {0.2f, 0.5f, 0.9f};
+        settings.lights[0].color = {0.2f, 0.5f, 0.9f};
         settings.ambient = 0.3f;
-        settings.lightDirection = normal; // Directional light behind the surface.
-        settings.lightIntensity = 3;
+        settings.lights[0].direction = normal; // Directional light behind the surface.
+        settings.lights[0].intensity = 3;
         pixel(show(plane(0, 0.5f)), expected(0, 0.5f), "Back light contributes only diffuse ambient");
         pixel(show(plane(1, 0.5f)), {0, 0, 0}, "Metal has neither diffuse ambient nor back-side direct light");
-        settings.lightDirection = -normal;
-        settings.lightIntensity = 0;
+        settings.lights[0].direction = -normal;
+        settings.lights[0].intensity = 0;
         pixel(show(plane(0.4f, 0.5f)), expected(0.4f, 0.5f), "Zero light keeps only ambient diffuse");
         settings.ambient = 0;
-        settings.lightColor = {1, 1, 1};
-        settings.lightIntensity = 1;
+        settings.lights[0].color = {1, 1, 1};
+        settings.lights[0].intensity = 1;
 
         // Orthographic rays stay parallel as the eye translates. A position-
         // based view vector would introduce an incorrect highlight change here.
-        settings.lightDirection = -math::normalize(math::Vec3{0.4f, 0, 1});
+        settings.lights[0].direction = -math::normalize(math::Vec3{0.4f, 0, 1});
         const auto orthographic = show(plane(0.7f, 0.55f));
         setCamera(false, {true, false}, {0.7f, 0, 0});
         const auto translatedOrthographic = show(plane(0.7f, 0.55f));
@@ -242,7 +242,7 @@ int main(int argc, char** argv) {
 
         // Perspective views use the actual fragment's WORLD position. Probe
         // separated points and a moved camera rather than only the optical axis.
-        settings.lightDirection = -normal;
+        settings.lights[0].direction = -normal;
         for (const float cameraX : {0.0f, 0.8f}) {
             setCamera(true, {true, false}, {cameraX, 0, 0});
             const auto image = show(plane(0.7f, 0.4f));
@@ -267,7 +267,7 @@ int main(int argc, char** argv) {
         const auto transformedNormal =
             math::normalize(math::Vec3{std::cos(angle) * scaled.x + std::sin(angle) * scaled.z, scaled.y,
                                        -std::sin(angle) * scaled.x + std::cos(angle) * scaled.z});
-        settings.lightDirection = -math::normalize(math::Vec3{-0.3f, 0.2f, 1});
+        settings.lights[0].direction = -math::normalize(math::Vec3{-0.3f, 0.2f, 1});
         pixel(show(plane(0.25f, 0.65f, localNormal, true)), expected(0.25f, 0.65f, transformedNormal),
               "Model translation, rotation and inverse-transpose normal");
         settings.model = math::identity();
@@ -275,8 +275,8 @@ int main(int argc, char** argv) {
         std::vector<render::AntialiasingSettings> modes{{}, {1, true, false}};
         if (renderer.supportedMsaaSamples() & 4u) modes.push_back({4, true, false});
         if (renderer.supportsTemporalAA()) modes.push_back({1, true, true});
-        settings.lightIntensity = 0.8f;
-        settings.lightColor = {0.8f, 0.9f, 1};
+        settings.lights[0].intensity = 0.8f;
+        settings.lights[0].color = {0.8f, 0.9f, 1};
         for (const auto aa : modes)
             for (const bool perspective : {false, true})
                 for (const bool yDown : {false, true})
@@ -292,11 +292,11 @@ int main(int argc, char** argv) {
             renderer.uploadModel(plane(0.2f, 0.6f));
             for (unsigned i = 0; i < 4; ++i) frame();
             require(renderer.temporalFrameCount() >= 3, "PBR history failed to accumulate");
-            settings.lightColor = {0.5f, 0.75f, 1};
+            settings.lights[0].color = {0.5f, 0.75f, 1};
             frame();
             require(renderer.temporalFrameCount() == 1, "Light color change retained stale PBR history");
             frame();
-            settings.lightIntensity = 0.3f;
+            settings.lights[0].intensity = 0.3f;
             frame();
             require(renderer.temporalFrameCount() == 1, "Light intensity change retained stale PBR history");
             setCamera(true, {true, false}, {0.03f, 0, 0});

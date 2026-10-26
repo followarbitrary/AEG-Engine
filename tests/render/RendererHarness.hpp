@@ -24,6 +24,10 @@ public:
     render::AntialiasingSettings antialiasing() { return renderer().antialiasing(); }
     std::uint32_t supportedMsaaSamples() { return renderer().supportedMsaaSamples(); }
     bool supportsTemporalAA() { return renderer().supportsTemporalAA(); }
+    void setShadows(const render::ShadowSettings& settings) { renderer().setShadows(settings); }
+    render::ShadowSettings shadows() { return renderer().shadows(); }
+    bool supportsShadows() { return renderer().supportsShadows(); }
+    std::uint32_t maximumShadowResolution() { return renderer().maximumShadowResolution(); }
     void resetTemporalHistory() { renderer().resetTemporalHistory(); }
     std::uint32_t temporalFrameCount() { return renderer().temporalFrameCount(); }
     void resizeViewport(std::uint32_t width, std::uint32_t height) { renderer().resizeViewport(width, height); }

@@ -41,6 +41,7 @@ void Renderer::Impl::initialize() {
             std::min({maximumTemporalViewport, supported.maximumExtent.width, supported.maximumExtent.height});
     }
     temporalSupported = temporalSupported && maximumTemporalViewport != 0;
+    initializeShadowSupport();
     createDescriptors();
     scenePipeline(1);
     createPostPass();
@@ -58,6 +59,7 @@ void Renderer::Impl::createDescriptors() {
     sceneLayout = device.createBindingLayout({{{0, UniformBuffer, Vertex | Fragment}}});
     materialLayout =
         device.createBindingLayout({{{0, CombinedTextureSampler, Fragment}, {1, CombinedTextureSampler, Fragment}}});
+    shadowSetLayout = device.createBindingLayout({{{0, CombinedTextureSampler, Fragment}}});
     postSetLayout = device.createBindingLayout({{{0, CombinedTextureSampler, Fragment}}});
     sampler = device.createSampler({rhi::Filter::Linear, rhi::AddressMode::Repeat});
     viewportSampler = device.createSampler({rhi::Filter::Linear, rhi::AddressMode::ClampToEdge});
@@ -67,8 +69,16 @@ void Renderer::Impl::createDescriptors() {
         throw std::runtime_error("Scene uniform buffer is not host writable");
     const std::array writes{rhi::BindingWrite{0, uniformBuffer.get(), nullptr, nullptr}};
     sceneDescriptor = device.createBindingSet(*sceneLayout, writes);
-    pipelineLayout =
-        device.createPipelineLayout({{sceneLayout.get(), materialLayout.get()}, sizeof(MaterialPush), Fragment});
+    // The scene shader always declares set 2, even while shadows are disabled.
+    // Upload a real, initialized white image so every draw has a valid descriptor.
+    constexpr std::array<std::uint8_t, 4> white{255, 255, 255, 255};
+    fallbackShadowTexture = device.uploadTexture(
+        {{1, 1}, rhi::Format::Rgba8Unorm, rhi::TextureUsage::CopyDestination | rhi::TextureUsage::Sampled, 1},
+        std::as_bytes(std::span(white)));
+    const std::array shadowWrites{rhi::BindingWrite{0, nullptr, fallbackShadowTexture.get(), pointSampler.get()}};
+    fallbackShadowDescriptor = device.createBindingSet(*shadowSetLayout, shadowWrites);
+    pipelineLayout = device.createPipelineLayout(
+        {{sceneLayout.get(), materialLayout.get(), shadowSetLayout.get()}, sizeof(MaterialPush), Fragment});
     postLayout = device.createPipelineLayout({{postSetLayout.get()}, sizeof(aeg::math::Vec2), Fragment});
     if (temporalSupported) {
         temporalSetLayout = device.createBindingLayout({{{0, CombinedTextureSampler, Fragment},
@@ -97,7 +107,11 @@ void Renderer::Impl::recordFrame(rhi::CommandList& commands, const RenderSetting
     // Recording is speculative. Acquisition/submit failure must leave the
     // previous frame's jitter, history and capture image unchanged.
     recordingHistory = temporalHistory;
-    drawScene(commands, settings);
+    auto uniform = sceneUniform(settings);
+    configureShadowUniform(uniform, settings);
+    std::memcpy(uniformBuffer->mapped().data(), &uniform, sizeof(uniform));
+    drawShadow(commands, uniform);
+    drawScene(commands, settings, uniform);
     pointFinalDescriptorAtTemporalOutput();
     drawTemporal(commands);
     drawFxaa(commands);
@@ -131,6 +145,10 @@ void Renderer::setAntialiasing(const AntialiasingSettings& settings) { impl_->se
 AntialiasingSettings Renderer::antialiasing() const { return impl_->aa; }
 std::uint32_t Renderer::supportedMsaaSamples() const { return impl_->sampleMask; }
 bool Renderer::supportsTemporalAA() const { return impl_->temporalSupported; }
+void Renderer::setShadows(const ShadowSettings& settings) { impl_->setShadows(settings); }
+ShadowSettings Renderer::shadows() const { return impl_->shadowSettings; }
+bool Renderer::supportsShadows() const { return impl_->shadowSupported; }
+std::uint32_t Renderer::maximumShadowResolution() const { return impl_->maximumShadow; }
 void Renderer::resetTemporalHistory() { impl_->resetTemporalHistory(); }
 std::uint32_t Renderer::temporalFrameCount() const { return impl_->temporalHistory.frames; }
 void Renderer::resizeViewport(std::uint32_t width, std::uint32_t height) { impl_->resizeViewport(width, height); }

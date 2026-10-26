@@ -100,7 +100,7 @@ SceneAttachments sceneAttachments(const tests::FakeCommands& commands, tests::Fa
     if (temporal || samples > 1)
         require(scene.framebuffer.attachments[2] != result.color && scene.framebuffer.attachments[2] != result.depth,
                 "Scene motion/resolve aliases a primary attachment");
-    require(scene.sets.size() == 2, "Scene did not bind uniform and material sets");
+    require(scene.sets.size() == 3, "Scene did not bind uniform, material and shadow sets");
     const auto& uniformSet = set(scene, 0);
     const auto& uniform = binding(uniformSet, 0);
     require(uniformSet.writes.size() == 1 && uniform.buffer == device.uniform && !uniform.texture && !uniform.sampler &&
@@ -303,7 +303,8 @@ void transparencyContracts() {
 }
 void pbrContracts() {
     render::RenderSettings settings;
-    require(settings.lightColor == math::Vec3(1) && settings.lightIntensity == 3, "Directional light defaults changed");
+    require(settings.lights[0].color == math::Vec3(1) && settings.lights[0].intensity == 3,
+            "Directional light defaults changed");
     const math::Vec3 eye{2, 3, 4}, target{-1, 0.5f, 0};
     const auto towardViewer = math::normalize(eye - target);
     const auto view = math::look_at(eye, target, {0, 1, 0});
@@ -319,8 +320,8 @@ void pbrContracts() {
         tests::FakeCommands commands;
         renderer.recordFrame(commands, settings);
         math::Vec4 position, direction;
-        std::memcpy(&position, device.uniform->bytes.data() + 176, sizeof(position));
-        std::memcpy(&direction, device.uniform->bytes.data() + 192, sizeof(direction));
+        std::memcpy(&position, device.uniform->bytes.data() + 160, sizeof(position));
+        std::memcpy(&direction, device.uniform->bytes.data() + 176, sizeof(direction));
         require(math::nearly_equal(math::Vec3(position), eye, 0.00001f) && position.w == float(perspective) &&
                     math::nearly_equal(math::Vec3(direction), towardViewer, 0.00001f),
                 "Shader camera ABI does not distinguish perspective and orthographic viewing");
@@ -386,33 +387,81 @@ void pbrContracts() {
             rejects([&] { renderer.uploadModel(badModel); }, "Invalid PBR factor was uploaded");
             verifyRetained();
         }
-    settings.lightColor = {0.5f, 0.25f, 1};
-    settings.lightIntensity = 2;
+    settings.lights[0].color = {0.5f, 0.25f, 1};
+    settings.lights[0].intensity = 2;
     tests::FakeCommands lighting;
     renderer.recordFrame(lighting, settings);
     math::Vec4 radiance;
-    std::memcpy(&radiance, device.uniform->bytes.data() + 208, sizeof(radiance));
-    require(radiance == math::Vec4(1, 0.5f, 2, 0), "Directional radiance ABI lost color or intensity");
+    std::memcpy(&radiance, device.uniform->bytes.data() + 448, sizeof(radiance));
+    require(radiance == math::Vec4(1, 0.5f, 2, 1), "Directional radiance ABI lost color or intensity");
     renderer.frameSubmitted();
-    settings.lightColor = math::Vec3(std::numeric_limits<float>::max());
-    settings.lightIntensity = std::numeric_limits<float>::max();
+    settings.lights[0].color = math::Vec3(std::numeric_limits<float>::max());
+    settings.lights[0].intensity = std::numeric_limits<float>::max();
     tests::FakeCommands extreme;
     renderer.recordFrame(extreme, settings);
-    std::memcpy(&radiance, device.uniform->bytes.data() + 208, sizeof(radiance));
-    require(radiance == math::Vec4(65504, 65504, 65504, 0), "Extreme radiance escaped the finite BRDF bound");
+    std::memcpy(&radiance, device.uniform->bytes.data() + 448, sizeof(radiance));
+    require(radiance == math::Vec4(65504, 65504, 65504, 1), "Extreme radiance escaped the finite BRDF bound");
     renderer.frameSubmitted();
-    settings.lightDirection = {std::numeric_limits<float>::infinity(), 0, 0};
+    settings.lights[0].type = render::LightType::Point;
+    settings.lights[0].position = {0, 0, 100};
+    settings.lights[0].color = math::Vec3(1);
+    settings.lights[0].intensity = 1000000;
+    settings.lights[0].range = 10000;
+    tests::FakeCommands brightPoint;
+    renderer.recordFrame(brightPoint, settings);
+    std::memcpy(&radiance, device.uniform->bytes.data() + 448, sizeof(radiance));
+    require(radiance == math::Vec4(1000000, 1000000, 1000000, 1),
+            "Point source radiance was capped before inverse-square attenuation");
+    renderer.frameSubmitted();
+    settings.lights[0].color = math::Vec3(std::numeric_limits<float>::max());
+    settings.lights[0].intensity = std::numeric_limits<float>::max();
+    tests::FakeCommands extremePoint;
+    renderer.recordFrame(extremePoint, settings);
+    std::memcpy(&radiance, device.uniform->bytes.data() + 448, sizeof(radiance));
+    require(math::is_finite(radiance) && radiance.x == std::numeric_limits<float>::max(),
+            "Extreme point source radiance overflowed its finite packed representation");
+    renderer.frameSubmitted();
+    settings.lights[0] = render::Light{};
+    settings.lights[0].position = {std::numeric_limits<float>::quiet_NaN(), 0, 0};
+    tests::FakeCommands directionalPosition;
+    renderer.recordFrame(directionalPosition, settings);
+    std::memcpy(&radiance, device.uniform->bytes.data() + 448, sizeof(radiance));
+    require(radiance == math::Vec4(3, 3, 3, 1), "Unused directional position disabled the light");
+    renderer.frameSubmitted();
+    settings.lights[0].type = render::LightType::Point;
+    tests::FakeCommands pointPosition;
+    renderer.recordFrame(pointPosition, settings);
+    std::memcpy(&radiance, device.uniform->bytes.data() + 448, sizeof(radiance));
+    require(radiance.w == 0, "Nonfinite point position left the light enabled");
+    renderer.frameSubmitted();
+    settings.lights[0] = render::Light{};
+    settings.lights[0].direction = {std::numeric_limits<float>::infinity(), 0, 0};
     settings.cameraTowardViewer = {};
     settings.cameraPosition = {std::numeric_limits<float>::quiet_NaN(), 0, 0};
-    settings.lightIntensity = std::numeric_limits<float>::quiet_NaN();
+    settings.lights[0].intensity = std::numeric_limits<float>::quiet_NaN();
     settings.ambient = std::numeric_limits<float>::quiet_NaN();
     tests::FakeCommands degenerate;
     renderer.recordFrame(degenerate, settings);
-    for (const auto offset : {128u, 144u, 176u, 192u, 208u}) {
+    for (const auto offset : {128u, 144u, 160u, 176u, 416u, 432u, 448u, 464u}) {
         math::Vec4 value;
         std::memcpy(&value, device.uniform->bytes.data() + offset, sizeof(value));
         require(math::is_finite(value), "Degenerate public lighting settings uploaded nonfinite shader values");
     }
+    renderer.frameSubmitted();
+    settings = {};
+    settings.lights[0].position.x = std::numeric_limits<float>::quiet_NaN();
+    renderer.setAntialiasing({1, false, true});
+    const auto temporalFrame = [&] {
+        tests::FakeCommands commands;
+        renderer.recordFrame(commands, settings);
+        renderer.frameSubmitted();
+    };
+    temporalFrame();
+    temporalFrame();
+    require(renderer.temporalFrameCount() == 2, "Unchanged NaN light property repeatedly reset temporal history");
+    settings.lights[0].position.x = 1;
+    temporalFrame();
+    require(renderer.temporalFrameCount() == 1, "Changed active light property retained stale temporal history");
 }
 }
 int main(int argc, char** argv) {
@@ -431,8 +480,9 @@ int main(int argc, char** argv) {
         mesh.indices = {0, 1, 2};
         model.meshes.push_back(mesh);
         renderer.uploadModel(model);
-        require(device.uploadedFormats == std::vector{rhi::Format::Rgba8Srgb, rhi::Format::Rgba8Unorm},
-                "Albedo/normal color spaces changed");
+        require(device.uploadedFormats ==
+                    std::vector{rhi::Format::Rgba8Unorm, rhi::Format::Rgba8Srgb, rhi::Format::Rgba8Unorm},
+                "Shadow fallback or albedo/normal color spaces changed");
         const std::filesystem::path capture(argv[1]);
         rejects([&] { renderer.captureViewport(capture); }, "Capture accepted unrendered output");
         renderer.setAntialiasing({8, true, true});
@@ -511,7 +561,7 @@ int main(int argc, char** argv) {
         renderer.frameSubmitted();
         require(renderer.temporalFrameCount() == 0, "Non-temporal frame advanced history");
         // Pin the shader ABI independently from the private uniform declaration.
-        require(device.uniform->bytes.size() == 432, "Scene uniform ABI must be 432 bytes");
+        require(device.uniform->bytes.size() == 1024, "Scene uniform ABI must be 1024 bytes");
         const auto uploaded = [&]<class T>(std::size_t offset) {
             T value{};
             std::memcpy(&value, device.uniform->bytes.data() + offset, sizeof(T));
@@ -547,9 +597,9 @@ int main(int argc, char** argv) {
                     expected = reflection * expected;
                 }
                 require(uploaded.template operator()<math::Mat4>(0) == expected &&
-                            uploaded.template operator()<math::Mat4>(352) == expected,
+                            uploaded.template operator()<math::Mat4>(320) == expected,
                         "Renderer did not canonicalize incoming projection Y exactly once");
-                require(uploaded.template operator()<math::Vec4>(160) ==
+                require(uploaded.template operator()<math::Vec4>(144) ==
                             math::Vec4(1, reversed ? 1.0f : 0.0f, 1, reversed ? 1.0f : 0.0f),
                         "Uploaded clip metadata does not describe canonical current/previous matrices");
                 const auto& recorded = pass(conventions, 0);
@@ -577,11 +627,11 @@ int main(int argc, char** argv) {
         renderer.frameSubmitted();
         settings.model = math::translation({0.1f, 0, 0});
         settings.viewProjection = math::translation({0.02f, -0.03f, 0}) * settings.viewProjection;
-        const auto previousProjection = uploaded.template operator()<math::Mat4>(352);
+        const auto previousProjection = uploaded.template operator()<math::Mat4>(320);
         tests::FakeCommands historySecond;
         renderer.recordFrame(historySecond, settings);
         require(temporalValid(historySecond) == 1 &&
-                    uploaded.template operator()<math::Mat4>(224) == previousProjection,
+                    uploaded.template operator()<math::Mat4>(192) == previousProjection,
                 "Temporal history lost the previous canonical projection");
         renderer.frameSubmitted();
         for (const bool toggleY : {true, false}) {
@@ -592,7 +642,7 @@ int main(int argc, char** argv) {
             tests::FakeCommands changed;
             renderer.recordFrame(changed, settings);
             require(temporalValid(changed) == 0, "Clip convention change sampled stale temporal history");
-            require(uploaded.template operator()<math::Mat4>(224) == uploaded.template operator()<math::Mat4>(352),
+            require(uploaded.template operator()<math::Mat4>(192) == uploaded.template operator()<math::Mat4>(320),
                     "History reset did not replace previous matrix with current canonical matrix");
             renderer.frameSubmitted();
             require(renderer.temporalFrameCount() == 1, "Clip convention change did not reset history count");

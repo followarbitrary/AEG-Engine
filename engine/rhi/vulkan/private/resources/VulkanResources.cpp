@@ -138,7 +138,11 @@ std::unique_ptr<Texture> VulkanDevice::createTexture(const TextureDesc& desc) {
     view.image = result->handle;
     view.viewType = VK_IMAGE_VIEW_TYPE_2D;
     view.format = info.format;
-    view.subresourceRange = {imageAspect(desc.format), 0, 1, 0, 1};
+    // Sampled depth/stencil descriptors select one aspect. Framebuffer attachments
+    // ignore the view aspect mask; barriers still transition both aspects of D24S8.
+    const VkImageAspectFlags viewAspect =
+        isDepthFormat(desc.format) ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
+    view.subresourceRange = {viewAspect, 0, 1, 0, 1};
     check(vkCreateImageView(handle, &view, nullptr, &result->view), "vkCreateImageView");
     return result;
 }

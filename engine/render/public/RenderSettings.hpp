@@ -1,6 +1,8 @@
 #pragma once
 #include <math.hpp>
 #include <RenderCamera.hpp>
+#include <Light.hpp>
+#include <array>
 #include <stdexcept>
 
 namespace aeg::render {
@@ -28,9 +30,8 @@ struct RenderSettings {
         cameraPosition = position;
         cameraTowardViewer = towardViewer;
     }
-    aeg::math::Vec3 lightDirection{-0.5f, -1.0f, -0.4f};
-    aeg::math::Vec3 lightColor{1};
-    float lightIntensity{3};
+    std::array<Light, kMaxLights> lights{};
+    std::uint32_t lightCount{1}; // Zero selects ambient-only lighting; excess entries are ignored.
     float ambient{0.28f};
     aeg::math::Vec4 background{0.035f, 0.045f, 0.065f, 1};
     bool unlit{false};

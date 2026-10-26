@@ -21,6 +21,7 @@ struct AttachmentDesc {
 };
 struct RenderPassDesc {
     std::vector<AttachmentDesc> attachments;
+    // Empty for a depth-only pass; at least one color or depth attachment is required.
     std::vector<std::uint32_t> colors;
     std::optional<std::uint32_t> depth;
     std::vector<std::uint32_t> resolves;
@@ -53,7 +54,7 @@ struct GraphicsPipelineDesc {
     std::uint32_t vertexStride{};
     std::vector<VertexAttribute> attributes;
     std::uint32_t samples{1};
-    std::uint32_t colorAttachmentCount{1};
+    std::uint32_t colorAttachmentCount{1}; // Zero for a depth-only pass.
     bool depthTest{}, depthWrite{};
     DepthCompare depthCompare{DepthCompare::Less};
     // Empty means Opaque for every color attachment; otherwise one entry per attachment.

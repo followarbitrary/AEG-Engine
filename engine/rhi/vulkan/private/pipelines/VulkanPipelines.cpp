@@ -57,10 +57,12 @@ std::unique_ptr<RenderPass> VulkanDevice::createRenderPass(const RenderPassDesc&
     VkSubpassDescription subpass{};
     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     subpass.colorAttachmentCount = static_cast<std::uint32_t>(colors.size());
-    subpass.pColorAttachments = colors.data();
+    subpass.pColorAttachments = colors.empty() ? nullptr : colors.data();
     subpass.pResolveAttachments = resolves.empty() ? nullptr : resolves.data();
     subpass.pDepthStencilAttachment = desc.depth ? &depth : nullptr;
     // Global dependencies are deliberate: postprocess and GUI sample at different pixel positions.
+    // ALL_GRAPHICS includes early/late depth tests, and ALL_COMMANDS includes shader sampling.
+    // The memory scopes cover sampled reads -> depth writes and depth writes -> sampled reads.
     std::array<VkSubpassDependency, 2> dependencies{};
     dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
     dependencies[0].dstSubpass = 0;
@@ -218,7 +220,7 @@ std::unique_ptr<GraphicsPipeline> VulkanDevice::createGraphicsPipeline(const Gra
     }
     VkPipelineColorBlendStateCreateInfo blend{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
     blend.attachmentCount = desc.colorAttachmentCount;
-    blend.pAttachments = blendAttachments.data();
+    blend.pAttachments = blendAttachments.empty() ? nullptr : blendAttachments.data();
     const std::array dynamicStates{VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
     VkPipelineDynamicStateCreateInfo dynamic{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
     dynamic.dynamicStateCount = static_cast<std::uint32_t>(dynamicStates.size());

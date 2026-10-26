@@ -2,11 +2,14 @@ add_library(aeg_render STATIC
     public/Renderer.hpp
     public/RenderSettings.hpp
     public/AntialiasingSettings.hpp
+    public/Light.hpp
+    public/ShadowSettings.hpp
     private/Renderer.cpp
     private/scene/GpuModel.cpp
     private/scene/ScenePass.cpp
     private/scene/ScenePipeline.cpp
     private/shaders/ShaderLibrary.cpp
+    private/shadow/ShadowPass.cpp
     private/viewport/ViewportTargets.cpp
     private/viewport/ViewportCapture.cpp
     private/antialiasing/Antialiasing.cpp

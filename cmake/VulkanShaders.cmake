@@ -1,8 +1,14 @@
 function(aeg_compile_vulkan_shaders target_name source_root output_variable)
     set(embed_script "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/EmbedSpirv.cmake")
     set(shader_outputs)
-    foreach(shader model.vert model.frag fullscreen.vert fxaa.frag taa.frag)
-        if(shader MATCHES "^model\\.")
+    set(scene_includes
+        "${source_root}/scene/normal_mapping.glsl"
+        "${source_root}/scene/pbr_lighting.glsl"
+        "${source_root}/scene/punctual_lighting.glsl"
+        "${source_root}/scene/scene_uniform.glsl"
+        "${source_root}/scene/shadow_sampling.glsl")
+    foreach(shader model.vert model.frag shadow.vert shadow.frag fullscreen.vert fxaa.frag taa.frag)
+        if(shader MATCHES "^(model|shadow)\\.")
             set(source "${source_root}/scene/${shader}")
         else()
             set(source "${source_root}/postprocess/${shader}")
@@ -11,7 +17,7 @@ function(aeg_compile_vulkan_shaders target_name source_root output_variable)
         add_custom_command(OUTPUT "${output}"
             COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/compiled-shaders"
             COMMAND Vulkan::glslc --target-env=vulkan1.2 "${source}" -o "${output}"
-            DEPENDS "${source}" "${source_root}/scene/normal_mapping.glsl" "${source_root}/scene/pbr_lighting.glsl"
+            DEPENDS "${source}" ${scene_includes}
             COMMENT "Compiling ${shader} to SPIR-V" VERBATIM)
         set(header "${CMAKE_BINARY_DIR}/generated/embedded_shaders/${shader}.spv.hpp")
         string(REPLACE "." "_" symbol "${shader}")
@@ -28,7 +34,7 @@ function(aeg_compile_vulkan_shaders target_name source_root output_variable)
         add_custom_command(OUTPUT "${output}"
             COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/compiled-shaders"
             COMMAND Vulkan::glslc --target-env=vulkan1.2 -DAEG_TAA=1 "${source}" -o "${output}"
-            DEPENDS "${source}" "${source_root}/scene/normal_mapping.glsl" "${source_root}/scene/pbr_lighting.glsl"
+            DEPENDS "${source}" ${scene_includes}
             COMMENT "Compiling temporal model.${stage} to SPIR-V" VERBATIM)
         set(header "${CMAKE_BINARY_DIR}/generated/embedded_shaders/model_taa.${stage}.spv.hpp")
         add_custom_command(OUTPUT "${header}"

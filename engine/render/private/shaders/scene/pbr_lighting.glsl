@@ -6,17 +6,15 @@ vec3 safePbrDirection(vec3 direction, vec3 fallback) {
     if (largest <= 0.0 || any(isnan(direction)) || any(isinf(direction))) return fallback;
     return normalize(direction / largest);
 }
-vec3 pbrLighting(vec3 base, float metallic, float perceptualRoughness, vec3 n, vec3 l, vec3 v, vec3 radiance,
-                 float ambient) {
+vec3 pbrDirectLighting(vec3 base, float metallic, float perceptualRoughness, vec3 n, vec3 l, vec3 v, vec3 radiance) {
     // Reflectance stays physical even for legacy materials with out-of-range color factors.
     // The unlit path preserves the original color-factor contract.
     base = clamp(base, vec3(0.0), vec3(1.0));
-    vec3 result = ambient * base * (1.0 - metallic);
     float noL = clamp(dot(n, l), 0.0, 1.0);
     float noV = clamp(dot(n, v), 0.0, 1.0);
-    if (noL <= 0.0 || noV <= 0.0) return result;
+    if (noL <= 0.0 || noV <= 0.0) return vec3(0.0);
     vec3 sum = l + v;
-    if (dot(sum, sum) < 1e-12) return result;
+    if (dot(sum, sum) < 1e-12) return vec3(0.0);
     vec3 h = normalize(sum);
     float noH = clamp(dot(n, h), 0.0, 1.0);
     float voH = clamp(dot(v, h), 0.0, 1.0);
@@ -35,5 +33,5 @@ vec3 pbrLighting(vec3 base, float metallic, float perceptualRoughness, vec3 n, v
     float fifth = oneMinus * oneMinus * oneMinus * oneMinus * oneMinus;
     vec3 fresnel = f0 + (vec3(1.0) - f0) * fifth;
     vec3 diffuse = (vec3(1.0) - fresnel) * (1.0 - metallic) * base / pbrPi;
-    return result + (diffuse + distribution * visibility * fresnel) * radiance * noL;
+    return (diffuse + distribution * visibility * fresnel) * radiance * noL;
 }

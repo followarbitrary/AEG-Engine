@@ -8,6 +8,54 @@ math::Mat4 backendProjection(const RenderSettings& settings) {
     reflection[1][1] = -1;
     return reflection * settings.viewProjection;
 }
+GpuLight packLight(const Light& light) {
+    GpuLight result;
+    const bool validType =
+        light.type == LightType::Directional || light.type == LightType::Point || light.type == LightType::Spot;
+    const bool validPosition = math::is_finite(light.position);
+    const bool validRange = std::isfinite(light.range) && light.range > 0;
+    const bool enabled =
+        light.enabled && validType && (light.type == LightType::Directional || (validPosition && validRange));
+    math::Vec3 direction;
+    if (!math::try_normalize(light.direction, direction)) direction = {0, -1, 0};
+    result.positionRange = {validPosition ? light.position : math::Vec3{}, validRange ? light.range : 0};
+    result.directionType = {direction, validType ? static_cast<float>(light.type) : 0.0f};
+    const auto nonnegative = [](float value) { return std::isfinite(value) ? std::max(value, 0.0f) : 0.0f; };
+    const float intensity = nonnegative(light.intensity);
+    const auto radiance = [&](float component) {
+        // Multiply in double so extreme, finite public values cannot overflow first.
+        // Punctual source radiance must retain its magnitude until distance attenuation.
+        const double maximum = light.type == LightType::Directional ? 65504.0 : std::numeric_limits<float>::max();
+        return static_cast<float>(std::min(double(nonnegative(component)) * intensity, maximum));
+    };
+    result.radiance = {radiance(light.color.x), radiance(light.color.y), radiance(light.color.z),
+                       enabled ? 1.0f : 0.0f};
+    constexpr float maximumCone = math::kPi * 0.5f - 0.001f;
+    const float outer = std::clamp(std::isfinite(light.outerConeAngle) ? light.outerConeAngle : math::to_radians(30),
+                                   0.0f, maximumCone);
+    const float inner =
+        std::clamp(std::isfinite(light.innerConeAngle) ? light.innerConeAngle : math::to_radians(20), 0.0f, outer);
+    result.cone = {std::cos(inner), std::cos(outer), 0, 0};
+    return result;
+}
+bool sameLightValue(float left, float right) { return left == right || (std::isnan(left) && std::isnan(right)); }
+bool sameLightValue(math::Vec3 left, math::Vec3 right) {
+    return sameLightValue(left.x, right.x) && sameLightValue(left.y, right.y) && sameLightValue(left.z, right.z);
+}
+bool sameLights(const RenderSettings& left, const RenderSettings& right) {
+    if (left.lightCount != right.lightCount) return false;
+    const auto count = std::min(left.lightCount, kMaxLights);
+    for (std::uint32_t i = 0; i < count; ++i) {
+        const auto& a = left.lights[i];
+        const auto& b = right.lights[i];
+        if (a.type != b.type || a.enabled != b.enabled || !sameLightValue(a.position, b.position) ||
+            !sameLightValue(a.direction, b.direction) || !sameLightValue(a.color, b.color) ||
+            !sameLightValue(a.intensity, b.intensity) || !sameLightValue(a.range, b.range) ||
+            !sameLightValue(a.innerConeAngle, b.innerConeAngle) || !sameLightValue(a.outerConeAngle, b.outerConeAngle))
+            return false;
+    }
+    return true;
+}
 }
 void Renderer::Impl::createScenePass(ScenePipeline& target) {
     const bool multisampled = target.samples > 1;
@@ -42,22 +90,14 @@ SceneUniform Renderer::Impl::sceneUniform(const RenderSettings& settings) {
     uniform.previousModel = settings.model;
     uniform.clipConvention = {1, settings.clipSpace.reversed_z ? 1.0f : 0.0f, 1,
                               settings.clipSpace.reversed_z ? 1.0f : 0.0f};
-    math::Vec3 light, towardViewer;
-    if (!math::try_normalize(settings.lightDirection, light)) light = {0, -1, 0};
+    math::Vec3 towardViewer;
     if (!math::try_normalize(settings.cameraTowardViewer, towardViewer)) towardViewer = {0, 0, 1};
-    uniform.lightDirection = aeg::math::Vec4(light, 0);
     uniform.cameraPosition = math::Vec4(
         math::is_finite(settings.cameraPosition) ? settings.cameraPosition : math::Vec3{}, perspective ? 1.0f : 0.0f);
     uniform.cameraTowardViewer = math::Vec4(towardViewer, 0);
-    // Raw settings are public: make degenerate directions and nonfinite light values deterministic.
-    const auto finiteNonnegative = [](float value) { return std::isfinite(value) ? std::max(value, 0.0f) : 0.0f; };
-    const float intensity = finiteNonnegative(settings.lightIntensity);
-    const auto radiance = [&](float component) {
-        // Bound radiance before BRDF evaluation to keep extreme public inputs finite.
-        return static_cast<float>(std::min(double(finiteNonnegative(component)) * intensity, 65504.0));
-    };
-    uniform.lightRadiance = {radiance(settings.lightColor.x), radiance(settings.lightColor.y),
-                             radiance(settings.lightColor.z), 0};
+    const auto lightCount = std::min(settings.lightCount, kMaxLights);
+    uniform.lightInfo = {static_cast<float>(lightCount), 0, 0, 0};
+    for (std::uint32_t i = 0; i < lightCount; ++i) uniform.lights[i] = packLight(settings.lights[i]);
     uniform.parameters = {std::isfinite(settings.ambient) ? std::clamp(settings.ambient, 0.0f, 1.0f) : 0.0f,
                           settings.unlit ? 1.0f : 0.0f, settings.normalMapping ? 1.0f : 0.0f,
                           std::isfinite(settings.normalStrength) ? std::clamp(settings.normalStrength, 0.0f, 4.0f)
@@ -68,9 +108,7 @@ SceneUniform Renderer::Impl::sceneUniform(const RenderSettings& settings) {
                                        settings.normalMapping != recordingHistory.previous.normalMapping ||
                                        settings.normalStrength != recordingHistory.previous.normalStrength ||
                                        settings.ambient != recordingHistory.previous.ambient ||
-                                       settings.lightDirection != recordingHistory.previous.lightDirection ||
-                                       settings.lightColor != recordingHistory.previous.lightColor ||
-                                       settings.lightIntensity != recordingHistory.previous.lightIntensity ||
+                                       !sameLights(settings, recordingHistory.previous) ||
                                        settings.background != recordingHistory.previous.background ||
                                        perspective != perspectiveProjection(recordingHistory.previous.viewProjection)))
             recordingHistory = TemporalHistory{};
@@ -106,9 +144,9 @@ SceneUniform Renderer::Impl::sceneUniform(const RenderSettings& settings) {
     return uniform;
 }
 
-void Renderer::Impl::drawScene(rhi::CommandList& commands, const RenderSettings& settings) {
+void Renderer::Impl::drawScene(rhi::CommandList& commands, const RenderSettings& settings,
+                               const SceneUniform& uniform) {
     auto& scene = scenePipeline(aa.msaaSamples, aa.taa, settings.clipSpace.reversed_z);
-    const auto uniform = sceneUniform(settings);
     struct TransparentDraw {
         const GpuMesh* mesh;
         double depth;
@@ -135,7 +173,6 @@ void Renderer::Impl::drawScene(rhi::CommandList& commands, const RenderSettings&
     }
     // Finish allocations and lazy pipeline creation before beginning a command pass.
     if (!transparent.empty()) scenePipeline(aa.msaaSamples, aa.taa, settings.clipSpace.reversed_z, true);
-    std::memcpy(uniformBuffer->mapped().data(), &uniform, sizeof(uniform));
     std::array<rhi::ClearValue, 3> clears{};
     clears[0].color = {settings.background.x, settings.background.y, settings.background.z, 1};
     clears[1].depth = settings.clipSpace.reversed_z ? 0.0f : 1.0f;
@@ -145,6 +182,7 @@ void Renderer::Impl::drawScene(rhi::CommandList& commands, const RenderSettings&
     commands.setViewport(viewport->extent());
     commands.bindPipeline(*(settings.clipSpace.reversed_z ? scene.greater : scene.less));
     commands.bindSet(*pipelineLayout, 0, *sceneDescriptor);
+    commands.bindSet(*pipelineLayout, 2, uniform.shadowInfo.x > 0.5f ? *shadow->descriptor : *fallbackShadowDescriptor);
     if (model) {
         const auto drawMesh = [&](const GpuMesh& mesh) {
             const auto& material = model->materials[mesh.material];

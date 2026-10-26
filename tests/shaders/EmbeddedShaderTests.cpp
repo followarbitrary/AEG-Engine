@@ -77,6 +77,8 @@ int main(int argc, char** argv) {
         std::pair{ShaderId::TaaFragment, "taa.frag.spv"},
         std::pair{ShaderId::ModelTaaVertex, "model_taa.vert.spv"},
         std::pair{ShaderId::ModelTaaFragment, "model_taa.frag.spv"},
+        std::pair{ShaderId::ShadowVertex, "shadow.vert.spv"},
+        std::pair{ShaderId::ShadowFragment, "shadow.frag.spv"},
     };
     int failures = 0;
     for (const auto& [id, filename] : shaders) {

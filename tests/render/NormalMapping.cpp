@@ -234,7 +234,7 @@ int main(int argc, char** argv) {
         settings.background = {0, 0, 0, 1};
         settings.ambient = ambient;
         // Keep analytic white BRDF probes below the LDR attachment's clipping limit.
-        settings.lightIntensity = 2;
+        settings.lights[0].intensity = 2;
         settings.cameraTowardViewer = fixtureViewer;
         std::uint32_t width = 321, height = 239;
         auto frame = [&] {
@@ -265,7 +265,7 @@ int main(int argc, char** argv) {
             return image;
         };
         auto light = [&](aeg::math::Vec3 towardLight, const std::string& name) {
-            settings.lightDirection = -towardLight;
+            settings.lights[0].direction = -towardLight;
             frame();
             return capture(name);
         };
@@ -353,7 +353,7 @@ int main(int argc, char** argv) {
         // path, including the embedded image and authored glTF normal scale.
         settings.model = aeg::math::translation(aeg::math::Vec3(-0.7f, -0.7f, 0.5f)) *
                          aeg::math::scale(aeg::math::Vec3(1.4f, 1.4f, 1));
-        settings.lightDirection = -aeg::math::normalize(aeg::math::Vec3(1, 2, 1)) * sign;
+        settings.lights[0].direction = -aeg::math::normalize(aeg::math::Vec3(1, 2, 1)) * sign;
         Image importedGltf;
         for (const auto* filename : {"normal-map.gltf", "normal-map.glb"}) {
             const auto imported = aeg::assets::loadModel(std::filesystem::path(AEG_TEST_FIXTURES) / filename);
@@ -387,7 +387,7 @@ int main(int argc, char** argv) {
                                                      radius * 0.01f, radius * 7, {true, false});
             settings.set_camera({aeg::math::look_at(eye, center, aeg::math::Vec3(0, 1, 0)), projection, {true, false}});
             settings.model = aeg::math::identity();
-            settings.lightDirection = -aeg::math::normalize(aeg::math::Vec3(0.6f, 1, 0.8f));
+            settings.lights[0].direction = -aeg::math::normalize(aeg::math::Vec3(0.6f, 1, 0.8f));
         };
         const auto fixtures = std::filesystem::path(AEG_TEST_FIXTURES);
         {
@@ -654,7 +654,7 @@ int main(int argc, char** argv) {
                                           aeg::assets::ImageData{1, 1, {tiltedX[0], tiltedX[1], tiltedX[2], 255}});
         response(procedural, mapped(tiltedX, 1, {0, 0, 1}, {1, 0, 0}, {0, 1, 0}), "procedural-common-material");
 
-        settings.lightDirection = -aeg::math::normalize(aeg::math::Vec3(sign, 0, sign));
+        settings.lights[0].direction = -aeg::math::normalize(aeg::math::Vec3(sign, 0, sign));
         renderer.uploadModel(withoutMap(source));
         frame();
         const auto disabledBaseline = capture("controls-baseline");
@@ -751,7 +751,7 @@ int main(int argc, char** argv) {
                 require(renderer.antialiasing() == aeg::render::AntialiasingSettings{1, fxaa, true},
                         "normal-mapped TAA did not force 1x MSAA");
                 require(renderer.temporalFrameCount() == 0, "AA change retained normal-map history");
-                settings.lightDirection = -litX;
+                settings.lights[0].direction = -litX;
                 advance(4);
                 require(renderer.temporalFrameCount() == 4, "normal-mapped history did not accumulate");
                 const auto name = fxaa ? "taa-fxaa" : "taa";
@@ -788,7 +788,7 @@ int main(int argc, char** argv) {
         renderer.setAntialiasing({});
         settings.normalMapping = true;
         settings.normalStrength = 1;
-        settings.lightDirection = -litX;
+        settings.lights[0].direction = -litX;
         frame();
         const auto retained = capture("before-reload");
         auto invalid = source;

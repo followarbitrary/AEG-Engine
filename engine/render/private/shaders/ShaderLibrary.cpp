@@ -6,6 +6,8 @@
 #include <embedded_shaders/taa.frag.spv.hpp>
 #include <embedded_shaders/model_taa.vert.spv.hpp>
 #include <embedded_shaders/model_taa.frag.spv.hpp>
+#include <embedded_shaders/shadow.vert.spv.hpp>
+#include <embedded_shaders/shadow.frag.spv.hpp>
 #include <stdexcept>
 
 namespace aeg::render::detail {
@@ -25,6 +27,10 @@ std::span<const std::byte> embeddedShader(ShaderId shader) {
         return std::as_bytes(std::span{embedded_shaders::model_taa_vert});
     case ShaderId::ModelTaaFragment:
         return std::as_bytes(std::span{embedded_shaders::model_taa_frag});
+    case ShaderId::ShadowVertex:
+        return std::as_bytes(std::span{embedded_shaders::shadow_vert});
+    case ShaderId::ShadowFragment:
+        return std::as_bytes(std::span{embedded_shaders::shadow_frag});
     }
     throw std::invalid_argument("Unknown embedded shader ID");
 }
