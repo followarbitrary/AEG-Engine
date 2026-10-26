@@ -19,6 +19,50 @@ bool finite(const glm::mat4& m) {
             if (!std::isfinite(m[c][r])) return false;
     return true;
 }
+void closeViewPreservesLayerDepth() {
+    for (const float scale : {0.01f, 1.0f, 100.0f}) {
+        aeg::foundation::Bounds bounds;
+        const float halfExtent = scale / std::sqrt(3.0f);
+        bounds.min = glm::vec3(-halfExtent);
+        bounds.max = glm::vec3(halfExtent);
+        const float radius = bounds.radius();
+        for (const float distanceInRadii : {0.5f, 1.0f, 1.5f}) {
+            aeg::camera::OrbitCamera camera;
+            camera.fit(bounds);
+            camera.zoom(std::log(camera.distance() / (distanceInRadii * radius)) / 0.15f);
+            const auto projection = camera.projection(1.6f);
+            require(finite(projection), "close-view projection remains finite across model scales");
+            // Two visible layers separated by 0.005% of the model radius must
+            // retain enough float depth separation to avoid quantizing together.
+            const auto bodyClip = projection * glm::vec4(0, 0, -camera.distance(), 1);
+            const auto layerClip = projection * glm::vec4(0, 0, -camera.distance() + radius * 0.00005f, 1);
+            const float bodyDepth = bodyClip.z / bodyClip.w;
+            const float layerDepth = layerClip.z / layerClip.w;
+            require(layerDepth > 0 && bodyDepth < 1, "close-view layers remain inside the depth clip range");
+            const float depthUlp = bodyDepth - std::nextafter(bodyDepth, 0.0f);
+            std::cout << "Close-view depth: radius " << radius << ", distance/radius " << distanceInRadii
+                      << ", layer separation in float depth ULPs " << (bodyDepth - layerDepth) / depthUlp << '\n';
+            require(bodyDepth - layerDepth >= 4 * depthUlp,
+                    "close-view decorative layers retain at least four float depth ULPs");
+        }
+    }
+}
+void fullZoomPreservesNearbySurfaces() {
+    for (const float scale : {0.01f, 1.0f, 100.0f}) {
+        aeg::foundation::Bounds bounds;
+        const float halfExtent = scale / std::sqrt(3.0f);
+        bounds.min = glm::vec3(-halfExtent);
+        bounds.max = glm::vec3(halfExtent);
+        aeg::camera::OrbitCamera camera;
+        camera.fit(bounds);
+        camera.zoom(1e8f);
+        const auto projection = camera.projection(1.6f);
+        require(finite(projection), "full-zoom projection remains finite across model scales");
+        const auto clip = projection * glm::vec4(0, 0, -camera.distance() * 0.25f, 1);
+        require(clip.w > 0 && clip.z / clip.w > 0 && clip.z / clip.w < 1,
+                "full zoom keeps nearby surfaces in front of the camera visible");
+    }
+}
 void horizontalOrbitFollowsDrag() {
     aeg::foundation::Bounds bounds;
     bounds.min = {-1, -1, -1};
@@ -37,8 +81,7 @@ void horizontalOrbitFollowsDrag() {
             };
             const float before = screenX();
             camera.orbit(direction * 80, 0);
-            require(direction * (screenX() - before) > 0.01f,
-                    "visible model surface follows horizontal mouse drag");
+            require(direction * (screenX() - before) > 0.01f, "visible model surface follows horizontal mouse drag");
             require(close(camera.position().y, initialEye.y), "horizontal drag preserves camera elevation");
         }
     }
@@ -80,7 +123,9 @@ int main() {
     int failures = 0;
     const std::pair<const char*, std::function<void()>> tests[] = {
         {"orbit camera", camera},
-        {"horizontal orbit follows drag", horizontalOrbitFollowsDrag}};
+        {"horizontal orbit follows drag", horizontalOrbitFollowsDrag},
+        {"close view preserves layer depth", closeViewPreservesLayerDepth},
+        {"full zoom preserves nearby surfaces", fullZoomPreservesNearbySurfaces}};
     for (const auto& [name, test] : tests) try {
             test();
             std::cout << "PASS " << name << '\n';

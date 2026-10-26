@@ -1,3 +1,11 @@
+add_executable(aeg_depth_precision_test DepthPrecision.cpp)
+target_link_libraries(aeg_depth_precision_test PRIVATE aeg::editor aeg::rhi_vulkan aeg::rhi_vulkan_gui aeg::camera glfw)
+aeg_project_options(aeg_depth_precision_test)
+add_dependencies(aeg_depth_precision_test aeg_resources)
+add_test(NAME aeg_depth_precision COMMAND aeg_depth_precision_test
+    "$<TARGET_FILE_DIR:aeg_editor>" "${CMAKE_BINARY_DIR}/depth-precision")
+set_tests_properties(aeg_depth_precision PROPERTIES LABELS gpu TIMEOUT 90)
+
 add_executable(aeg_normal_mapping_test NormalMapping.cpp)
 target_link_libraries(aeg_normal_mapping_test PRIVATE aeg::editor aeg::rhi_vulkan aeg::rhi_vulkan_gui glfw)
 target_compile_definitions(aeg_normal_mapping_test PRIVATE AEG_TEST_FIXTURES="${PROJECT_SOURCE_DIR}/tests/fixtures")

@@ -51,7 +51,10 @@ glm::mat4 OrbitCamera::projection(float aspect) const {
     aspect = std::clamp(aspect, 0.01f, 100.0f);
     // Keep the smaller viewport dimension at the fitted field of view.
     const float verticalFov = 2 * std::atan(std::tan(fieldOfView * 0.5f) / std::min(aspect, 1.0f));
-    const float nearPlane = std::max(radius_ * 0.0001f, distance_ - radius_ * 1.5f);
+    // A tiny radius-only near plane loses depth separation between skin and
+    // thin overlays when zoomed in. Follow distance to retain precision while
+    // still allowing close inspection all the way to the minimum zoom.
+    const float nearPlane = std::max({radius_ * 0.0001f, distance_ * 0.01f, distance_ - radius_ * 1.5f});
     const float farPlane = std::max(nearPlane * 2, distance_ + radius_ * 4);
     auto result = glm::perspective(verticalFov, aspect, nearPlane, farPlane);
     result[1][1] *= -1;
