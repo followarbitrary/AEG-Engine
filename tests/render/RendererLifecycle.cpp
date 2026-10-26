@@ -33,7 +33,7 @@ int main(int argc, char** argv) {
     int result = 0;
     try {
         const std::filesystem::path runtime(argv[1]), fixture(argv[2]), output(argv[3]);
-        aeg::tests::TestRenderer renderer(window, runtime / "shaders", true);
+        aeg::tests::TestRenderer renderer(window, true);
         auto source = aeg::assets::loadModel(runtime / "assets/models/demo.obj");
         renderer.uploadModel(source);
         aeg::camera::OrbitCamera camera;

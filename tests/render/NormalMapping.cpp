@@ -205,7 +205,7 @@ glm::vec3 mapped(Sample sample, float scale, glm::vec3 n, glm::vec3 t, glm::vec3
 }
 
 int main(int argc, char** argv) {
-    if (argc != 3 || !glfwInit()) return 1;
+    if (argc != 2 || !glfwInit()) return 1;
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     auto* window = glfwCreateWindow(800, 600, "AEG normal mapping test", nullptr, nullptr);
@@ -219,9 +219,9 @@ int main(int argc, char** argv) {
     auto* previous = std::cerr.rdbuf(diagnostics.rdbuf());
     int result{};
     try {
-        const std::filesystem::path runtime(argv[1]), output(argv[2]);
+        const std::filesystem::path output(argv[1]);
         std::filesystem::create_directories(output);
-        aeg::tests::TestRenderer renderer(window, runtime / "shaders", true);
+        aeg::tests::TestRenderer renderer(window, true);
         aeg::render::RenderSettings settings;
         require(settings.normalMapping && settings.normalStrength == 1, "normal mapping must default enabled at 1");
         settings.background = {0, 0, 0, 1};

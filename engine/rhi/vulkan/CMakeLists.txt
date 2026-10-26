@@ -1,5 +1,3 @@
-include("${CMAKE_CURRENT_SOURCE_DIR}/private/pipelines/VulkanShaders.cmake")
-
 add_library(aeg_rhi_vulkan STATIC
     private/device/VulkanDevice.cpp
     private/resources/VulkanResources.cpp

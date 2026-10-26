@@ -40,8 +40,7 @@ struct EditorGraphics::Impl {
     }
 };
 
-EditorGraphics::EditorGraphics(GLFWwindow* window, const std::filesystem::path& shaders,
-                               const EditorBackendFactory& factory, bool validation)
+EditorGraphics::EditorGraphics(GLFWwindow* window, const EditorBackendFactory& factory, bool validation)
     : impl_(std::make_unique<Impl>()) {
     if (!ImGui::GetCurrentContext()) throw std::runtime_error("Editor graphics requires an ImGui context");
     const auto native = nativeWindow(window);
@@ -50,7 +49,7 @@ EditorGraphics::EditorGraphics(GLFWwindow* window, const std::filesystem::path& 
     impl_->backend = factory(native, validation);
     if (!impl_->backend.device || !impl_->backend.swapchain || !impl_->backend.gui)
         throw std::runtime_error("Editor backend factory returned incomplete graphics services");
-    impl_->scene = std::make_unique<render::Renderer>(*impl_->backend.device, shaders);
+    impl_->scene = std::make_unique<render::Renderer>(*impl_->backend.device);
     impl_->sampler = impl_->backend.device->createSampler({rhi::Filter::Linear, rhi::AddressMode::ClampToEdge});
 }
 EditorGraphics::~EditorGraphics() = default;

@@ -160,11 +160,11 @@ TemporalAttachments temporalAttachments(const tests::FakeCommands& commands, tes
 }
 }
 int main(int argc, char** argv) {
-    if (argc != 3) return 1;
+    if (argc != 2) return 1;
     try {
         using namespace aeg;
         tests::FakeDevice device;
-        render::Renderer renderer(device, argv[1]);
+        render::Renderer renderer(device);
         renderer.resizeViewport(17, 13);
         assets::ModelData model;
         model.materials.emplace_back();
@@ -175,7 +175,7 @@ int main(int argc, char** argv) {
         renderer.uploadModel(model);
         require(device.uploadedFormats == std::vector{rhi::Format::Rgba8Srgb, rhi::Format::Rgba8Unorm},
                 "Albedo/normal color spaces changed");
-        const std::filesystem::path capture(argv[2]);
+        const std::filesystem::path capture(argv[1]);
         rejects([&] { renderer.captureViewport(capture); }, "Capture accepted unrendered output");
         renderer.setAntialiasing({8, true, true});
         require(renderer.antialiasing().msaaSamples == 1, "TAA must select single sampling");

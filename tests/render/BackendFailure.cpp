@@ -79,7 +79,7 @@ extern "C" VKAPI_ATTR VkResult VKAPI_CALL vkFlushMappedMemoryRanges(VkDevice dev
 }
 
 namespace {
-bool runCase(const std::filesystem::path& shaders, Failure selected, const char* name) {
+bool runCase(Failure selected, const char* name) {
     failure = selected;
     injected = stagingCreated = false;
     stagingBuffer = VK_NULL_HANDLE;
@@ -91,7 +91,7 @@ bool runCase(const std::filesystem::path& shaders, Failure selected, const char*
     auto* previous = std::cerr.rdbuf(diagnostics.rdbuf());
     bool threw = false;
     try {
-        aeg::tests::TestRenderer renderer(window, shaders, true);
+        aeg::tests::TestRenderer renderer(window, true);
     } catch (const std::exception&) {
         threw = true;
     }
@@ -120,14 +120,14 @@ bool runCase(const std::filesystem::path& shaders, Failure selected, const char*
 }
 }
 
-int main(int argc, char** argv) {
-    if (argc != 2 || !glfwInit()) return 1;
+int main() {
+    if (!glfwInit()) return 1;
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
-    bool passed = runCase(argv[1], Failure::DescriptorLayout, "descriptor layout");
-    passed = runCase(argv[1], Failure::FontAllocation, "font staging allocation") && passed;
-    passed = runCase(argv[1], Failure::FontMap, "font staging map") && passed;
-    passed = runCase(argv[1], Failure::FontFlush, "font staging flush") && passed;
+    bool passed = runCase(Failure::DescriptorLayout, "descriptor layout");
+    passed = runCase(Failure::FontAllocation, "font staging allocation") && passed;
+    passed = runCase(Failure::FontMap, "font staging map") && passed;
+    passed = runCase(Failure::FontFlush, "font staging flush") && passed;
     glfwTerminate();
     return passed ? 0 : 1;
 }

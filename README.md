@@ -47,7 +47,7 @@ cmake --build --preset release --parallel 8
 ctest --preset release
 ```
 
-输出在 `build/debug/bin/` 或 `build/release/bin/`。构建会通过 `glslc --target-env=vulkan1.2` 编译 GLSL，并把 `shaders/*.spv`、`assets/` 复制到可执行文件旁。分发时保留整个 `bin` 目录；程序从可执行文件位置查找资源，允许从其他工作目录启动。
+输出在 `build/debug/bin/` 或 `build/release/bin/`。构建先通过 `glslc --target-env=vulkan1.2` 将 GLSL 编译到 `compiled-shaders/*.spv`，再提取为 `generated/embedded_shaders/*.spv.hpp` 中的 `constexpr std::uint32_t` 数组，编译进渲染库。运行时直接使用静态内存中的字节视图创建着色器，不打开或读取 SPIR-V 文件，也不需要分发 `shaders/` 目录。模型等 `assets/` 资源继续复制到可执行文件旁，程序允许从其他工作目录启动。
 
 ## 启动与命令行
 
@@ -155,9 +155,11 @@ glTF 的 OPAQUE 会忽略 alpha，MASK 使用模型指定的 cutoff（默认 0.5
 
 ## 已验证的里程碑
 
-2026-10-26 在本机 MSVC 19.51 / RTX 5070 / Vulkan SDK 1.4.357.0 上完成 Debug、Release 和 MinGW 编译。完整 Debug CTest **26/26 通过**，包含公开接口、相机、模型导入、法线贴图、自动查找、MMD 效果绑定、字体、RHI 描述校验及模拟渲染命令九个 CPU 目标，以及 **17 项真实 GPU 测试**。原有 **33 项模型/相机用例及 8 项字体用例**保留，法线导入与通用材质接口新增 13 组用例，自动查找新增 15 组用例，EMD/FX 绑定新增 14 组用例。Release 和 MinGW 的九个 CPU 目标也通过验证。CPU 回归覆盖左右拖动时模型表面的投影运动方向，以及 PMX 编码、坐标/绕序、UV、材质、中文路径、透明裁切和错误输入；字体回归检查中文实际字形、Unicode 字体路径、字体数据所有权和无效字体诊断；GPU 测试另检查 PMX 场景确实可见。
+2026-10-26 在本机 MSVC 19.51 / RTX 5070 / Vulkan SDK 1.4.357.0 上完成 Debug、Release 和 MinGW 编译。完整 Debug CTest **30/30 通过**，包含公开接口、相机、模型导入、法线贴图、自动查找、MMD 效果绑定、字体、RHI 描述校验、模拟渲染命令、内嵌着色器及生成器十一项 CPU 测试，以及 **19 项真实 GPU 测试**。原有 **33 项模型/相机用例及 8 项字体用例**保留，法线导入与通用材质接口新增 13 组用例，自动查找新增 15 组用例，EMD/FX 绑定新增 14 组用例。Release 和 MinGW 的十一项 CPU 测试也通过验证。CPU 回归覆盖左右拖动时模型表面的投影运动方向，以及 PMX 编码、坐标/绕序、UV、材质、中文路径、透明裁切和错误输入；字体回归检查中文实际字形、Unicode 字体路径、字体数据所有权和无效字体诊断；GPU 测试另检查 PMX 场景确实可见。
 
 GPU 测试检查场景截图确实包含模型，覆盖 OPAQUE/MASK 材质、含空格及中文资源 URI、窗口与视口反复缩放、导入替换失败后画面保持不变，以及 ImGui 初始化失败时的资源回收。测试同时检查 Vulkan 同步验证及退出阶段的错误输出。测试使用隐藏窗口；`-GpuTests` 仍需要可用的 Windows 桌面和 Vulkan 驱动。
+
+内嵌着色器测试逐字节比较七份静态数据与构建生成的 SPIR-V，检查大小、对齐、魔数、静态存储及无效枚举；生成器测试检查错误输入诊断和原输出保留。独立 Ninja 构建验证完整并行生成、GLSL／包含文件／提取脚本修改后的增量依赖和重复空构建。隔离部署测试只复制可执行文件和运行库，不携带 `shaders/` 或 SPIR-V 文件，分别执行 MSAA 4x＋FXAA 和 TAA＋FXAA，并检查非空场景截图及验证错误为零。Debug、Release、MinGW 均通过该部署验证。
 
 抗锯齿 GPU 回归检查斜边的实际像素覆盖、纯色和模型内部颜色、MSAA/FXAA 叠加后的最终截图、恢复关闭后的像素一致性，以及单像素/奇数尺寸、窗口缩放、重复切换、错误参数和模型替换。当前 RTX 5070 支持全部四档；缺少部分采样档位的物理设备尚未实测。MinGW 命令行已另验证所有档位叠加 FXAA 的真实渲染，Vulkan 验证错误均为零。
 
@@ -196,6 +198,8 @@ EMD 真实窗口验证确认了声明图片自动加载、手动清除/覆盖以
 | `tests/{foundation,camera,assets,rhi,render,editor}/` | 对应测试目标 | 与功能目录对应的 CPU/GPU 回归；数据保留在 `tests/fixtures/` |
 | `assets/` | 运行时复制 | 离线演示模型与纹理 |
 
+功能性 CMake 模块统一放在根目录 `cmake/`：`ProjectOptions.cmake` 管理编译器检测及目标编译／链接选项，`VulkanShaders.cmake` 定义着色器构建规则，`EmbedSpirv.cmake` 提取 SPIR-V 头文件；依赖修补和测试驱动脚本也集中在该目录。根入口加载这些模块，各功能目录的 `CMakeLists.txt` 声明目标、依赖和测试。
+
 各模块都有自己的 `CMakeLists.txt`。公开头文件直接位于 `public/`，内部头文件与源文件位于 `private/`。例如：
 
 ```text
@@ -216,7 +220,9 @@ engine/render/
 
 RHI 的十个公开头文件平铺在 `engine/rhi/public/`，只依赖 C++ 标准库，不包含 Vulkan、GLFW、ImGui、Windows、GLM 或模型数据类型。Vulkan 资源、命令与呈现实现分别放在 `engine/rhi/vulkan/private/{device,resources,bindings,pipelines,commands,presentation}/`。模型和材质上传、场景绘制、视口、MSAA／TAA／FXAA 与截图转换均通过真实 RHI 对象和命令实现，通用 Renderer 不调用 Vulkan，也不持有 ImGui 或窗口对象。
 
-ImGui 分成 core、GLFW 平台和 Vulkan 绘制三个目标。应用入口在创建窗口后通过工厂回调装配 Vulkan 设备、交换链和 GUI 适配器；`EditorGraphics` 协调等待与获取图像、UI 构建、场景与后处理、UI 绘制、提交及呈现。只有成功提交才推进 TAA 历史，呈现要求重建不会回滚已提交帧。GUI 使用稳定的纹理注册标识，并保留输出图像所有权直到注册更新或移除。GLSL 保留在渲染模块，Vulkan 编译命令归后端适配器，运行时路径仍为 `shaders/`。
+ImGui 分成 core、GLFW 平台和 Vulkan 绘制三个目标。应用入口在创建窗口后通过工厂回调装配 Vulkan 设备、交换链和 GUI 适配器；`EditorGraphics` 协调等待与获取图像、UI 构建、场景与后处理、UI 绘制、提交及呈现。只有成功提交才推进 TAA 历史，呈现要求重建不会回滚已提交帧。GUI 使用稳定的纹理注册标识，并保留输出图像所有权直到注册更新或移除。
+
+GLSL 保留在渲染模块，Vulkan 专用编译规则和 SPIR-V 头文件提取分别位于 `cmake/VulkanShaders.cmake`、`cmake/EmbedSpirv.cmake`。`ShaderLibrary` 通过枚举返回七份内嵌数据的只读 `span`，普通场景、TAA 场景、全屏、FXAA 与 TAA 管线都使用这一入口；`Renderer` 只接收 RHI 设备，不再接收着色器目录。CMake 为渲染库本身声明生成依赖，直接构建 `aeg_render` 也会先生成所需头文件。修改 GLSL、包含文件或提取脚本后会自动更新生成结果，内容相同时保留头文件时间戳，避免无效重编译。生成文件保留在构建目录，不加入源码仓库。
 
 使用模块时链接其 CMake 目标，通过扁平头文件名引用公开接口：
 

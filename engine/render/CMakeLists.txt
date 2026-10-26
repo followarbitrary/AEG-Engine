@@ -6,6 +6,7 @@ add_library(aeg_render STATIC
     private/scene/GpuModel.cpp
     private/scene/ScenePass.cpp
     private/scene/ScenePipeline.cpp
+    private/shaders/ShaderLibrary.cpp
     private/viewport/ViewportTargets.cpp
     private/viewport/ViewportCapture.cpp
     private/antialiasing/Antialiasing.cpp

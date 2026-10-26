@@ -1,10 +1,7 @@
 #include "RendererImpl.hpp"
 
 namespace aeg::render {
-Renderer::Impl::Impl(rhi::Device& target, const std::filesystem::path& shaders)
-    : device(target), shaderDirectory(shaders) {
-    initialize();
-}
+Renderer::Impl::Impl(rhi::Device& target) : device(target) { initialize(); }
 
 Renderer::Impl::~Impl() noexcept {
     // Device remains owned by the application. All dependent resources are
@@ -45,10 +42,11 @@ void Renderer::Impl::initialize() {
     createDescriptors();
     scenePipeline(1);
     createPostPass();
-    postPipeline = createPipeline(*postPass, *postLayout, 1, false, "fullscreen.vert.spv", "fxaa.frag.spv");
+    postPipeline = createPipeline(*postPass, *postLayout, 1, false, detail::ShaderId::FullscreenVertex,
+                                  detail::ShaderId::FxaaFragment);
     if (temporalSupported)
-        temporalPipeline =
-            createPipeline(*temporalPass, *temporalLayout, 1, false, "fullscreen.vert.spv", "taa.frag.spv", 2);
+        temporalPipeline = createPipeline(*temporalPass, *temporalLayout, 1, false, detail::ShaderId::FullscreenVertex,
+                                          detail::ShaderId::TaaFragment, 2);
     resizeViewport(960, 640);
 }
 
@@ -124,8 +122,7 @@ void Renderer::Impl::frameSubmitted() {
     pendingOutput.reset();
 }
 
-Renderer::Renderer(rhi::Device& device, const std::filesystem::path& shaders)
-    : impl_(std::make_unique<Impl>(device, shaders)) {}
+Renderer::Renderer(rhi::Device& device) : impl_(std::make_unique<Impl>(device)) {}
 Renderer::~Renderer() = default;
 void Renderer::uploadModel(const ModelData& model) { impl_->uploadModel(model); }
 void Renderer::setAntialiasing(const AntialiasingSettings& settings) { impl_->setAntialiasing(settings); }

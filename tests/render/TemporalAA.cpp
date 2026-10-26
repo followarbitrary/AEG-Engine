@@ -171,7 +171,7 @@ double rampError(const Image& actual, const Image& reference) {
 }
 
 int main(int argc, char** argv) {
-    if (argc != 3 || !glfwInit()) return 1;
+    if (argc != 2 || !glfwInit()) return 1;
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE);
     auto* window = glfwCreateWindow(800, 600, "AEG temporal AA test", nullptr, nullptr);
@@ -185,9 +185,9 @@ int main(int argc, char** argv) {
     auto* previous = std::cerr.rdbuf(diagnostics.rdbuf());
     int result{};
     try {
-        const std::filesystem::path runtime(argv[1]), output(argv[2]);
+        const std::filesystem::path output(argv[1]);
         std::filesystem::create_directories(output);
-        aeg::tests::TestRenderer renderer(window, runtime / "shaders", true);
+        aeg::tests::TestRenderer renderer(window, true);
         require(!renderer.antialiasing().taa && renderer.temporalFrameCount() == 0, "TAA must default off");
         aeg::render::RenderSettings settings;
         settings.unlit = true;

@@ -41,6 +41,14 @@ static_assert(
 static_assert(std::is_same_v<decltype(&aeg::editor::runEditor),
                              int (*)(const aeg::editor::EditorOptions&, const aeg::editor::EditorBackendFactory&)>);
 static_assert(!std::is_copy_constructible_v<aeg::render::Renderer>);
+static_assert(std::is_constructible_v<aeg::render::Renderer, aeg::rhi::Device&>);
+static_assert(!std::is_constructible_v<aeg::render::Renderer, aeg::rhi::Device&, const std::filesystem::path&>);
+static_assert(
+    std::is_constructible_v<aeg::editor::EditorGraphics, GLFWwindow*, const aeg::editor::EditorBackendFactory&>);
+static_assert(
+    std::is_constructible_v<aeg::editor::EditorGraphics, GLFWwindow*, const aeg::editor::EditorBackendFactory&, bool>);
+static_assert(!std::is_constructible_v<aeg::editor::EditorGraphics, GLFWwindow*, const std::filesystem::path&,
+                                       const aeg::editor::EditorBackendFactory&, bool>);
 
 void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);

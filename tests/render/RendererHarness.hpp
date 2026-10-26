@@ -8,9 +8,9 @@ namespace aeg::tests {
 // coordinator, renderer and backend objects as the application.
 class TestRenderer {
 public:
-    TestRenderer(GLFWwindow* window, const std::filesystem::path& shaders, bool validation)
+    TestRenderer(GLFWwindow* window, bool validation)
         : graphics_(
-              window, shaders,
+              window,
               [](const rhi::NativeWindow& native, bool checked) {
                   editor::EditorBackend backend;
                   backend.device = rhi::vulkan::createVulkanDevice({native, checked});

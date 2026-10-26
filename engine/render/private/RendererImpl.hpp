@@ -5,6 +5,7 @@
 #include "scene/SceneUniform.hpp"
 #include "viewport/ViewportTargets.hpp"
 #include "antialiasing/TemporalHistory.hpp"
+#include "shaders/ShaderLibrary.hpp"
 #include <Utf8Path.hpp>
 #include <algorithm>
 #include <array>
@@ -29,7 +30,6 @@ inline constexpr auto outputUsage =
 
 struct Renderer::Impl {
     rhi::Device& device;
-    std::filesystem::path shaderDirectory;
     AntialiasingSettings aa;
     std::uint32_t sampleMask{1}, maximumViewport{1}, maximumTemporalViewport{1};
     bool temporalSupported{};
@@ -49,15 +49,15 @@ struct Renderer::Impl {
     RenderSettings pendingSettings;
     bool pendingFrame{};
 
-    Impl(rhi::Device& target, const std::filesystem::path& shaders);
+    explicit Impl(rhi::Device& target);
     ~Impl() noexcept;
     void initialize();
     void createDescriptors();
     void createScenePass(ScenePipeline& target);
     void createPostPass();
     std::unique_ptr<rhi::GraphicsPipeline> createPipeline(rhi::RenderPass& pass, rhi::PipelineLayout& layout,
-                                                          std::uint32_t samples, bool scene, const char* vertexName,
-                                                          const char* fragmentName,
+                                                          std::uint32_t samples, bool scene, detail::ShaderId vertexId,
+                                                          detail::ShaderId fragmentId,
                                                           std::uint32_t colorAttachmentCount = 1);
     ScenePipeline& scenePipeline(std::uint32_t samples, bool temporal = false);
     void resetTemporalHistory() noexcept;

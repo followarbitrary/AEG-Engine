@@ -22,7 +22,7 @@ int runEditor(const EditorOptions& options, const EditorBackendFactory& factory)
     std::cout << "Font: " << foundation::pathToUtf8(font.source) << '\n';
 
     // This scope makes backend teardown precede the ImGui context and native window.
-    EditorGraphics graphics(lifetime.window, options.resourceDirectory / "shaders", factory, options.validation);
+    EditorGraphics graphics(lifetime.window, factory, options.validation);
     auto& renderer = graphics.renderer();
     renderer.setAntialiasing({options.msaaSamples, options.fxaa, options.taa});
     EditorState state;

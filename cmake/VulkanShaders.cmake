@@ -1,4 +1,5 @@
 function(aeg_compile_vulkan_shaders target_name source_root output_variable)
+    set(embed_script "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/EmbedSpirv.cmake")
     set(shader_outputs)
     foreach(shader model.vert model.frag fullscreen.vert fxaa.frag taa.frag)
         if(shader MATCHES "^model\\.")
@@ -12,7 +13,14 @@ function(aeg_compile_vulkan_shaders target_name source_root output_variable)
             COMMAND Vulkan::glslc --target-env=vulkan1.2 "${source}" -o "${output}"
             DEPENDS "${source}" "${source_root}/scene/normal_mapping.glsl"
             COMMENT "Compiling ${shader} to SPIR-V" VERBATIM)
-        list(APPEND shader_outputs "${output}")
+        set(header "${CMAKE_BINARY_DIR}/generated/embedded_shaders/${shader}.spv.hpp")
+        string(REPLACE "." "_" symbol "${shader}")
+        add_custom_command(OUTPUT "${header}"
+            COMMAND "${CMAKE_COMMAND}" "-DINPUT=${output}" "-DOUTPUT=${header}" "-DSYMBOL=${symbol}"
+                -P "${embed_script}"
+            DEPENDS "${output}" "${embed_script}"
+            COMMENT "Embedding ${shader} SPIR-V" VERBATIM)
+        list(APPEND shader_outputs "${header}")
     endforeach()
     foreach(stage vert frag)
         set(source "${source_root}/scene/model.${stage}")
@@ -22,7 +30,13 @@ function(aeg_compile_vulkan_shaders target_name source_root output_variable)
             COMMAND Vulkan::glslc --target-env=vulkan1.2 -DAEG_TAA=1 "${source}" -o "${output}"
             DEPENDS "${source}" "${source_root}/scene/normal_mapping.glsl"
             COMMENT "Compiling temporal model.${stage} to SPIR-V" VERBATIM)
-        list(APPEND shader_outputs "${output}")
+        set(header "${CMAKE_BINARY_DIR}/generated/embedded_shaders/model_taa.${stage}.spv.hpp")
+        add_custom_command(OUTPUT "${header}"
+            COMMAND "${CMAKE_COMMAND}" "-DINPUT=${output}" "-DOUTPUT=${header}" "-DSYMBOL=model_taa_${stage}"
+                -P "${embed_script}"
+            DEPENDS "${output}" "${embed_script}"
+            COMMENT "Embedding temporal model.${stage} SPIR-V" VERBATIM)
+        list(APPEND shader_outputs "${header}")
     endforeach()
     add_custom_target(${target_name} DEPENDS ${shader_outputs})
     set(${output_variable} "${shader_outputs}" PARENT_SCOPE)

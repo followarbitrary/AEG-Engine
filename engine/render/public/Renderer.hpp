@@ -8,7 +8,7 @@
 namespace aeg::render {
 class Renderer {
 public:
-    Renderer(rhi::Device& device, const std::filesystem::path& shaderDirectory);
+    explicit Renderer(rhi::Device& device);
     ~Renderer();
     Renderer(const Renderer&) = delete;
     Renderer& operator=(const Renderer&) = delete;
