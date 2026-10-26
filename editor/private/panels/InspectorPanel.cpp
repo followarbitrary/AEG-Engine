@@ -37,6 +37,7 @@ void drawInspectorPanel(EditorState& state, render::Renderer& renderer) {
             }
             ImGui::Checkbox("自动旋转###Auto rotate", &autoRotate);
             if (ImGui::Button("重置变换###Reset transform")) {
+                cancelTransformGizmo(state.gizmo, transform, false);
                 transform = {};
                 renderer.resetTemporalHistory();
                 frameRequested = true;

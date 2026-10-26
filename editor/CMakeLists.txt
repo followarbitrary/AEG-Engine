@@ -13,6 +13,9 @@ add_library(aeg_editor_module STATIC
     private/panels/MaterialPanel.cpp
     private/panels/LightPanel.cpp
     private/panels/ViewportPanel.cpp
+    private/gizmo/Transform.cpp
+    private/gizmo/ViewportGizmo.cpp
+    private/gizmo/OrientationGizmo.cpp
     private/fonts/EditorFont.cpp)
 add_library(aeg::editor ALIAS aeg_editor_module)
 target_include_directories(aeg_editor_module
@@ -20,5 +23,5 @@ target_include_directories(aeg_editor_module
     PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/private")
 target_link_libraries(aeg_editor_module
     PUBLIC aeg::render aeg::gui
-    PRIVATE aeg::foundation aeg::camera aeg::assets aeg_imgui_glfw glfw)
+    PRIVATE aeg::foundation aeg::camera aeg::assets aeg_imgui_glfw aeg_imguizmo glfw)
 aeg_project_options(aeg_editor_module)

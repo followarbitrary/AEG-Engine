@@ -54,9 +54,21 @@ FetchContent_Declare(stb
     URL_HASH SHA256=a6c31950b3bdf05eb92258768ba2a11bd44449490574b1aac67028452288c40d
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
 
-FetchContent_MakeAvailable(glfw assimp imgui stb)
+FetchContent_Declare(imguizmo
+    SUBBUILD_DIR "${CMAKE_BINARY_DIR}/_deps/imguizmo-subbuild"
+    DOWNLOAD_DIR "${PROJECT_SOURCE_DIR}/build/downloads"
+    DOWNLOAD_NAME imguizmo.tar.gz
+    BINARY_DIR "${CMAKE_BINARY_DIR}/_deps/imguizmo-build"
+    URL https://codeload.github.com/CedricGuillemet/ImGuizmo/tar.gz/b796ac3b861afc6e91ca74e4611effd9c9527367
+    URL_HASH SHA256=330072b157ee1fe1f4e2fce0d07cec89c734b8d25cfa09793708f71c02d6784e
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    # Only consume the core sources; upstream examples fetch their own ImGui.
+    SOURCE_SUBDIR aeg-source-only)
+
+FetchContent_MakeAvailable(glfw assimp imgui stb imguizmo)
 include("${CMAKE_CURRENT_LIST_DIR}/ApplyAssimpMmdPatch.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/ApplyImGuiVulkanPatch.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/ApplyImGuizmoPatch.cmake")
 
 if(MINGW)
     # Assimp 5.4.3 exports a blanket -Bstatic plus manual stdc++/winpthread
@@ -84,6 +96,10 @@ add_library(aeg_imgui_core STATIC
     "${imgui_SOURCE_DIR}/imgui_tables.cpp"
     "${imgui_SOURCE_DIR}/imgui_widgets.cpp")
 target_include_directories(aeg_imgui_core SYSTEM PUBLIC "${imgui_SOURCE_DIR}")
+add_library(aeg_imguizmo STATIC "${imguizmo_SOURCE_DIR}/src/ImGuizmo.cpp")
+target_include_directories(aeg_imguizmo SYSTEM PUBLIC "${imguizmo_SOURCE_DIR}/src")
+target_link_libraries(aeg_imguizmo PUBLIC aeg_imgui_core)
+
 add_library(aeg_imgui_glfw STATIC "${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp")
 target_include_directories(aeg_imgui_glfw SYSTEM PUBLIC "${imgui_SOURCE_DIR}/backends")
 target_link_libraries(aeg_imgui_glfw PUBLIC aeg_imgui_core PRIVATE glfw)

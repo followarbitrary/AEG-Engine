@@ -1,4 +1,7 @@
 #pragma once
+#include "gizmo/Transform.hpp"
+#include "gizmo/ViewportGizmo.hpp"
+#include "gizmo/OrientationGizmo.hpp"
 #include <Editor.hpp>
 #include <AntialiasingSettings.hpp>
 #include <Bounds.hpp>
@@ -37,18 +40,6 @@ struct ImportQueue {
     std::string error;
 };
 
-struct Transform {
-    math::Vec3 translation{0};
-    math::Vec3 rotation{0};
-    math::Vec3 scale{1};
-    math::Mat4 matrix() const {
-        const auto orientation = math::axis_angle({1, 0, 0}, math::to_radians(rotation.x)) *
-                                 math::axis_angle({0, 1, 0}, math::to_radians(rotation.y)) *
-                                 math::axis_angle({0, 0, 1}, math::to_radians(rotation.z));
-        return math::trs(translation, orientation, scale);
-    }
-};
-
 struct EditorState {
     render::AntialiasingSettings antialiasing;
     std::uint32_t supportedMsaa{1};
@@ -57,6 +48,8 @@ struct EditorState {
     assets::ModelData model;
     camera::OrbitCamera camera;
     Transform transform;
+    ViewportGizmoState gizmo;
+    OrientationGizmoState orientationGizmo;
     render::RenderSettings settings;
     ImportQueue imports;
     std::array<char, 4096> importPath{};

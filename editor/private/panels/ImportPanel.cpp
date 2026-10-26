@@ -37,7 +37,9 @@ void drawImportPanel(EditorState& state) {
             for (const auto& warning : model.warnings) ImGui::TextWrapped("%s", warning.c_str());
         ImGui::Spacing();
         ImGui::TextDisabled("视口操作");
-        ImGui::TextWrapped("左键 / 右键拖动：环绕\n中键拖动：平移\n滚轮：缩放\nF：聚焦模型");
+        ImGui::TextWrapped(
+            "W / E / R：移动 / 旋转 / 缩放\n拖动手柄：变换模型\nEsc：取消本次拖动\n右上角方向轴：切换视角\n左键 / "
+            "右键拖动空白处：环绕\n中键拖动：平移\n滚轮：缩放\nF：聚焦模型");
     }
     ImGui::End();
 }
@@ -57,6 +59,9 @@ void processImports(EditorState& state, render::Renderer& renderer) {
             renderer.uploadModel(candidate);
             model = std::move(candidate);
             resetMaterialEditor(state);
+            cancelTransformGizmo(state.gizmo, transform, false);
+            state.orientationGizmo = {};
+            state.viewportDrag = {};
             transform = {};
             // Each successful import starts from the front; ordinary focus keeps the orbit angle.
             camera = {};

@@ -67,7 +67,7 @@ int runEditor(const EditorOptions& options, const EditorBackendFactory& factory)
         const double now = glfwGetTime();
         const auto elapsed = static_cast<float>(std::clamp(now - previousTime, 0.0, 0.1));
         previousTime = now;
-        if (state.autoRotate)
+        if (state.autoRotate && !state.gizmo.active)
             state.transform.rotation.y = std::fmod(state.transform.rotation.y + elapsed * 22.0f, 360.0f);
         bool builtUi = false;
         graphics.drawFrame(state.settings, [&] {

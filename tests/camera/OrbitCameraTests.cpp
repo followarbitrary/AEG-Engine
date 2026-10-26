@@ -2,6 +2,7 @@
 #include <OrbitCamera.hpp>
 #include <RenderCamera.hpp>
 #include <math.hpp>
+#include <array>
 #include <cmath>
 #include <functional>
 #include <iostream>
@@ -48,6 +49,122 @@ void focusPreservesOrbit() {
     require(nearly_equal(camera.target(), next.center(), 0.00001f), "focus centers the requested model");
     require(nearly_equal(normalize(camera.position() - camera.target()), direction, 0.000001f),
             "focus preserves the user's orbit angle");
+}
+void explicitViewDirections() {
+    using namespace aeg::math;
+    // Each expected screen basis is independent of the camera's Euler implementation.
+    struct AxisView {
+        Vec3 towardViewer;
+        Vec3 right;
+        Vec3 up;
+    };
+    const std::array views{AxisView{{1, 0, 0}, {0, 0, -1}, {0, 1, 0}}, AxisView{{-1, 0, 0}, {0, 0, 1}, {0, 1, 0}},
+                           AxisView{{0, 1, 0}, {1, 0, 0}, {0, 0, -1}}, AxisView{{0, -1, 0}, {1, 0, 0}, {0, 0, 1}},
+                           AxisView{{0, 0, 1}, {1, 0, 0}, {0, 1, 0}},  AxisView{{0, 0, -1}, {-1, 0, 0}, {0, 1, 0}}};
+    for (const auto& axis : views) {
+        aeg::camera::OrbitCamera camera;
+        camera.fit({{-2, -1, -3}, {4, 5, 7}});
+        camera.orbit(71, -33);
+        camera.pan(12, 9, 600);
+        const auto target = camera.target();
+        const float distance = camera.distance();
+        const auto projection = camera.projection(1.6f);
+        require(camera.setViewDirection(axis.towardViewer), "accept every signed world-axis view");
+        require(camera.target() == target && camera.distance() == distance,
+                "view snapping preserves the orbit target and distance");
+        require(camera.projection(1.6f) == projection, "view snapping preserves the fitted radius and projection");
+        require(nearly_equal(camera.position(), target + axis.towardViewer * distance, 0.00001f),
+                "signed axis selects the corresponding eye side of the target");
+        const auto view = camera.view();
+        require(finite(view) && view != Mat4{}, "all signed axis views have valid nonzero view matrices");
+        require(nearly_equal(transform_point(view, target), Vec3(0, 0, -distance), 0.00001f),
+                "axis view centers its target at negative camera Z");
+        require(nearly_equal(transform_vector(view, axis.right), Vec3(1, 0, 0), 0.000001f) &&
+                    nearly_equal(transform_vector(view, axis.up), Vec3(0, 1, 0), 0.000001f) &&
+                    nearly_equal(transform_vector(view, axis.towardViewer), Vec3(0, 0, 1), 0.000001f),
+                "axis views preserve the hand-derived right-handed screen basis");
+        if (axis.towardViewer.y != 0)
+            require(camera.position().x == target.x && camera.position().z == target.z,
+                    "top and bottom views are exact poles rather than a near-pole tilt");
+    }
+    for (const float magnitude : {std::numeric_limits<float>::denorm_min(), 1.0f, std::numeric_limits<float>::max()}) {
+        aeg::camera::OrbitCamera camera;
+        require(camera.setViewDirection({0, magnitude, 0}), "normalize every nonzero finite direction scale");
+        require(nearly_equal(normalize(camera.position() - camera.target()), Vec3(0, 1, 0), 0.000001f),
+                "direction magnitude does not affect the selected view");
+        require(camera.setViewDirection({magnitude, magnitude, magnitude}),
+                "normalize finite horizontal and vertical components without float length overflow or underflow");
+        require(nearly_equal(normalize(camera.position() - camera.target()), normalize(Vec3(1, 1, 1)), 0.000001f),
+                "arbitrary finite direction magnitude does not affect its orientation");
+    }
+    aeg::camera::OrbitCamera camera;
+    const Vec3 arbitrary{2, -3, -4};
+    require(camera.setViewDirection(arbitrary), "accept non-axis view directions");
+    require(nearly_equal(normalize(camera.position() - camera.target()), normalize(arbitrary), 0.000001f),
+            "non-axis direction is normalized without reversing the view");
+}
+void polePanAndOrbit() {
+    using namespace aeg::math;
+    for (const float pole : {-1.f, 1.f}) {
+        aeg::camera::OrbitCamera camera;
+        require(camera.setViewDirection({0, pole, 0}), "set a pole before panning");
+        const auto initialTarget = camera.target();
+        const float distance = camera.distance();
+        const float panUnits = 2 * distance * std::tan(kPi / 8) / 600;
+        camera.pan(20, 10, 600);
+        const Vec3 expectedOffset{-20 * panUnits, 0, -pole * 10 * panUnits};
+        require(nearly_equal(camera.target(), initialTarget + expectedOffset, 0.000001f),
+                "pole pan follows the deterministic +X right and signed Z up basis");
+        require(camera.distance() == distance && finite(camera.view()) && camera.view() != Mat4{},
+                "pole pan preserves distance and a valid view");
+        camera.orbit(0, -pole * 20);
+        const Vec3 expectedDirection{0, pole * std::cos(0.1f), std::sin(0.1f)};
+        require(nearly_equal(normalize(camera.position() - camera.target()), expectedDirection, 0.000001f),
+                "vertical orbit exits either pole with the existing drag sign");
+        camera.orbit(0, pole * 1e8f);
+        require(nearly_equal(normalize(camera.position() - camera.target()), Vec3(0, pole, 0), 0.000001f) &&
+                    finite(camera.view()) && camera.view() != Mat4{},
+                "orbit reaches the exact full pitch limit without a singular view");
+        camera.orbit(80, 0);
+        const auto marker = camera.target() + Vec3(0, 0, -pole);
+        const auto markerInView = transform_point(camera.view(), marker);
+        require(std::abs(markerInView.x) > 0.2f && finite(camera.view()),
+                "horizontal orbit at a pole changes its screen basis without losing a valid view");
+        camera.orbit(0, -pole * 20);
+        require(finite(camera.view()) && camera.view() != Mat4{}, "orbit continues away from a rotated pole");
+    }
+}
+void viewDirectionPreservesStateOnFailure() {
+    using namespace aeg::math;
+    aeg::camera::OrbitCamera camera;
+    camera.fit({{-2, 3, -5}, {4, 9, 7}});
+    camera.orbit(80, -50);
+    camera.pan(20, 10, 600);
+    camera.zoom(3);
+    const auto target = camera.target();
+    const auto position = camera.position();
+    const auto view = camera.view();
+    const auto projection = camera.projection(1.6f);
+    const float distance = camera.distance();
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float infinity = std::numeric_limits<float>::infinity();
+    for (const Vec3 invalid : {Vec3{}, Vec3{nan, 0, 1}, Vec3{0, infinity, 1}, Vec3{0, 1, -infinity}}) {
+        require(!camera.setViewDirection(invalid), "reject zero and nonfinite view directions");
+        require(camera.target() == target && camera.position() == position && camera.distance() == distance &&
+                    camera.view() == view && camera.projection(1.6f) == projection,
+                "failed view direction changes preserve all observable camera state");
+    }
+    require(camera.setViewDirection({0, -1, 0}), "valid view changes work after rejected inputs");
+    camera.zoom(1);
+    require(close(camera.distance(), distance * std::exp(-0.15f)) && camera.target() == target,
+            "zoom after view snapping retains the previous fitted distance scale");
+    const aeg::foundation::Bounds next{{1, 2, 3}, {5, 8, 11}};
+    camera.fit(next);
+    require(camera.target() == next.center() &&
+                nearly_equal(camera.position(), next.center() + Vec3(0, -camera.distance(), 0), 0.000001f),
+            "fit after view snapping changes bounds while preserving the selected pole");
+    camera.zoom(1e8f);
+    require(close(camera.distance(), next.radius() * 0.02f), "view snapping preserves fit-dependent zoom limits");
 }
 void closeViewPreservesLayerDepth() {
     for (const float scale : {0.01f, 1.0f, 100.0f}) {
@@ -185,6 +302,9 @@ int main() {
     const std::pair<const char*, std::function<void()>> tests[] = {
         {"default view faces forward", defaultViewFacesForward},
         {"focus preserves orbit", focusPreservesOrbit},
+        {"explicit view directions", explicitViewDirections},
+        {"pole pan and orbit", polePanAndOrbit},
+        {"view direction failure preserves state", viewDirectionPreservesStateOnFailure},
         {"orbit camera", camera},
         {"render camera matrix and convention contract", renderCameraContract},
         {"horizontal orbit follows drag", horizontalOrbitFollowsDrag},

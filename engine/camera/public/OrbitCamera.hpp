@@ -7,6 +7,10 @@ class OrbitCamera {
 public:
     // Reframe the bounds without changing the current orbit angle.
     void fit(const foundation::Bounds& bounds);
+    // Set the target-to-eye direction while preserving the orbit target and distance.
+    // Zero or nonfinite directions are rejected without changing the camera.
+    // Exact +Y/-Y views use screen up -Z/+Z respectively, and screen right +X.
+    [[nodiscard]] bool setViewDirection(math::Vec3 towardViewer);
     // Mouse delta in pixels (+X right, +Y down); horizontal surface motion follows the drag.
     void orbit(float deltaX, float deltaY);
     void pan(float deltaX, float deltaY, float viewportHeight);

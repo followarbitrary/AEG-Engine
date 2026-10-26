@@ -7,7 +7,24 @@
 namespace aeg::camera {
 namespace {
 constexpr float fieldOfView = 0.78539816339f;
+constexpr float halfPi = std::numbers::pi_v<float> * 0.5f;
 bool finite(math::Vec3 v) { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); }
+struct OrbitBasis {
+    math::Vec3 backward;
+    math::Vec3 right;
+    math::Vec3 up;
+};
+OrbitBasis orbitBasis(float yaw, float pitch) {
+    const float sinYaw = std::sin(yaw), cosYaw = std::cos(yaw);
+    // A float approximation of pi/2 has a small negative cosine. Exact poles
+    // need a true zero to avoid tilting and flipping the apparent up direction.
+    const bool pole = std::abs(pitch) == halfPi;
+    const float sinPitch = pole ? std::copysign(1.0f, pitch) : std::sin(pitch);
+    const float cosPitch = pole ? 0.0f : std::cos(pitch);
+    return {{cosPitch * sinYaw, sinPitch, cosPitch * cosYaw},
+            {cosYaw, 0, -sinYaw},
+            {-sinPitch * sinYaw, cosPitch, -sinPitch * cosYaw}};
+}
 }
 void OrbitCamera::fit(const foundation::Bounds& bounds) {
     if (!finite(bounds.min) || !finite(bounds.max)) return;
@@ -20,20 +37,33 @@ void OrbitCamera::fit(const foundation::Bounds& bounds) {
     }
     distance_ = radius_ / std::sin(fieldOfView * 0.5f) * 1.2f;
 }
+bool OrbitCamera::setViewDirection(math::Vec3 towardViewer) {
+    if (!finite(towardViewer)) return false;
+    // atan2/hypot in double support all nonzero finite float magnitudes,
+    // including subnormals, without overflow or a world-scale epsilon.
+    const double horizontal = std::hypot(static_cast<double>(towardViewer.x), static_cast<double>(towardViewer.z));
+    if (horizontal == 0 && towardViewer.y == 0) return false;
+    const float yaw =
+        horizontal == 0
+            ? 0.0f
+            : static_cast<float>(std::atan2(static_cast<double>(towardViewer.x), static_cast<double>(towardViewer.z)));
+    const float pitch = static_cast<float>(std::atan2(static_cast<double>(towardViewer.y), horizontal));
+    yaw_ = yaw;
+    pitch_ = pitch;
+    return true;
+}
 void OrbitCamera::orbit(float deltaX, float deltaY) {
     if (!std::isfinite(deltaX) || !std::isfinite(deltaY)) return;
     // Move the camera opposite the drag so the visible model surface follows it.
     yaw_ = std::remainder(yaw_ - std::remainder(deltaX, 1256.637f) * 0.005f, 2 * std::numbers::pi_v<float>);
-    pitch_ = std::clamp(pitch_ + deltaY * 0.005f, -1.55334f, 1.55334f);
+    pitch_ = std::clamp(pitch_ + deltaY * 0.005f, -halfPi, halfPi);
 }
 void OrbitCamera::pan(float deltaX, float deltaY, float viewportHeight) {
     if (!std::isfinite(deltaX) || !std::isfinite(deltaY) || !std::isfinite(viewportHeight) || viewportHeight <= 0)
         return;
-    const auto forward = math::normalize(target_ - position());
-    const auto right = math::normalize(math::cross(forward, math::Vec3(0, 1, 0)));
-    const auto up = math::normalize(math::cross(right, forward));
+    const auto basis = orbitBasis(yaw_, pitch_);
     const auto offset =
-        (-deltaX * right + deltaY * up) * (2 * distance_ * std::tan(fieldOfView * 0.5f) / viewportHeight);
+        (-deltaX * basis.right + deltaY * basis.up) * (2 * distance_ * std::tan(fieldOfView * 0.5f) / viewportHeight);
     if (finite(offset) && finite(target_ + offset)) target_ += offset;
 }
 void OrbitCamera::zoom(float steps) {
@@ -41,11 +71,8 @@ void OrbitCamera::zoom(float steps) {
     distance_ =
         std::clamp(distance_ * std::exp(std::clamp(-steps * 0.15f, -30.0f, 30.0f)), radius_ * 0.02f, radius_ * 1000.0f);
 }
-math::Vec3 OrbitCamera::position() const {
-    return target_ + distance_ * math::Vec3(std::cos(pitch_) * std::sin(yaw_), std::sin(pitch_),
-                                            std::cos(pitch_) * std::cos(yaw_));
-}
-math::Mat4 OrbitCamera::view() const { return math::look_at(position(), target_, math::Vec3(0, 1, 0)); }
+math::Vec3 OrbitCamera::position() const { return target_ + distance_ * orbitBasis(yaw_, pitch_).backward; }
+math::Mat4 OrbitCamera::view() const { return math::look_at(position(), target_, orbitBasis(yaw_, pitch_).up); }
 math::Mat4 OrbitCamera::projection(float aspect, math::ClipSpaceConvention convention) const {
     if (!std::isfinite(aspect) || aspect <= 0) aspect = 1;
     aspect = std::clamp(aspect, 0.01f, 100.0f);

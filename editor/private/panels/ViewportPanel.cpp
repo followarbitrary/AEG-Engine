@@ -32,10 +32,14 @@ void drawViewportPanel(EditorState& state, render::Renderer& renderer, EditorGra
     auto& transform = state.transform;
     auto& model = state.model;
     const auto& io = ImGui::GetIO();
+    bool visible = false;
+    for (int button = 0; button < 3; ++button)
+        if (!ImGui::IsMouseDown(button)) viewportDrag[button] = false;
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
     if (ImGui::Begin(viewportWindow, nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
         const auto available = ImGui::GetContentRegionAvail();
         if (available.x >= 1 && available.y >= 1) {
+            visible = true;
             viewportWidth =
                 static_cast<std::uint32_t>(std::max(1.0f, std::floor(available.x * io.DisplayFramebufferScale.x)));
             viewportHeight =
@@ -43,33 +47,72 @@ void drawViewportPanel(EditorState& state, render::Renderer& renderer, EditorGra
             renderer.resizeViewport(viewportWidth, viewportHeight);
             const auto imagePosition = ImGui::GetCursorScreenPos();
             ImGui::Image(graphics.viewportTexture(), available);
-            // Image has no active ID. Own the gesture so ImGui's window-move
-            // ID cannot consume drags over the scene, while other widgets
-            // still block camera input.
+            if (frameRequested) {
+                camera.fit(transformedBounds(model.bounds, transform.matrix()));
+                renderer.resetTemporalHistory();
+                frameRequested = false;
+            }
+            const ViewportRect rect{{imagePosition.x, imagePosition.y}, {available.x, available.y}};
+            const bool cameraOwnsGesture =
+                std::any_of(viewportDrag.begin(), viewportDrag.end(), [](bool v) { return v; });
+            const bool hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) &&
+                                 rect.contains({io.MousePos.x, io.MousePos.y});
+            const bool toolbarClaims = drawGizmoToolbar(state.gizmo, rect,
+                                                        ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+                                                            !cameraOwnsGesture && !state.orientationGizmo.active);
+            // Test the orientation widget first for input priority, but paint it
+            // after model handles within this window's layer.
+            auto* draw = ImGui::GetWindowDrawList();
+            draw->ChannelsSplit(2);
+            draw->ChannelsSetCurrent(1);
+            const bool orientationClaims =
+                drawOrientationGizmo(state.orientationGizmo, camera, rect,
+                                     hovered && !cameraOwnsGesture && !state.gizmo.active &&
+                                         !state.gizmo.blockedUntilRelease && !toolbarClaims && !io.WantTextInput);
+            if (state.orientationGizmo.snapped) renderer.resetTemporalHistory();
+            draw->ChannelsSetCurrent(0);
+            const bool transformClaims = drawTransformGizmo(state.gizmo, transform, camera, model.bounds.center(), rect,
+                                                            !cameraOwnsGesture && !orientationClaims && !toolbarClaims);
+            draw->ChannelsMerge();
+            const bool overlayClaims = toolbarClaims || orientationClaims || transformClaims;
+            // Register the input item only during gestures. A passive hovered
+            // item would make ImGuizmo reject the next click via IsAnyItemHovered.
+            // During a gesture it prevents ImGui's window-move ID taking the mouse.
+            bool inputAvailable = !ImGui::IsAnyItemActive();
+            const bool mouseChanged = ImGui::IsMouseClicked(0) || ImGui::IsMouseClicked(1) ||
+                                      ImGui::IsMouseClicked(2) || ImGui::IsMouseReleased(0) ||
+                                      ImGui::IsMouseReleased(1) || ImGui::IsMouseReleased(2);
             ImGui::SetCursorScreenPos(imagePosition);
-            ImGui::InvisibleButton("##ViewportInput", available,
-                                   ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight |
-                                       ImGuiButtonFlags_MouseButtonMiddle);
-            const bool inputAvailable = !ImGui::IsAnyItemActive() || ImGui::IsItemActive();
+            if (cameraOwnsGesture || state.gizmo.active || state.gizmo.blockedUntilRelease ||
+                state.orientationGizmo.active || mouseChanged) {
+                ImGui::InvisibleButton("##ViewportInput", available,
+                                       ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight |
+                                           ImGuiButtonFlags_MouseButtonMiddle);
+                inputAvailable = !ImGui::IsAnyItemActive() || ImGui::IsItemActive();
+            }
             for (int button = 0; button < 3; ++button) {
-                if (!ImGui::IsMouseDown(button)) viewportDrag[button] = false;
-                if (ImGui::IsItemHovered() && inputAvailable && ImGui::IsMouseClicked(button))
+                if (hovered && !overlayClaims && inputAvailable && !io.WantTextInput && ImGui::IsMouseClicked(button))
                     viewportDrag[button] = true;
             }
-            if (ImGui::IsItemHovered() && inputAvailable && !io.WantTextInput) {
+            if (inputAvailable && !overlayClaims && !io.WantTextInput) {
                 if ((viewportDrag[ImGuiMouseButton_Left] && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) ||
                     (viewportDrag[ImGuiMouseButton_Right] && ImGui::IsMouseDragging(ImGuiMouseButton_Right)))
                     camera.orbit(io.MouseDelta.x, io.MouseDelta.y);
                 if (viewportDrag[ImGuiMouseButton_Middle] && ImGui::IsMouseDragging(ImGuiMouseButton_Middle))
                     camera.pan(io.MouseDelta.x, io.MouseDelta.y, available.y);
-                if (io.MouseWheel != 0) camera.zoom(io.MouseWheel);
-                if (ImGui::IsKeyPressed(ImGuiKey_F, false)) frameRequested = true;
+                if (hovered && io.MouseWheel != 0) camera.zoom(io.MouseWheel);
+                if (hovered && ImGui::IsKeyPressed(ImGuiKey_F, false)) frameRequested = true;
             }
             sceneRendered = true;
         }
     }
     ImGui::End();
     ImGui::PopStyleVar();
+    if (!visible) {
+        cancelTransformGizmo(state.gizmo, transform, true);
+        state.orientationGizmo = {};
+        viewportDrag = {};
+    }
     settings.model = transform.matrix();
     if (frameRequested) {
         camera.fit(transformedBounds(model.bounds, settings.model));
