@@ -3,6 +3,8 @@
 #include <ModelData.hpp>
 #include <RenderSettings.hpp>
 #include <ShadowSettings.hpp>
+#include <EnvironmentSettings.hpp>
+#include <EnvironmentImage.hpp>
 #include <RhiDevice.hpp>
 #include <filesystem>
 #include <memory>
@@ -14,6 +16,12 @@ public:
     Renderer(const Renderer&) = delete;
     Renderer& operator=(const Renderer&) = delete;
     void uploadModel(const assets::ModelData& model);
+    void uploadEnvironment(const assets::HdrImageData& image);
+    void useProceduralEnvironment();
+    void setEnvironment(const EnvironmentSettings& settings);
+    [[nodiscard]] EnvironmentSettings environment() const;
+    [[nodiscard]] bool supportsEnvironment() const;
+    [[nodiscard]] bool hasEnvironment() const;
     void setAntialiasing(const AntialiasingSettings& settings);
     [[nodiscard]] AntialiasingSettings antialiasing() const;
     [[nodiscard]] std::uint32_t supportedMsaaSamples() const;

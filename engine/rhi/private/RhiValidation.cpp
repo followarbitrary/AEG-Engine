@@ -2,8 +2,32 @@
 #include <RhiPipeline.hpp>
 #include <stdexcept>
 #include <set>
+#include <algorithm>
+#include <bit>
+#include <cmath>
 
 namespace aeg::rhi {
+Extent2D mipExtent(const TextureDesc& desc, std::uint32_t mip) {
+    if (!desc.extent.width || !desc.extent.height || mip >= desc.mipLevels || mip >= 32)
+        throw std::invalid_argument("Texture mip is out of range");
+    return {std::max(1u, desc.extent.width >> mip), std::max(1u, desc.extent.height >> mip)};
+}
+std::uint32_t textureLayerCount(const TextureDesc& desc) {
+    if (desc.dimension == TextureDimension::Cube) return 6;
+    if (desc.dimension == TextureDimension::Texture2D) return 1;
+    throw std::invalid_argument("Unknown texture dimension");
+}
+void validate(const SamplerDesc& desc) {
+    const auto validAddress = [](AddressMode value) {
+        return value == AddressMode::Repeat || value == AddressMode::ClampToEdge;
+    };
+    if ((desc.filter != Filter::Linear && desc.filter != Filter::Nearest) || !validAddress(desc.address) ||
+        (desc.addressV && !validAddress(*desc.addressV)) || !std::isfinite(desc.maxLod) || desc.maxLod < 0)
+        throw std::invalid_argument("Invalid sampler filtering, addressing or mip range");
+}
+void validate(const ComputePipelineDesc& desc) {
+    if (!desc.layout || !desc.compute) throw std::invalid_argument("Missing compute pipeline resource");
+}
 namespace {
 void samples(std::uint32_t value) {
     if (value != 1 && value != 2 && value != 4 && value != 8)
@@ -41,10 +65,18 @@ void validate(const TextureDesc& desc) {
     (void)formatByteSize(desc.format);
     constexpr auto valid =
         std::to_underlying(TextureUsage::Sampled | TextureUsage::ColorAttachment | TextureUsage::DepthAttachment |
-                           TextureUsage::CopySource | TextureUsage::CopyDestination);
+                           TextureUsage::CopySource | TextureUsage::CopyDestination | TextureUsage::Storage);
     if (!desc.extent.width || !desc.extent.height || desc.usage == TextureUsage::None ||
         (std::to_underlying(desc.usage) & ~valid))
         throw std::invalid_argument("Texture requires nonzero extent and valid usage");
+    (void)textureLayerCount(desc);
+    if (!desc.mipLevels || desc.mipLevels > std::bit_width(std::max(desc.extent.width, desc.extent.height)) ||
+        (desc.samples != 1 && desc.mipLevels != 1))
+        throw std::invalid_argument("Invalid texture mip count");
+    if (desc.dimension == TextureDimension::Cube && (desc.extent.width != desc.extent.height || desc.samples != 1))
+        throw std::invalid_argument("Cube texture requires square single-sample faces");
+    if (contains(desc.usage, TextureUsage::Storage) && (isDepthFormat(desc.format) || desc.samples != 1))
+        throw std::invalid_argument("Storage textures require a single-sample color format");
     if (isDepthFormat(desc.format) && contains(desc.usage, TextureUsage::ColorAttachment))
         throw std::invalid_argument("Depth format cannot be a color attachment");
     if (!isDepthFormat(desc.format) && contains(desc.usage, TextureUsage::DepthAttachment))

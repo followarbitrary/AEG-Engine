@@ -22,6 +22,12 @@ foreach(header IN LISTS aeg_rhi_public_headers)
 endforeach()
 
 if(TARGET aeg_render)
+    add_executable(aeg_environment_commands_test ../render/EnvironmentCommands.cpp)
+    target_link_libraries(aeg_environment_commands_test PRIVATE aeg::render)
+    target_include_directories(aeg_environment_commands_test PRIVATE "${PROJECT_SOURCE_DIR}/engine/render/private")
+    aeg_project_options(aeg_environment_commands_test)
+    add_test(NAME aeg_environment_commands COMMAND aeg_environment_commands_test)
+    set_tests_properties(aeg_environment_commands PROPERTIES LABELS cpu TIMEOUT 60)
     add_executable(aeg_cascade_fitting_tests ../render/CascadeFitting.cpp
         ../../engine/render/private/shadow/ShadowFitting.cpp)
     target_link_libraries(aeg_cascade_fitting_tests PRIVATE aeg::camera)

@@ -174,7 +174,7 @@ void resourcesAndPolicy() {
         require(mode != std::uint32_t(assets::AlphaMode::Blend) && cutoff == 0.37f,
                 "Blend cast or Mask cutoff changed");
     }
-    require(device.uniform->bytes.size() == 1248, "Shared scene uniform must be 1248 bytes");
+    require(device.uniform->bytes.size() == 1264, "Shared scene uniform must be 1264 bytes");
     require(uploaded<math::Vec4>(device, 1184) == math::Vec4(1, 0, 1.0f / 128, 1) &&
                 uploaded<math::Vec4>(device, 1200).x == shadow.depthBias &&
                 uploaded<math::Vec4>(device, 1200).y == shadow.slopeBias &&

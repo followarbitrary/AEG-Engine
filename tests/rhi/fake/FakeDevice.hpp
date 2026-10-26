@@ -34,19 +34,91 @@ struct FakePipeline final : rhi::GraphicsPipeline {
     rhi::GraphicsPipelineDesc desc;
     explicit FakePipeline(const rhi::GraphicsPipelineDesc& value) : desc(value) {}
 };
+struct FakeShader final : rhi::Shader {
+    rhi::ShaderStage stage;
+    explicit FakeShader(rhi::ShaderStage value) : stage(value) {}
+};
+struct FakeBindingLayout final : rhi::BindingLayout {
+    rhi::BindingLayoutDesc desc;
+    explicit FakeBindingLayout(const rhi::BindingLayoutDesc& value) : desc(value) {}
+};
+struct FakePipelineLayout final : rhi::PipelineLayout {
+    rhi::PipelineLayoutDesc desc;
+    explicit FakePipelineLayout(const rhi::PipelineLayoutDesc& value) : desc(value) {}
+};
+struct FakeComputePipeline final : rhi::ComputePipeline {
+    rhi::ComputePipelineDesc desc;
+    explicit FakeComputePipeline(const rhi::ComputePipelineDesc& value) : desc(value) {}
+};
 struct FakeFramebuffer final : rhi::Framebuffer {
     rhi::FramebufferDesc desc;
     explicit FakeFramebuffer(const rhi::FramebufferDesc& value) : desc(value) {}
 };
 struct FakeSet final : rhi::BindingSet {
+    rhi::BindingLayoutDesc desc;
     std::vector<rhi::BindingWrite> writes;
-    void update(std::span<const rhi::BindingWrite> value) override { writes.assign(value.begin(), value.end()); }
+    explicit FakeSet(rhi::BindingLayoutDesc value) : desc(std::move(value)) {}
+    void update(std::span<const rhi::BindingWrite> value) override {
+        std::vector<std::uint32_t> seen;
+        for (const auto& write : value) {
+            const auto binding =
+                std::ranges::find_if(desc.bindings, [&](const auto& entry) { return entry.binding == write.binding; });
+            if (binding == desc.bindings.end() || std::ranges::find(seen, write.binding) != seen.end())
+                throw std::invalid_argument("Unknown or duplicate fake binding write");
+            seen.push_back(write.binding);
+            if (binding->type == rhi::BindingType::UniformBuffer) {
+                if (!write.buffer || write.texture || write.sampler || write.storageMipLevel ||
+                    !rhi::contains(write.buffer->description().usage, rhi::BufferUsage::Uniform))
+                    throw std::invalid_argument("Invalid fake uniform binding");
+            } else if (binding->type == rhi::BindingType::CombinedTextureSampler) {
+                if (write.buffer || !write.texture || !write.sampler || write.storageMipLevel ||
+                    !rhi::contains(write.texture->description().usage, rhi::TextureUsage::Sampled) ||
+                    write.texture->description().samples != 1)
+                    throw std::invalid_argument("Invalid fake sampled image binding");
+            } else if (binding->type == rhi::BindingType::StorageImage) {
+                if (write.buffer || !write.texture || write.sampler ||
+                    !rhi::contains(write.texture->description().usage, rhi::TextureUsage::Storage) ||
+                    write.texture->description().samples != 1 ||
+                    write.storageMipLevel >= write.texture->description().mipLevels)
+                    throw std::invalid_argument("Invalid fake storage image binding");
+            } else {
+                throw std::invalid_argument("Unknown fake binding type");
+            }
+        }
+        auto replacement = writes;
+        for (const auto& write : value) {
+            const auto found =
+                std::ranges::find_if(replacement, [&](const auto& entry) { return entry.binding == write.binding; });
+            if (found == replacement.end())
+                replacement.push_back(write);
+            else
+                *found = write;
+        }
+        writes.swap(replacement);
+    }
 };
 struct BoundSetSnapshot {
     rhi::PipelineLayout* layout{};
     std::uint32_t index{};
     rhi::BindingSet* set{};
     std::vector<rhi::BindingWrite> writes;
+    rhi::PipelineBindPoint point{rhi::PipelineBindPoint::Graphics};
+};
+struct DispatchSnapshot {
+    rhi::ComputePipelineDesc pipeline;
+    std::vector<BoundSetSnapshot> sets;
+    std::vector<std::byte> constants;
+    std::array<std::uint32_t, 3> groups{};
+};
+struct TransitionSnapshot {
+    rhi::Texture* texture{};
+    rhi::ResourceState before{}, after{};
+    rhi::TextureDesc description;
+};
+struct TextureCopySnapshot {
+    rhi::Texture* source{};
+    rhi::Buffer* destination{};
+    rhi::TextureSubresource subresource;
 };
 struct DrawSnapshot {
     rhi::GraphicsPipelineDesc pipeline;
@@ -63,8 +135,11 @@ struct PassSnapshot {
     rhi::GraphicsPipelineDesc pipeline;
     std::vector<DrawSnapshot> draws;
 };
+class FakeCommands;
 class FakeDevice final : public rhi::Device {
 public:
+    FakeDevice();
+    ~FakeDevice() override;
     rhi::DeviceCapabilities caps{4096, 4096, 8, rhi::Format::D32Float, true};
     std::uint32_t samples{15};
     bool failTexture{};
@@ -73,6 +148,13 @@ public:
     bool failPipeline{};
     bool failBindingSet{};
     bool failWaitIdle{};
+    bool failComputePipeline{}, failImmediateSubmit{};
+    bool failSampler{}, failShader{}, failBindingLayout{}, failPipelineLayout{};
+    std::uint32_t failNthComputePipeline{}, failNthBindingSet{};
+    bool storageSupport{true}, cubeSupport{true}, storageLinearFiltering{true};
+    std::uint32_t immediateSubmissions{};
+    std::unique_ptr<FakeCommands> immediateCommands;
+    void enableCompute() { caps.compute = true; }
     bool colorBlending{true};
     // Independent sampled-depth capabilities: D32, D16, D24. Ordinary scene
     // depth support keeps the historical fake-device behavior.
@@ -82,15 +164,28 @@ public:
     FakeBuffer* uniform{};
     std::vector<rhi::Format> uploadedFormats;
     rhi::Texture* lastReadback{};
+    rhi::TextureSubresource lastReadbackSubresource{};
     const rhi::DeviceCapabilities& capabilities() const override { return caps; }
-    rhi::TextureSupport textureSupport(rhi::Format format, rhi::TextureUsage usage) const override {
+    rhi::TextureSupport
+    textureSupport(rhi::Format format, rhi::TextureUsage usage,
+                   rhi::TextureDimension dimension = rhi::TextureDimension::Texture2D) const override {
+        if (dimension != rhi::TextureDimension::Texture2D && dimension != rhi::TextureDimension::Cube)
+            throw std::invalid_argument("Unknown fake texture dimension");
+        if (dimension == rhi::TextureDimension::Cube && !cubeSupport) return {};
+        if (rhi::contains(usage, rhi::TextureUsage::Storage))
+            return {caps.compute && storageSupport, 1,
+                    dimension == rhi::TextureDimension::Cube
+                        ? rhi::Extent2D{caps.maximumCubeImageDimension, caps.maximumCubeImageDimension}
+                        : rhi::Extent2D{caps.maximumImageDimension, caps.maximumImageDimension},
+                    storageLinearFiltering, false};
         if (rhi::isDepthFormat(format) &&
             rhi::contains(usage, rhi::TextureUsage::DepthAttachment | rhi::TextureUsage::Sampled)) {
             const auto index = format == rhi::Format::D32Float ? 0u : format == rhi::Format::D16Unorm ? 1u : 2u;
             return {depthSampledSupport[index], depthSampledSupport[index] ? 1u : 0u, depthSampledMaximum[index], false,
                     false};
         }
-        return {true, samples, {4096, 4096}, true, colorBlending};
+        const auto maximum = dimension == rhi::TextureDimension::Cube ? caps.maximumCubeImageDimension : 4096u;
+        return {true, samples, {maximum, maximum}, true, colorBlending};
     }
     std::unique_ptr<rhi::Buffer> createBuffer(const rhi::BufferDesc& desc) override {
         rhi::validate(desc);
@@ -112,29 +207,53 @@ public:
     }
     std::unique_ptr<rhi::Texture> uploadTexture(const rhi::TextureDesc& desc,
                                                 std::span<const std::byte> pixels) override {
+        rhi::validate(desc);
+        if ((desc.format != rhi::Format::Rgba8Unorm && desc.format != rhi::Format::Rgba8Srgb &&
+             desc.format != rhi::Format::Rgba32Float) ||
+            desc.mipLevels != 1 || desc.samples != 1 || !rhi::contains(desc.usage, rhi::TextureUsage::Sampled))
+            throw std::invalid_argument("Fake upload requires single-mip sampled RGBA8 or RGBA32F faces");
+        const auto pixelCount = static_cast<std::uint64_t>(desc.extent.width) * desc.extent.height;
+        const auto pixelStride = rhi::formatByteSize(desc.format) * rhi::textureLayerCount(desc);
+        if (pixelCount > std::numeric_limits<std::size_t>::max() / pixelStride ||
+            pixelCount * pixelStride != pixels.size())
+            throw std::invalid_argument("Fake texture upload byte count mismatch");
         uploadedFormats.push_back(desc.format);
-        auto texture = createTexture(desc);
+        auto uploadedDesc = desc;
+        uploadedDesc.usage = uploadedDesc.usage | rhi::TextureUsage::CopyDestination;
+        auto texture = createTexture(uploadedDesc);
         dynamic_cast<FakeTexture&>(*texture).uploaded.assign(pixels.begin(), pixels.end());
         return texture;
     }
     std::unique_ptr<rhi::Sampler> createSampler(const rhi::SamplerDesc& desc) override {
+        rhi::validate(desc);
+        if (std::exchange(failSampler, false)) throw std::runtime_error("Injected sampler allocation failure");
         return std::make_unique<FakeSampler>(desc);
     }
-    std::unique_ptr<rhi::Shader> createShader(const rhi::ShaderDesc&) override {
-        return std::make_unique<EmptyResource<rhi::Shader>>();
+    std::unique_ptr<rhi::Shader> createShader(const rhi::ShaderDesc& desc) override {
+        if (desc.stage == rhi::ShaderStage::Compute && !caps.compute)
+            throw std::runtime_error("Compute shaders unsupported");
+        if (desc.stage != rhi::ShaderStage::Vertex && desc.stage != rhi::ShaderStage::Fragment &&
+            desc.stage != rhi::ShaderStage::Compute)
+            throw std::invalid_argument("Invalid fake shader stage");
+        if (std::exchange(failShader, false)) throw std::runtime_error("Injected shader allocation failure");
+        return std::make_unique<FakeShader>(desc.stage);
     }
-    std::unique_ptr<rhi::BindingLayout> createBindingLayout(const rhi::BindingLayoutDesc&) override {
-        return std::make_unique<EmptyResource<rhi::BindingLayout>>();
+    std::unique_ptr<rhi::BindingLayout> createBindingLayout(const rhi::BindingLayoutDesc& desc) override {
+        if (std::exchange(failBindingLayout, false)) throw std::runtime_error("Injected binding layout failure");
+        return std::make_unique<FakeBindingLayout>(desc);
     }
-    std::unique_ptr<rhi::BindingSet> createBindingSet(rhi::BindingLayout&,
+    std::unique_ptr<rhi::BindingSet> createBindingSet(rhi::BindingLayout& layout,
                                                       std::span<const rhi::BindingWrite> writes) override {
         if (std::exchange(failBindingSet, false)) throw std::runtime_error("Injected descriptor allocation failure");
-        auto set = std::make_unique<FakeSet>();
+        if (failNthBindingSet && --failNthBindingSet == 0)
+            throw std::runtime_error("Injected partial descriptor allocation failure");
+        auto set = std::make_unique<FakeSet>(dynamic_cast<FakeBindingLayout&>(layout).desc);
         set->update(writes);
         return set;
     }
-    std::unique_ptr<rhi::PipelineLayout> createPipelineLayout(const rhi::PipelineLayoutDesc&) override {
-        return std::make_unique<EmptyResource<rhi::PipelineLayout>>();
+    std::unique_ptr<rhi::PipelineLayout> createPipelineLayout(const rhi::PipelineLayoutDesc& desc) override {
+        if (std::exchange(failPipelineLayout, false)) throw std::runtime_error("Injected pipeline layout failure");
+        return std::make_unique<FakePipelineLayout>(desc);
     }
     std::unique_ptr<rhi::RenderPass> createRenderPass(const rhi::RenderPassDesc& desc) override {
         rhi::validate(desc);
@@ -150,11 +269,27 @@ public:
             throw std::runtime_error("Unsupported color attachment blending");
         return std::make_unique<FakePipeline>(desc);
     }
-    rhi::TextureReadback readback(rhi::Texture& texture, rhi::ResourceState) override {
+    std::unique_ptr<rhi::ComputePipeline> createComputePipeline(const rhi::ComputePipelineDesc& desc) override {
+        rhi::validate(desc);
+        if (!caps.compute) throw std::runtime_error("Compute pipelines unsupported");
+        if (dynamic_cast<FakeShader&>(*desc.compute).stage != rhi::ShaderStage::Compute)
+            throw std::invalid_argument("Compute pipeline requires a compute shader");
+        if (std::exchange(failComputePipeline, false)) throw std::runtime_error("Injected compute pipeline failure");
+        if (failNthComputePipeline && --failNthComputePipeline == 0)
+            throw std::runtime_error("Injected partial compute pipeline failure");
+        return std::make_unique<FakeComputePipeline>(desc);
+    }
+    void submitImmediate(const std::function<void(rhi::CommandList&)>& record) override;
+    rhi::TextureReadback readback(rhi::Texture& texture, rhi::ResourceState = rhi::ResourceState::Sampled,
+                                  rhi::TextureSubresource subresource = {}) override {
         lastReadback = &texture;
+        lastReadbackSubresource = subresource;
         const auto& desc = texture.description();
-        return {desc.extent, desc.format,
-                std::vector<std::byte>(static_cast<std::size_t>(desc.extent.width) * desc.extent.height *
+        const auto extent = rhi::mipExtent(desc, subresource.mipLevel);
+        if (subresource.layer >= rhi::textureLayerCount(desc))
+            throw std::invalid_argument("Readback layer out of range");
+        return {extent, desc.format,
+                std::vector<std::byte>(static_cast<std::size_t>(extent.width) * extent.height *
                                        rhi::formatByteSize(desc.format))};
     }
     void waitIdle() override {
@@ -168,10 +303,16 @@ public:
 };
 class FakeCommands final : public rhi::CommandList {
 public:
+    explicit FakeCommands(const rhi::DeviceCapabilities* caps = nullptr) : caps_(caps) {}
     std::vector<std::string> passes;
     std::vector<PassSnapshot> recordedPasses;
     std::vector<std::vector<std::byte>> constants;
     std::uint32_t indexedDraws{};
+    std::vector<DispatchSnapshot> dispatches;
+    std::vector<TransitionSnapshot> transitions;
+    std::vector<TextureCopySnapshot> subresourceCopies;
+    std::vector<std::string> operations;
+    bool inRenderPass() const { return activePass_ != nullptr; }
     void beginRenderPass(rhi::RenderPass& pass, rhi::Framebuffer& framebuffer, rhi::Extent2D,
                          std::span<const rhi::ClearValue> clears) override {
         if (activePass_) throw std::runtime_error("Nested fake render pass");
@@ -193,7 +334,38 @@ public:
         if (activePass_->pipeline.pass != activePass_->pass)
             throw std::runtime_error("Pipeline belongs to the wrong render pass");
     }
-    void bindSet(rhi::PipelineLayout& layout, std::uint32_t index, rhi::BindingSet& set) override {
+    void bindComputePipeline(rhi::ComputePipeline& pipeline) override {
+        if (activePass_ || (caps_ && !caps_->compute)) throw std::runtime_error("Invalid fake compute pipeline bind");
+        computePipeline_ = &dynamic_cast<FakeComputePipeline&>(pipeline);
+        if (computeLayout_ != computePipeline_->desc.layout) computeSets_.clear();
+        computeLayout_ = computePipeline_->desc.layout;
+    }
+    void bindSet(rhi::PipelineLayout& layout, std::uint32_t index, rhi::BindingSet& set,
+                 rhi::PipelineBindPoint point = rhi::PipelineBindPoint::Graphics) override {
+        if (point == rhi::PipelineBindPoint::Compute) {
+            if (activePass_ || (caps_ && !caps_->compute))
+                throw std::runtime_error("Fake compute binding inside render pass");
+            const auto& desc = dynamic_cast<FakePipelineLayout&>(layout).desc;
+            if (index >= desc.sets.size()) throw std::invalid_argument("Fake compute set index exceeds layout");
+            const auto& expected = dynamic_cast<FakeBindingLayout&>(*desc.sets[index]).desc;
+            const auto& actual = dynamic_cast<FakeSet&>(set).desc;
+            if (expected.bindings.size() != actual.bindings.size())
+                throw std::invalid_argument("Fake compute binding layout mismatch");
+            for (const auto& binding : expected.bindings)
+                if (!std::ranges::any_of(actual.bindings, [&](const auto& other) {
+                        return binding.binding == other.binding && binding.type == other.type &&
+                               binding.stages == other.stages;
+                    }))
+                    throw std::invalid_argument("Fake compute binding layout mismatch");
+            if (computePipeline_ && computePipeline_->desc.layout != &layout)
+                throw std::invalid_argument("Fake compute pipeline layout mismatch");
+            if (computeLayout_ != &layout) computeSets_.clear();
+            computeLayout_ = &layout;
+            if (computeSets_.size() <= index) computeSets_.resize(index + 1);
+            computeSets_[index] = {&layout, index, &set, {}, point};
+            return;
+        }
+        if (point != rhi::PipelineBindPoint::Graphics) throw std::invalid_argument("Unknown fake pipeline bind point");
         if (!activePass_) throw std::runtime_error("Fake binding outside render pass");
         // Copy writes now: descriptor updates for a later frame must not rewrite this recording.
         activePass_->sets.push_back({&layout, index, &set, dynamic_cast<FakeSet&>(set).writes});
@@ -210,13 +382,81 @@ public:
         ++indexedDraws;
         activePass_->draws.push_back({activePass_->pipeline, currentConstants_, indices_});
     }
-    void transition(rhi::Texture&, rhi::ResourceState, rhi::ResourceState) override {}
+    void dispatch(std::uint32_t x, std::uint32_t y, std::uint32_t z) override {
+        if (activePass_ || !computePipeline_ || !x || !y || !z)
+            throw std::invalid_argument("Invalid fake dispatch state or group count");
+        const std::array groups{x, y, z};
+        if (caps_)
+            for (std::size_t i = 0; i < groups.size(); ++i)
+                if (groups[i] > caps_->maximumComputeGroupCount[i])
+                    throw std::invalid_argument("Fake dispatch exceeds limits");
+        const auto& layout = dynamic_cast<FakePipelineLayout&>(*computePipeline_->desc.layout).desc;
+        if (computeSets_.size() < layout.sets.size())
+            throw std::invalid_argument("Missing fake compute descriptor set");
+        auto sets = computeSets_;
+        for (std::size_t i = 0; i < layout.sets.size(); ++i) {
+            if (!sets[i].set) throw std::invalid_argument("Missing fake compute descriptor set");
+            const auto& set = dynamic_cast<FakeSet&>(*sets[i].set);
+            for (const auto& binding : set.desc.bindings)
+                if (rhi::contains(binding.stages, rhi::ShaderStage::Compute) &&
+                    !std::ranges::any_of(set.writes,
+                                         [&](const auto& write) { return write.binding == binding.binding; }))
+                    throw std::invalid_argument("Uninitialized fake compute binding");
+            sets[i].writes = set.writes;
+        }
+        dispatches.push_back({computePipeline_->desc, std::move(sets), currentConstants_, groups});
+        operations.push_back("dispatch");
+    }
+    void transition(rhi::Texture& texture, rhi::ResourceState before, rhi::ResourceState after) override {
+        if (activePass_ || after == rhi::ResourceState::Undefined)
+            throw std::invalid_argument("Invalid fake transition");
+        transitions.push_back({&texture, before, after, texture.description()});
+        operations.push_back("transition");
+    }
     void copyBuffer(rhi::Buffer&, rhi::Buffer&, std::size_t) override {}
-    void copyTextureToBuffer(rhi::Texture&, rhi::Buffer&) override {}
+    void copyTextureToBuffer(rhi::Texture& texture, rhi::Buffer& buffer,
+                             rhi::TextureSubresource subresource = {}) override {
+        (void)rhi::mipExtent(texture.description(), subresource.mipLevel);
+        if (activePass_ || subresource.layer >= rhi::textureLayerCount(texture.description()))
+            throw std::invalid_argument("Invalid fake subresource copy");
+        subresourceCopies.push_back({&texture, &buffer, subresource});
+    }
 
 private:
     PassSnapshot* activePass_{};
     rhi::Buffer* indices_{};
     std::vector<std::byte> currentConstants_;
+    const rhi::DeviceCapabilities* caps_{};
+    FakeComputePipeline* computePipeline_{};
+    rhi::PipelineLayout* computeLayout_{};
+    std::vector<BoundSetSnapshot> computeSets_;
 };
+inline FakeDevice::FakeDevice() {
+    caps.maximumCubeImageDimension = 4096;
+    caps.maximumComputeGroupCount = {65535, 65535, 65535};
+    caps.maximumComputeGroupSize = {1024, 1024, 64};
+    caps.maximumComputeInvocations = 1024;
+}
+inline FakeDevice::~FakeDevice() = default;
+inline void FakeDevice::submitImmediate(const std::function<void(rhi::CommandList&)>& record) {
+    if (!record) throw std::invalid_argument("Missing fake immediate callback");
+    auto commands = std::make_unique<FakeCommands>(&caps);
+    record(*commands);
+    if (commands->inRenderPass()) throw std::logic_error("Fake immediate render pass was not ended");
+    if (std::exchange(failImmediateSubmit, false)) throw std::runtime_error("Injected immediate submission failure");
+    if (!immediateCommands) {
+        immediateCommands = std::move(commands);
+    } else {
+        immediateCommands->dispatches.insert(immediateCommands->dispatches.end(), commands->dispatches.begin(),
+                                             commands->dispatches.end());
+        immediateCommands->transitions.insert(immediateCommands->transitions.end(), commands->transitions.begin(),
+                                              commands->transitions.end());
+        immediateCommands->subresourceCopies.insert(immediateCommands->subresourceCopies.end(),
+                                                    commands->subresourceCopies.begin(),
+                                                    commands->subresourceCopies.end());
+        immediateCommands->operations.insert(immediateCommands->operations.end(), commands->operations.begin(),
+                                             commands->operations.end());
+    }
+    ++immediateSubmissions;
+}
 }

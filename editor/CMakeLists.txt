@@ -12,6 +12,7 @@ add_library(aeg_editor_module STATIC
     private/panels/InspectorPanel.cpp
     private/panels/MaterialPanel.cpp
     private/panels/LightPanel.cpp
+    private/panels/EnvironmentPanel.cpp
     private/panels/ViewportPanel.cpp
     private/gizmo/Transform.cpp
     private/gizmo/ViewportGizmo.cpp

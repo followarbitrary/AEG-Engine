@@ -237,6 +237,7 @@ void drawLightingSection(EditorState& state, render::Renderer& renderer) {
         if (ImGui::ColorEdit3("背景###Background", background))
             settings.background = {background[0], background[1], background[2], settings.background.w};
     }
+    drawEnvironmentSection(state, renderer);
     drawShadows(state, renderer);
 }
 }

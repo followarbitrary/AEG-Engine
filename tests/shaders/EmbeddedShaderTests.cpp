@@ -79,6 +79,10 @@ int main(int argc, char** argv) {
         std::pair{ShaderId::ModelTaaFragment, "model_taa.frag.spv"},
         std::pair{ShaderId::ShadowVertex, "shadow.vert.spv"},
         std::pair{ShaderId::ShadowFragment, "shadow.frag.spv"},
+        std::pair{ShaderId::EnvironmentCompute, "environment.comp.spv"},
+        std::pair{ShaderId::IrradianceCompute, "irradiance.comp.spv"},
+        std::pair{ShaderId::PrefilterCompute, "prefilter.comp.spv"},
+        std::pair{ShaderId::BrdfCompute, "brdf.comp.spv"},
     };
     int failures = 0;
     for (const auto& [id, filename] : shaders) {

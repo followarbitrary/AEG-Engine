@@ -65,4 +65,13 @@ class GraphicsPipeline {
 public:
     virtual ~GraphicsPipeline() = default;
 };
+struct ComputePipelineDesc {
+    PipelineLayout* layout{};
+    Shader* compute{};
+};
+void validate(const ComputePipelineDesc& desc);
+class ComputePipeline {
+public:
+    virtual ~ComputePipeline() = default;
+};
 }

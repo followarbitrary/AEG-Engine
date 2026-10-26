@@ -62,6 +62,7 @@ public:
     VkImage handle{};
     VkDeviceMemory memory{};
     VkImageView view{};
+    std::vector<VkImageView> storageViews;
     VulkanTexture(VulkanDevice& device, TextureDesc description) : owner(&device), desc(description) {}
     ~VulkanTexture() override;
     const TextureDesc& description() const override { return desc; }
@@ -96,6 +97,7 @@ public:
     BindingLayoutDesc desc;
     VkDescriptorPool pool{};
     VkDescriptorSet handle{};
+    std::set<std::uint32_t> initializedBindings;
     VulkanBindingSet(VulkanDevice& device, BindingLayoutDesc description)
         : owner(&device), desc(std::move(description)) {}
     ~VulkanBindingSet() override;
@@ -134,25 +136,38 @@ public:
     explicit VulkanPipeline(VulkanDevice& device) : owner(&device) {}
     ~VulkanPipeline() override;
 };
+class VulkanComputePipeline final : public ComputePipeline {
+public:
+    VulkanDevice* owner;
+    VulkanPipelineLayout* layout{};
+    VkPipeline handle{};
+    explicit VulkanComputePipeline(VulkanDevice& device) : owner(&device) {}
+    ~VulkanComputePipeline() override;
+};
 class VulkanCommands final : public CommandList {
 public:
     VulkanDevice* owner;
     VkCommandBuffer handle{};
     bool inPass{};
+    VulkanComputePipeline* computePipeline{};
+    VulkanPipelineLayout* computeBoundLayout{};
+    std::vector<VulkanBindingSet*> computeSets;
     explicit VulkanCommands(VulkanDevice& device) : owner(&device) {}
     void beginRenderPass(RenderPass&, Framebuffer&, Extent2D, std::span<const ClearValue>) override;
     void endRenderPass() override;
     void setViewport(Extent2D) override;
     void bindPipeline(GraphicsPipeline&) override;
-    void bindSet(PipelineLayout&, std::uint32_t, BindingSet&) override;
+    void bindComputePipeline(ComputePipeline&) override;
+    void bindSet(PipelineLayout&, std::uint32_t, BindingSet&, PipelineBindPoint = PipelineBindPoint::Graphics) override;
     void bindVertexBuffer(Buffer&) override;
     void bindIndexBuffer(Buffer&) override;
     void pushConstants(PipelineLayout&, std::span<const std::byte>) override;
     void draw(std::uint32_t) override;
     void drawIndexed(std::uint32_t) override;
+    void dispatch(std::uint32_t, std::uint32_t, std::uint32_t) override;
     void transition(Texture&, ResourceState, ResourceState) override;
     void copyBuffer(Buffer&, Buffer&, std::size_t) override;
-    void copyTextureToBuffer(Texture&, Buffer&) override;
+    void copyTextureToBuffer(Texture&, Buffer&, TextureSubresource = {}) override;
 };
 class VulkanDevice final : public Device {
 public:
@@ -174,7 +189,7 @@ public:
     ~VulkanDevice() override;
     void cleanup() noexcept;
     const DeviceCapabilities& capabilities() const override { return caps; }
-    TextureSupport textureSupport(Format, TextureUsage) const override;
+    TextureSupport textureSupport(Format, TextureUsage, TextureDimension = TextureDimension::Texture2D) const override;
     std::unique_ptr<Buffer> createBuffer(const BufferDesc&) override;
     std::unique_ptr<Buffer> uploadBuffer(std::span<const std::byte>, BufferUsage) override;
     std::unique_ptr<Texture> createTexture(const TextureDesc&) override;
@@ -187,7 +202,9 @@ public:
     std::unique_ptr<RenderPass> createRenderPass(const RenderPassDesc&) override;
     std::unique_ptr<Framebuffer> createFramebuffer(const FramebufferDesc&) override;
     std::unique_ptr<GraphicsPipeline> createGraphicsPipeline(const GraphicsPipelineDesc&) override;
-    TextureReadback readback(Texture&, ResourceState) override;
+    std::unique_ptr<ComputePipeline> createComputePipeline(const ComputePipelineDesc&) override;
+    void submitImmediate(const std::function<void(CommandList&)>&) override;
+    TextureReadback readback(Texture&, ResourceState = ResourceState::Sampled, TextureSubresource = {}) override;
     void waitIdle() override { check(vkDeviceWaitIdle(handle), "vkDeviceWaitIdle"); }
     const std::string& deviceName() const override { return name; }
     std::uint32_t validationErrorCount() const override { return errors.load(); }

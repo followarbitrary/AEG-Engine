@@ -5,7 +5,7 @@
 #include <span>
 #include <vector>
 namespace aeg::rhi {
-enum class BindingType { UniformBuffer, CombinedTextureSampler };
+enum class BindingType { UniformBuffer, CombinedTextureSampler, StorageImage };
 struct BindingDesc {
     std::uint32_t binding{};
     BindingType type{BindingType::UniformBuffer};
@@ -23,6 +23,7 @@ struct BindingWrite {
     Buffer* buffer{};
     Texture* texture{};
     Sampler* sampler{};
+    std::uint32_t storageMipLevel{};
 };
 class BindingSet {
 public:

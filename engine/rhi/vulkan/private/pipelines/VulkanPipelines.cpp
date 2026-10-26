@@ -13,9 +13,14 @@ VulkanFramebuffer::~VulkanFramebuffer() {
 VulkanPipeline::~VulkanPipeline() {
     if (handle) vkDestroyPipeline(owner->handle, handle, nullptr);
 }
+VulkanComputePipeline::~VulkanComputePipeline() {
+    if (handle) vkDestroyPipeline(owner->handle, handle, nullptr);
+}
 std::unique_ptr<Shader> VulkanDevice::createShader(const ShaderDesc& desc) {
     if (desc.format != ShaderFormat::Spirv || desc.bytecode.empty() || desc.bytecode.size() % 4 ||
-        (desc.stage != ShaderStage::Vertex && desc.stage != ShaderStage::Fragment))
+        (desc.stage != ShaderStage::Vertex && desc.stage != ShaderStage::Fragment &&
+         desc.stage != ShaderStage::Compute) ||
+        (desc.stage == ShaderStage::Compute && !caps.compute))
         throw std::invalid_argument("Invalid SPIR-V shader description");
     std::vector<std::uint32_t> code(desc.bytecode.size() / 4);
     std::memcpy(code.data(), desc.bytecode.data(), desc.bytecode.size());
@@ -101,7 +106,8 @@ std::unique_ptr<Framebuffer> VulkanDevice::createFramebuffer(const FramebufferDe
         if (!desc.attachments[i]) throw std::invalid_argument("Null framebuffer attachment");
         auto& texture = owned<VulkanTexture>(*this, *desc.attachments[i]);
         const auto& attachment = pass.desc.attachments[i];
-        if (texture.desc.format != attachment.format || texture.desc.samples != attachment.samples ||
+        if (texture.desc.dimension != TextureDimension::Texture2D || texture.desc.mipLevels != 1 ||
+            texture.desc.format != attachment.format || texture.desc.samples != attachment.samples ||
             texture.desc.extent.width < desc.extent.width || texture.desc.extent.height < desc.extent.height ||
             !contains(texture.desc.usage,
                       isDepthFormat(attachment.format) ? TextureUsage::DepthAttachment : TextureUsage::ColorAttachment))
@@ -240,6 +246,26 @@ std::unique_ptr<GraphicsPipeline> VulkanDevice::createGraphicsPipeline(const Gra
     info.renderPass = pass.handle;
     check(vkCreateGraphicsPipelines(handle, VK_NULL_HANDLE, 1, &info, nullptr, &result->handle),
           "vkCreateGraphicsPipelines");
+    return result;
+}
+std::unique_ptr<ComputePipeline> VulkanDevice::createComputePipeline(const ComputePipelineDesc& desc) {
+    validate(desc);
+    if (!caps.compute) throw std::runtime_error("Selected graphics queue does not support compute");
+    auto& layout = owned<VulkanPipelineLayout>(*this, *desc.layout);
+    auto& shader = owned<VulkanShader>(*this, *desc.compute);
+    if (shader.stage != ShaderStage::Compute) throw std::invalid_argument("Compute pipeline requires a compute shader");
+    if (layout.desc.pushConstantBytes && !contains(layout.desc.pushConstantStages, ShaderStage::Compute))
+        throw std::invalid_argument("Compute push constants require compute stage visibility");
+    auto result = std::make_unique<VulkanComputePipeline>(*this);
+    result->layout = &layout;
+    VkComputePipelineCreateInfo info{VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
+    info.stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    info.stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+    info.stage.module = shader.handle;
+    info.stage.pName = "main";
+    info.layout = layout.handle;
+    check(vkCreateComputePipelines(handle, VK_NULL_HANDLE, 1, &info, nullptr, &result->handle),
+          "vkCreateComputePipelines");
     return result;
 }
 }

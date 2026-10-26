@@ -1,0 +1,30 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "shared.glsl"
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout(set = 0, binding = 1, rgba32f) uniform writeonly image2D outputBrdf;
+
+void main() {
+    uvec3 pixel = gl_GlobalInvocationID;
+    if (pixel.x >= ibl.size || pixel.y >= ibl.size || pixel.z != 0u) return;
+
+    float noV = (float(pixel.x) + 0.5) / float(ibl.size);
+    float roughness = 0.045 + 0.955 * (float(pixel.y) + 0.5) / float(ibl.size);
+    vec3 v = vec3(sqrt(max(1.0 - noV * noV, 0.0)), 0.0, noV);
+    vec2 integrated = vec2(0.0);
+    for (uint i = 0u; i < ibl.sampleCount; ++i) {
+        vec3 h = iblGgxHalfVector(iblHammersley(i, ibl.sampleCount), roughness);
+        float voH = max(dot(v, h), 0.0);
+        vec3 l = normalize(2.0 * voH * h - v);
+        float noL = max(l.z, 0.0);
+        if (noL <= 0.0) continue;
+        float weight = 4.0 * noL * iblCorrelatedSmithVisibility(noL, noV, roughness) * voH / max(h.z, 1e-8);
+        float oneMinus = 1.0 - voH;
+        float fc = oneMinus * oneMinus * oneMinus * oneMinus * oneMinus;
+        integrated += vec2(1.0 - fc, fc) * weight;
+    }
+    // Rejected samples remain in the denominator of the Monte Carlo estimate.
+    integrated /= float(ibl.sampleCount);
+    imageStore(outputBrdf, ivec2(pixel.xy), vec4(integrated, 0.0, 1.0));
+}

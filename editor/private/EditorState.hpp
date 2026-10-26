@@ -66,6 +66,9 @@ struct EditorState {
     std::uint32_t selectedLight{0};
     int newLightType{1};
     std::string shadowError;
+    std::array<char, 4096> environmentPath{};
+    std::string environmentNotice;
+    std::string environmentError;
     bool autoRotate{false};
     bool frameRequested{false};
     bool sceneRendered{false};
@@ -85,6 +88,7 @@ void drawImportPanel(EditorState& state);
 void resetMaterialEditor(EditorState& state);
 void drawMaterialSection(EditorState& state, render::Renderer& renderer);
 void drawLightingSection(EditorState& state, render::Renderer& renderer);
+void drawEnvironmentSection(EditorState& state, render::Renderer& renderer);
 void drawInspectorPanel(EditorState& state, render::Renderer& renderer);
 void drawViewportPanel(EditorState& state, render::Renderer& renderer, EditorGraphics& graphics);
 }

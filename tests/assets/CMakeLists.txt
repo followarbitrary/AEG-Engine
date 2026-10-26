@@ -44,3 +44,8 @@ target_compile_definitions(aeg_mmd_effect_normal_tests PRIVATE
 aeg_project_options(aeg_mmd_effect_normal_tests)
 add_test(NAME aeg_mmd_effect_normal_tests COMMAND aeg_mmd_effect_normal_tests)
 set_tests_properties(aeg_mmd_effect_normal_tests PROPERTIES LABELS cpu TIMEOUT 60)
+add_executable(aeg_environment_image_tests EnvironmentImageTests.cpp)
+target_link_libraries(aeg_environment_image_tests PRIVATE aeg::assets)
+aeg_project_options(aeg_environment_image_tests)
+add_test(NAME aeg_environment_image COMMAND aeg_environment_image_tests)
+set_tests_properties(aeg_environment_image PROPERTIES LABELS cpu TIMEOUT 60)

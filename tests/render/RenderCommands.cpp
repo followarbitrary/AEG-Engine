@@ -100,7 +100,7 @@ SceneAttachments sceneAttachments(const tests::FakeCommands& commands, tests::Fa
     if (temporal || samples > 1)
         require(scene.framebuffer.attachments[2] != result.color && scene.framebuffer.attachments[2] != result.depth,
                 "Scene motion/resolve aliases a primary attachment");
-    require(scene.sets.size() == 3, "Scene did not bind uniform, material and shadow sets");
+    require(scene.sets.size() == 4, "Scene did not bind uniform, material, shadow and environment sets");
     const auto& uniformSet = set(scene, 0);
     const auto& uniform = binding(uniformSet, 0);
     require(uniformSet.writes.size() == 1 && uniform.buffer == device.uniform && !uniform.texture && !uniform.sampler &&
@@ -480,9 +480,10 @@ int main(int argc, char** argv) {
         mesh.indices = {0, 1, 2};
         model.meshes.push_back(mesh);
         renderer.uploadModel(model);
-        require(device.uploadedFormats ==
-                    std::vector{rhi::Format::Rgba8Unorm, rhi::Format::Rgba8Srgb, rhi::Format::Rgba8Unorm},
-                "Shadow fallback or albedo/normal color spaces changed");
+        require(device.uploadedFormats == std::vector{rhi::Format::Rgba8Unorm, rhi::Format::Rgba8Unorm,
+                                                      rhi::Format::Rgba8Unorm, rhi::Format::Rgba8Srgb,
+                                                      rhi::Format::Rgba8Unorm},
+                "Shadow/environment fallbacks or albedo/normal color spaces changed");
         const std::filesystem::path capture(argv[1]);
         rejects([&] { renderer.captureViewport(capture); }, "Capture accepted unrendered output");
         renderer.setAntialiasing({8, true, true});
@@ -561,7 +562,7 @@ int main(int argc, char** argv) {
         renderer.frameSubmitted();
         require(renderer.temporalFrameCount() == 0, "Non-temporal frame advanced history");
         // Pin the shader ABI independently from the private uniform declaration.
-        require(device.uniform->bytes.size() == 1248, "Scene uniform ABI must be 1248 bytes");
+        require(device.uniform->bytes.size() == 1264, "Scene uniform ABI must be 1264 bytes");
         const auto uploaded = [&]<class T>(std::size_t offset) {
             T value{};
             std::memcpy(&value, device.uniform->bytes.data() + offset, sizeof(T));

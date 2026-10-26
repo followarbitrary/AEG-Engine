@@ -10,7 +10,9 @@ public:
     Device& operator=(const Device&) = delete;
     virtual ~Device() = default;
     [[nodiscard]] virtual const DeviceCapabilities& capabilities() const = 0;
-    [[nodiscard]] virtual TextureSupport textureSupport(Format format, TextureUsage usage) const = 0;
+    [[nodiscard]] virtual TextureSupport
+    textureSupport(Format format, TextureUsage usage,
+                   TextureDimension dimension = TextureDimension::Texture2D) const = 0;
     virtual std::unique_ptr<Buffer> createBuffer(const BufferDesc& desc) = 0;
     virtual std::unique_ptr<Buffer> uploadBuffer(std::span<const std::byte> bytes, BufferUsage usage) = 0;
     virtual std::unique_ptr<Texture> createTexture(const TextureDesc& desc) = 0;
@@ -24,7 +26,12 @@ public:
     virtual std::unique_ptr<RenderPass> createRenderPass(const RenderPassDesc& desc) = 0;
     virtual std::unique_ptr<Framebuffer> createFramebuffer(const FramebufferDesc& desc) = 0;
     virtual std::unique_ptr<GraphicsPipeline> createGraphicsPipeline(const GraphicsPipelineDesc& desc) = 0;
-    virtual TextureReadback readback(Texture& texture, ResourceState currentState = ResourceState::Sampled) = 0;
+    virtual std::unique_ptr<ComputePipeline> createComputePipeline(const ComputePipelineDesc& desc) = 0;
+    // Records outside a render pass, submits on the graphics/compute queue, and waits for completion.
+    // The callback and every referenced resource must remain alive until this call returns.
+    virtual void submitImmediate(const std::function<void(CommandList&)>& record) = 0;
+    virtual TextureReadback readback(Texture& texture, ResourceState currentState = ResourceState::Sampled,
+                                     TextureSubresource subresource = {}) = 0;
     virtual void waitIdle() = 0;
     [[nodiscard]] virtual const std::string& deviceName() const = 0;
     [[nodiscard]] virtual std::uint32_t validationErrorCount() const = 0;

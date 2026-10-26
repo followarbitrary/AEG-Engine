@@ -42,6 +42,7 @@ VkImageUsageFlags imageUsage(TextureUsage usage) {
     if (contains(usage, TextureUsage::DepthAttachment)) flags |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
     if (contains(usage, TextureUsage::CopySource)) flags |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
     if (contains(usage, TextureUsage::CopyDestination)) flags |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    if (contains(usage, TextureUsage::Storage)) flags |= VK_IMAGE_USAGE_STORAGE_BIT;
     return flags;
 }
 VkBufferUsageFlags bufferUsage(BufferUsage usage) {
@@ -63,6 +64,8 @@ VulkanBuffer::~VulkanBuffer() {
     if (memory) vkFreeMemory(owner->handle, memory, nullptr);
 }
 VulkanTexture::~VulkanTexture() {
+    for (const auto storageView : storageViews)
+        if (storageView) vkDestroyImageView(owner->handle, storageView, nullptr);
     if (view) vkDestroyImageView(owner->handle, view, nullptr);
     if (handle) vkDestroyImage(owner->handle, handle, nullptr);
     if (memory) vkFreeMemory(owner->handle, memory, nullptr);
@@ -110,16 +113,24 @@ std::unique_ptr<Buffer> VulkanDevice::uploadBuffer(std::span<const std::byte> by
 }
 std::unique_ptr<Texture> VulkanDevice::createTexture(const TextureDesc& desc) {
     validate(desc);
-    const auto support = textureSupport(desc.format, desc.usage);
+    const auto support = textureSupport(desc.format, desc.usage, desc.dimension);
     if (!support.supported || !(support.sampleMask & desc.samples) || desc.extent.width > support.maximumExtent.width ||
         desc.extent.height > support.maximumExtent.height)
         throw std::invalid_argument("Unsupported Vulkan texture description");
+    VkImageFormatProperties limits{};
+    const VkImageCreateFlags flags = desc.dimension == TextureDimension::Cube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0;
+    check(vkGetPhysicalDeviceImageFormatProperties(physical, nativeFormat(desc.format), VK_IMAGE_TYPE_2D,
+                                                   VK_IMAGE_TILING_OPTIMAL, imageUsage(desc.usage), flags, &limits),
+          "vkGetPhysicalDeviceImageFormatProperties(texture)");
+    if (desc.mipLevels > limits.maxMipLevels || textureLayerCount(desc) > limits.maxArrayLayers)
+        throw std::invalid_argument("Texture mip or layer count exceeds device limit");
     auto result = std::make_unique<VulkanTexture>(*this, desc);
     VkImageCreateInfo info{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    info.flags = flags;
     info.imageType = VK_IMAGE_TYPE_2D;
     info.extent = {desc.extent.width, desc.extent.height, 1};
-    info.mipLevels = 1;
-    info.arrayLayers = 1;
+    info.mipLevels = desc.mipLevels;
+    info.arrayLayers = textureLayerCount(desc);
     info.format = nativeFormat(desc.format);
     info.tiling = VK_IMAGE_TILING_OPTIMAL;
     info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -136,24 +147,36 @@ std::unique_ptr<Texture> VulkanDevice::createTexture(const TextureDesc& desc) {
     check(vkBindImageMemory(handle, result->handle, result->memory, 0), "vkBindImageMemory");
     VkImageViewCreateInfo view{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
     view.image = result->handle;
-    view.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    view.viewType = desc.dimension == TextureDimension::Cube ? VK_IMAGE_VIEW_TYPE_CUBE : VK_IMAGE_VIEW_TYPE_2D;
     view.format = info.format;
     // Sampled depth/stencil descriptors select one aspect. Framebuffer attachments
     // ignore the view aspect mask; barriers still transition both aspects of D24S8.
     const VkImageAspectFlags viewAspect =
         isDepthFormat(desc.format) ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
-    view.subresourceRange = {viewAspect, 0, 1, 0, 1};
+    view.subresourceRange = {viewAspect, 0, desc.mipLevels, 0, textureLayerCount(desc)};
     check(vkCreateImageView(handle, &view, nullptr, &result->view), "vkCreateImageView");
+    if (contains(desc.usage, TextureUsage::Storage)) {
+        result->storageViews.resize(desc.mipLevels, VK_NULL_HANDLE);
+        view.viewType = desc.dimension == TextureDimension::Cube ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D;
+        view.subresourceRange.levelCount = 1;
+        for (std::uint32_t mip = 0; mip < desc.mipLevels; ++mip) {
+            view.subresourceRange.baseMipLevel = mip;
+            check(vkCreateImageView(handle, &view, nullptr, &result->storageViews[mip]), "vkCreateImageView(storage)");
+        }
+    }
     return result;
 }
 std::unique_ptr<Texture> VulkanDevice::uploadTexture(const TextureDesc& description,
                                                      std::span<const std::byte> pixels) {
     validate(description);
-    if ((description.format != Format::Rgba8Unorm && description.format != Format::Rgba8Srgb) ||
-        description.samples != 1 || !contains(description.usage, TextureUsage::Sampled))
-        throw std::invalid_argument("Texture upload requires a sampled RGBA8 single-sample texture");
-    const auto bytes = static_cast<std::uint64_t>(description.extent.width) * description.extent.height * 4;
-    if (bytes != pixels.size()) throw std::invalid_argument("RGBA8 texture upload byte count mismatch");
+    if ((description.format != Format::Rgba8Unorm && description.format != Format::Rgba8Srgb &&
+         description.format != Format::Rgba32Float) ||
+        description.samples != 1 || description.mipLevels != 1 || !contains(description.usage, TextureUsage::Sampled))
+        throw std::invalid_argument("Texture upload requires sampled single-mip RGBA8 or RGBA32F faces");
+    const auto pixelCount = static_cast<std::uint64_t>(description.extent.width) * description.extent.height;
+    const auto pixelStride = formatByteSize(description.format) * textureLayerCount(description);
+    if (pixelCount > std::numeric_limits<std::size_t>::max() / pixelStride || pixelCount * pixelStride != pixels.size())
+        throw std::invalid_argument("Texture upload byte count mismatch");
     auto desc = description;
     desc.usage = desc.usage | TextureUsage::CopyDestination;
     auto staging = createBuffer({pixels.size(), BufferUsage::CopySource, MemoryUsage::Upload});
@@ -164,7 +187,7 @@ std::unique_ptr<Texture> VulkanDevice::uploadTexture(const TextureDesc& descript
     immediate([&](VulkanCommands& commands) {
         commands.transition(texture, ResourceState::Undefined, ResourceState::CopyDestination);
         VkBufferImageCopy copy{};
-        copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, textureLayerCount(desc)};
         copy.imageExtent = {desc.extent.width, desc.extent.height, 1};
         vkCmdCopyBufferToImage(commands.handle, buffer.handle, texture.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
                                &copy);
@@ -173,35 +196,42 @@ std::unique_ptr<Texture> VulkanDevice::uploadTexture(const TextureDesc& descript
     return result;
 }
 std::unique_ptr<Sampler> VulkanDevice::createSampler(const SamplerDesc& desc) {
+    validate(desc);
     auto result = std::make_unique<VulkanSampler>(*this);
     VkSamplerCreateInfo info{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
     info.magFilter = info.minFilter = desc.filter == Filter::Linear ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
     info.mipmapMode = desc.filter == Filter::Linear ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
-    info.addressModeU = info.addressModeV = info.addressModeW =
+    info.addressModeU = info.addressModeW =
         desc.address == AddressMode::Repeat ? VK_SAMPLER_ADDRESS_MODE_REPEAT : VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    info.addressModeV = desc.addressV.value_or(desc.address) == AddressMode::Repeat
+                            ? VK_SAMPLER_ADDRESS_MODE_REPEAT
+                            : VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     info.maxAnisotropy = 1;
-    info.maxLod = 0;
+    info.maxLod = desc.maxLod;
     check(vkCreateSampler(handle, &info, nullptr, &result->handle), "vkCreateSampler");
     return result;
 }
-TextureReadback VulkanDevice::readback(Texture& generic, ResourceState currentState) {
+TextureReadback VulkanDevice::readback(Texture& generic, ResourceState currentState, TextureSubresource subresource) {
     auto& texture = owned<VulkanTexture>(*this, generic);
     const auto& desc = texture.desc;
     if (isDepthFormat(desc.format) || desc.samples != 1 || !contains(desc.usage, TextureUsage::CopySource) ||
         currentState == ResourceState::Undefined)
         throw std::invalid_argument("Readback requires an initialized single-sample color copy source");
-    const std::uint64_t byteCount =
-        static_cast<std::uint64_t>(desc.extent.width) * desc.extent.height * formatByteSize(desc.format);
-    if (byteCount > std::numeric_limits<std::size_t>::max()) throw std::length_error("Texture readback is too large");
+    const auto extent = mipExtent(desc, subresource.mipLevel);
+    if (subresource.layer >= textureLayerCount(desc)) throw std::invalid_argument("Readback layer is out of range");
+    const auto pixelCount = static_cast<std::uint64_t>(extent.width) * extent.height;
+    if (pixelCount > std::numeric_limits<std::size_t>::max() / formatByteSize(desc.format))
+        throw std::length_error("Texture readback is too large");
+    const auto byteCount = pixelCount * formatByteSize(desc.format);
     waitIdle();
     auto staging =
         createBuffer({static_cast<std::size_t>(byteCount), BufferUsage::CopyDestination, MemoryUsage::Readback});
     immediate([&](VulkanCommands& commands) {
         commands.transition(texture, currentState, ResourceState::CopySource);
-        commands.copyTextureToBuffer(texture, *staging);
+        commands.copyTextureToBuffer(texture, *staging, subresource);
         commands.transition(texture, ResourceState::CopySource, currentState);
     });
-    TextureReadback result{desc.extent, desc.format, {}};
+    TextureReadback result{extent, desc.format, {}};
     const auto mapped = staging->mapped();
     result.pixels.assign(mapped.begin(), mapped.end());
     return result;

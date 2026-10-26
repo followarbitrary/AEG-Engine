@@ -73,8 +73,10 @@ public:
     void endRenderPass() override { commands.endRenderPass(); }
     void setViewport(rhi::Extent2D value) override { commands.setViewport(value); }
     void bindPipeline(rhi::GraphicsPipeline& value) override { commands.bindPipeline(value); }
-    void bindSet(rhi::PipelineLayout& layout, std::uint32_t index, rhi::BindingSet& set) override {
-        commands.bindSet(layout, index, set);
+    void bindComputePipeline(rhi::ComputePipeline& value) override { commands.bindComputePipeline(value); }
+    void bindSet(rhi::PipelineLayout& layout, std::uint32_t index, rhi::BindingSet& set,
+                 rhi::PipelineBindPoint point = rhi::PipelineBindPoint::Graphics) override {
+        commands.bindSet(layout, index, set, point);
     }
     void bindVertexBuffer(rhi::Buffer& value) override { commands.bindVertexBuffer(value); }
     void bindIndexBuffer(rhi::Buffer& value) override { commands.bindIndexBuffer(value); }
@@ -82,6 +84,7 @@ public:
         commands.pushConstants(layout, value);
     }
     void draw(std::uint32_t count) override { commands.draw(count); }
+    void dispatch(std::uint32_t x, std::uint32_t y, std::uint32_t z) override { commands.dispatch(x, y, z); }
     void drawIndexed(std::uint32_t count) override {
         if (shadow_) shadowUniforms.push_back(device_.uniform->bytes);
         commands.drawIndexed(count);
@@ -92,7 +95,9 @@ public:
     void copyBuffer(rhi::Buffer& from, rhi::Buffer& to, std::size_t count) override {
         commands.copyBuffer(from, to, count);
     }
-    void copyTextureToBuffer(rhi::Texture& from, rhi::Buffer& to) override { commands.copyTextureToBuffer(from, to); }
+    void copyTextureToBuffer(rhi::Texture& from, rhi::Buffer& to, rhi::TextureSubresource subresource = {}) override {
+        commands.copyTextureToBuffer(from, to, subresource);
+    }
 
 private:
     tests::FakeDevice& device_;
@@ -134,7 +139,7 @@ void checkRecorded(tests::FakeDevice& device, RecordingCommands& recorded, unsig
         expected.push_back("fxaa");
     }
     require(commands.passes == expected, "Cascade passes must precede scene, TAA and FXAA");
-    require(device.uniform->bytes.size() == 1248, "Cascade scene uniform ABI must be 1248 bytes");
+    require(device.uniform->bytes.size() == 1264, "Cascade scene uniform ABI must be 1264 bytes");
     require(uploaded<math::Vec4>(device, 1184) == math::Vec4(1, 0, 1.0f / resolution, float(count)),
             "Cascade enable, light index, inverse resolution or active-count ABI is wrong");
     const auto& scenePass = scene(commands);

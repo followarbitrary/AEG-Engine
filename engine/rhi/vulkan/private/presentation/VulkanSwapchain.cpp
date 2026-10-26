@@ -174,6 +174,9 @@ bool VulkanSwapchain::beginFrame() {
         check(result, "vkAcquireNextImageKHR");
     check(vkResetCommandBuffer(commands.handle, 0), "vkResetCommandBuffer(frame)");
     commands.inPass = false;
+    commands.computePipeline = nullptr;
+    commands.computeBoundLayout = nullptr;
+    commands.computeSets.clear();
     VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     check(vkBeginCommandBuffer(commands.handle, &begin), "vkBeginCommandBuffer(frame)");

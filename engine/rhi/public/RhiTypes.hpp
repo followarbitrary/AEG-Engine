@@ -42,7 +42,8 @@ enum class TextureUsage : std::uint32_t {
     ColorAttachment = 2,
     DepthAttachment = 4,
     CopySource = 8,
-    CopyDestination = 16
+    CopyDestination = 16,
+    Storage = 32
 };
 enum class BufferUsage : std::uint32_t {
     None = 0,
@@ -52,7 +53,9 @@ enum class BufferUsage : std::uint32_t {
     CopySource = 8,
     CopyDestination = 16
 };
-enum class ShaderStage : std::uint32_t { None = 0, Vertex = 1, Fragment = 2 };
+enum class ShaderStage : std::uint32_t { None = 0, Vertex = 1, Fragment = 2, Compute = 4 };
+enum class TextureDimension { Texture2D, Cube };
+enum class PipelineBindPoint { Graphics, Compute };
 template <class T>
 concept Flags = std::is_same_v<T, TextureUsage> || std::is_same_v<T, BufferUsage> || std::is_same_v<T, ShaderStage>;
 template <Flags T> constexpr T operator|(T a, T b) {
@@ -62,7 +65,16 @@ template <Flags T> constexpr bool contains(T flags, T value) {
     return (std::to_underlying(flags) & std::to_underlying(value)) == std::to_underlying(value);
 }
 enum class MemoryUsage { Device, Upload, Readback };
-enum class ResourceState { Undefined, Sampled, ColorAttachment, DepthAttachment, CopySource, CopyDestination, Present };
+enum class ResourceState {
+    Undefined,
+    Sampled,
+    ColorAttachment,
+    DepthAttachment,
+    CopySource,
+    CopyDestination,
+    Present,
+    Storage
+};
 enum class LoadOp { Clear, Load, Discard };
 enum class StoreOp { Store, Discard };
 enum class Filter { Nearest, Linear };
@@ -80,6 +92,10 @@ struct DeviceCapabilities {
     std::uint32_t maximumImageDimension{1}, maximumFramebufferDimension{1}, maximumColorAttachments{1};
     Format depthFormat{Format::Undefined};
     bool independentBlend{};
+    bool compute{};
+    std::uint32_t maximumCubeImageDimension{1};
+    std::array<std::uint32_t, 3> maximumComputeGroupCount{}, maximumComputeGroupSize{};
+    std::uint32_t maximumComputeInvocations{};
 };
 struct ClearValue {
     std::array<float, 4> color{};

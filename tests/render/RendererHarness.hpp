@@ -40,8 +40,9 @@ public:
     const std::string& deviceName() { return renderer().deviceName(); }
     std::uint32_t validationErrorCount() { return renderer().validationErrorCount(); }
 
-private:
     render::Renderer& renderer() { return graphics_.renderer(); }
+
+private:
     editor::EditorGraphics graphics_;
 };
 }

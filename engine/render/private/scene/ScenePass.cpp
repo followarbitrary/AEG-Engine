@@ -102,6 +102,9 @@ SceneUniform Renderer::Impl::sceneUniform(const RenderSettings& settings) {
                           settings.unlit ? 1.0f : 0.0f, settings.normalMapping ? 1.0f : 0.0f,
                           std::isfinite(settings.normalStrength) ? std::clamp(settings.normalStrength, 0.0f, 4.0f)
                                                                  : 1.0f};
+    uniform.environmentInfo = {environmentSettings.enabled && environmentResources ? 1.0f : 0.0f,
+                               environmentSettings.intensity, environmentSettings.rotationRadians,
+                               environmentResources ? float(environmentResources->maps.prefilterMipCount - 1) : 0.0f};
     if (aa.taa) {
         if (recordingHistory.valid && (settings.clipSpace != recordingHistory.previous.clipSpace ||
                                        settings.unlit != recordingHistory.previous.unlit ||
@@ -186,6 +189,8 @@ void Renderer::Impl::drawScene(rhi::CommandList& commands, const RenderSettings&
                      uniform.shadowInfo.x > 0.5f
                          ? *shadow->descriptors[static_cast<std::uint32_t>(uniform.shadowInfo.w) - 1]
                          : *fallbackShadowDescriptor);
+    commands.bindSet(*pipelineLayout, 3,
+                     environmentResources ? *environmentResources->descriptor : *fallbackEnvironmentDescriptor);
     if (model) {
         const auto drawMesh = [&](const GpuMesh& mesh) {
             const auto& material = model->materials[mesh.material];

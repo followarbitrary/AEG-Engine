@@ -42,6 +42,7 @@ void Renderer::Impl::initialize() {
     }
     temporalSupported = temporalSupported && maximumTemporalViewport != 0;
     initializeShadowSupport();
+    initializeEnvironmentSupport();
     createDescriptors();
     scenePipeline(1);
     createPostPass();
@@ -64,9 +65,13 @@ void Renderer::Impl::createDescriptors() {
                                                    {2, CombinedTextureSampler, Fragment},
                                                    {3, CombinedTextureSampler, Fragment}}});
     postSetLayout = device.createBindingLayout({{{0, CombinedTextureSampler, Fragment}}});
+    environmentSetLayout = device.createBindingLayout({{{0, CombinedTextureSampler, Fragment},
+                                                        {1, CombinedTextureSampler, Fragment},
+                                                        {2, CombinedTextureSampler, Fragment}}});
     sampler = device.createSampler({rhi::Filter::Linear, rhi::AddressMode::Repeat});
     viewportSampler = device.createSampler({rhi::Filter::Linear, rhi::AddressMode::ClampToEdge});
     pointSampler = device.createSampler({rhi::Filter::Nearest, rhi::AddressMode::ClampToEdge});
+    environmentSampler = device.createSampler({rhi::Filter::Linear, rhi::AddressMode::ClampToEdge, {}, 9});
     uniformBuffer = device.createBuffer({sizeof(SceneUniform), rhi::BufferUsage::Uniform, rhi::MemoryUsage::Upload});
     if (uniformBuffer->mapped().size() < sizeof(SceneUniform))
         throw std::runtime_error("Scene uniform buffer is not host writable");
@@ -82,8 +87,24 @@ void Renderer::Impl::createDescriptors() {
     for (std::uint32_t i = 0; i < kMaxShadowCascades; ++i)
         shadowWrites[i] = {i, nullptr, fallbackShadowTexture.get(), pointSampler.get()};
     fallbackShadowDescriptor = device.createBindingSet(*shadowSetLayout, shadowWrites);
+    constexpr std::array<std::uint8_t, 4> black{0, 0, 0, 255};
+    constexpr std::array<std::uint8_t, 24> blackFaces{0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255,
+                                                      0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255};
+    constexpr auto fallbackUsage = rhi::TextureUsage::CopyDestination | rhi::TextureUsage::Sampled;
+    fallbackEnvironmentCube =
+        device.uploadTexture({{1, 1}, rhi::Format::Rgba8Unorm, fallbackUsage, 1, 1, rhi::TextureDimension::Cube},
+                             std::as_bytes(std::span(blackFaces)));
+    fallbackEnvironmentLut =
+        device.uploadTexture({{1, 1}, rhi::Format::Rgba8Unorm, fallbackUsage, 1}, std::as_bytes(std::span(black)));
+    const std::array environmentWrites{
+        rhi::BindingWrite{0, nullptr, fallbackEnvironmentCube.get(), environmentSampler.get()},
+        rhi::BindingWrite{1, nullptr, fallbackEnvironmentCube.get(), environmentSampler.get()},
+        rhi::BindingWrite{2, nullptr, fallbackEnvironmentLut.get(), environmentSampler.get()}};
+    fallbackEnvironmentDescriptor = device.createBindingSet(*environmentSetLayout, environmentWrites);
     pipelineLayout = device.createPipelineLayout(
-        {{sceneLayout.get(), materialLayout.get(), shadowSetLayout.get()}, sizeof(MaterialPush), Fragment});
+        {{sceneLayout.get(), materialLayout.get(), shadowSetLayout.get(), environmentSetLayout.get()},
+         sizeof(MaterialPush),
+         Fragment});
     shadowPipelineLayout =
         device.createPipelineLayout({{sceneLayout.get(), materialLayout.get()}, sizeof(ShadowPush), Vertex | Fragment});
     postLayout = device.createPipelineLayout({{postSetLayout.get()}, sizeof(aeg::math::Vec2), Fragment});
@@ -94,6 +115,63 @@ void Renderer::Impl::createDescriptors() {
                                                          {3, CombinedTextureSampler, Fragment}}});
         temporalLayout = device.createPipelineLayout({{temporalSetLayout.get()}, sizeof(TemporalPush), Fragment});
     }
+}
+
+void Renderer::Impl::initializeEnvironmentSupport() {
+    if (!EnvironmentBaker::supported(device)) return;
+    const auto& caps = device.capabilities();
+    constexpr auto usage = rhi::TextureUsage::Storage | rhi::TextureUsage::Sampled | rhi::TextureUsage::CopySource;
+    const auto cube = device.textureSupport(rhi::Format::Rgba32Float, usage, rhi::TextureDimension::Cube);
+    const auto flat = device.textureSupport(rhi::Format::Rgba32Float, usage);
+    const auto source = device.textureSupport(rhi::Format::Rgba32Float,
+                                              rhi::TextureUsage::Sampled | rhi::TextureUsage::CopyDestination);
+    const auto defaults = EnvironmentBakeSettings{};
+    const auto maximumCube =
+        std::min({caps.maximumCubeImageDimension, cube.maximumExtent.width, cube.maximumExtent.height});
+    const auto maximumFlat =
+        std::min({caps.maximumImageDimension, flat.maximumExtent.width, flat.maximumExtent.height});
+    const auto maximumSize =
+        std::max({defaults.environmentSize, defaults.irradianceSize, defaults.prefilterSize, defaults.brdfSize});
+    // First enable uploads makeProceduralEnvironment()'s fixed 512x256 panorama.
+    environmentSupported = defaults.environmentSize <= maximumCube && defaults.brdfSize <= maximumFlat &&
+                           defaults.irradianceSize <= maximumCube && defaults.prefilterSize <= maximumCube &&
+                           (maximumSize + 7) / 8 <= caps.maximumComputeGroupCount[0] &&
+                           (maximumSize + 7) / 8 <= caps.maximumComputeGroupCount[1] && source.supported &&
+                           source.linearFiltering && (source.sampleMask & 1u) && caps.maximumImageDimension >= 512 &&
+                           source.maximumExtent.width >= 512 && source.maximumExtent.height >= 256;
+}
+
+void Renderer::Impl::uploadEnvironment(const assets::HdrImageData& image) {
+    if (!environmentSupported) throw std::runtime_error("Compute environment lighting is unsupported");
+    // Keep both the first immutable LUT and every replacement map private until all work succeeds.
+    std::unique_ptr<EnvironmentBaker> candidateBaker;
+    auto* baker = environmentBaker.get();
+    if (!baker) {
+        candidateBaker = std::make_unique<EnvironmentBaker>(device);
+        baker = candidateBaker.get();
+    }
+    auto candidate = std::make_unique<EnvironmentResources>();
+    candidate->maps = baker->bake(image);
+    const std::array writes{rhi::BindingWrite{0, nullptr, candidate->maps.irradiance.get(), environmentSampler.get()},
+                            rhi::BindingWrite{1, nullptr, candidate->maps.prefiltered.get(), environmentSampler.get()},
+                            rhi::BindingWrite{2, nullptr, &baker->brdfLut(), environmentSampler.get()}};
+    candidate->descriptor = device.createBindingSet(*environmentSetLayout, writes);
+    device.waitIdle();
+    if (candidateBaker) environmentBaker.swap(candidateBaker);
+    environmentResources.swap(candidate);
+    resetTemporalHistory();
+}
+
+void Renderer::Impl::setEnvironment(const EnvironmentSettings& requested) {
+    if (!std::isfinite(requested.intensity) || requested.intensity < 0 || requested.intensity > 100 ||
+        !std::isfinite(requested.rotationRadians))
+        throw std::invalid_argument("Environment intensity must be in [0,100] and rotation must be finite");
+    if (requested == environmentSettings) return;
+    if (requested.enabled && !environmentSupported)
+        throw std::runtime_error("Compute environment lighting is unsupported");
+    if (requested.enabled && !environmentResources) uploadEnvironment(assets::makeProceduralEnvironment());
+    environmentSettings = requested;
+    resetTemporalHistory();
 }
 
 void Renderer::Impl::invalidateOutput() noexcept {
@@ -148,6 +226,12 @@ void Renderer::Impl::frameSubmitted() {
 Renderer::Renderer(rhi::Device& device) : impl_(std::make_unique<Impl>(device)) {}
 Renderer::~Renderer() = default;
 void Renderer::uploadModel(const ModelData& model) { impl_->uploadModel(model); }
+void Renderer::uploadEnvironment(const assets::HdrImageData& image) { impl_->uploadEnvironment(image); }
+void Renderer::useProceduralEnvironment() { uploadEnvironment(assets::makeProceduralEnvironment()); }
+void Renderer::setEnvironment(const EnvironmentSettings& settings) { impl_->setEnvironment(settings); }
+EnvironmentSettings Renderer::environment() const { return impl_->environmentSettings; }
+bool Renderer::supportsEnvironment() const { return impl_->environmentSupported; }
+bool Renderer::hasEnvironment() const { return bool(impl_->environmentResources); }
 void Renderer::setAntialiasing(const AntialiasingSettings& settings) { impl_->setAntialiasing(settings); }
 AntialiasingSettings Renderer::antialiasing() const { return impl_->aa; }
 std::uint32_t Renderer::supportedMsaaSamples() const { return impl_->sampleMask; }

@@ -1,5 +1,6 @@
 add_library(aeg_assets STATIC
     public/ModelData.hpp
+    public/EnvironmentImage.hpp
     public/ModelImporter.hpp
     public/MaterialTextures.hpp
     public/MaterialProperties.hpp
@@ -14,6 +15,7 @@ add_library(aeg_assets STATIC
     private/geometry/TangentSpace.cpp
     private/assimp/AssimpFileSystem.cpp
     private/image/ImageDecoder.cpp
+    private/image/EnvironmentImage.cpp
     private/pmx/PmxValidation.cpp)
 add_library(aeg::assets ALIAS aeg_assets)
 target_include_directories(aeg_assets

@@ -1,0 +1,23 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "shared.glsl"
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout(set = 0, binding = 0) uniform samplerCube sourceEnvironment;
+layout(set = 0, binding = 1, rgba32f) uniform writeonly image2DArray outputIrradiance;
+
+void main() {
+    uvec3 pixel = gl_GlobalInvocationID;
+    if (pixel.x >= ibl.size || pixel.y >= ibl.size || pixel.z >= 6u) return;
+
+    vec3 n = iblCubeDirection(pixel.z, vec2(pixel.xy) + 0.5, ibl.size);
+    mat3 frame = iblTangentFrame(n);
+    vec3 irradiance = vec3(0.0);
+    for (uint i = 0u; i < ibl.sampleCount; ++i) {
+        vec3 l = frame * iblCosineHemisphere(iblHammersley(i, ibl.sampleCount));
+        irradiance += textureLod(sourceEnvironment, l, 0.0).rgb;
+    }
+    // Cosine-weighted PDF is NoL/pi, so this stores actual irradiance E.
+    irradiance *= iblPi / float(ibl.sampleCount);
+    imageStore(outputIrradiance, ivec3(pixel), vec4(irradiance, 1.0));
+}

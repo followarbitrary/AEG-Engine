@@ -17,6 +17,8 @@ VkImageLayout imageLayout(ResourceState state) {
         return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     case ResourceState::Present:
         return VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    case ResourceState::Storage:
+        return VK_IMAGE_LAYOUT_GENERAL;
     }
     throw std::invalid_argument("Unknown RHI resource state");
 }
@@ -25,7 +27,8 @@ StateScope stateScope(ResourceState state) {
     case ResourceState::Undefined:
         return {0, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT};
     case ResourceState::Sampled:
-        return {VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT};
+        return {VK_ACCESS_SHADER_READ_BIT, VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT |
+                                               VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT};
     case ResourceState::ColorAttachment:
         return {VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
                 VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
@@ -38,17 +41,23 @@ StateScope stateScope(ResourceState state) {
         return {VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT};
     case ResourceState::Present:
         return {0, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT};
+    case ResourceState::Storage:
+        return {VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT};
     }
     throw std::invalid_argument("Unknown RHI resource state");
 }
 void VulkanDevice::immediate(const std::function<void(VulkanCommands&)>& record) {
+    if (!record) throw std::invalid_argument("Missing immediate recording callback");
     VulkanCommands commands(*this);
+    VkFence fence{};
+    VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    check(vkCreateFence(handle, &fenceInfo, nullptr, &fence), "vkCreateFence(immediate)");
     VkCommandBufferAllocateInfo allocate{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
     allocate.commandPool = pool;
     allocate.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     allocate.commandBufferCount = 1;
-    check(vkAllocateCommandBuffers(handle, &allocate, &commands.handle), "vkAllocateCommandBuffers(immediate)");
     try {
+        check(vkAllocateCommandBuffers(handle, &allocate, &commands.handle), "vkAllocateCommandBuffers(immediate)");
         VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
         begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         check(vkBeginCommandBuffer(commands.handle, &begin), "vkBeginCommandBuffer(immediate)");
@@ -58,13 +67,28 @@ void VulkanDevice::immediate(const std::function<void(VulkanCommands&)>& record)
         VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
         submit.commandBufferCount = 1;
         submit.pCommandBuffers = &commands.handle;
-        check(vkQueueSubmit(graphicsQueue, 1, &submit, VK_NULL_HANDLE), "vkQueueSubmit(immediate)");
-        check(vkQueueWaitIdle(graphicsQueue), "vkQueueWaitIdle(immediate)");
+        check(vkQueueSubmit(graphicsQueue, 1, &submit, fence), "vkQueueSubmit(immediate)");
+        const auto firstWait = vkWaitForFences(handle, 1, &fence, VK_TRUE, UINT64_MAX);
+        auto completion = firstWait;
+        // A recoverable host-side wait failure cannot let the caller destroy resources
+        // still referenced by this submission. Drain before propagating that failure.
+        while (completion != VK_SUCCESS && completion != VK_ERROR_DEVICE_LOST) {
+            completion = vkDeviceWaitIdle(handle);
+            if (completion != VK_SUCCESS && completion != VK_ERROR_DEVICE_LOST)
+                completion = vkWaitForFences(handle, 1, &fence, VK_TRUE, UINT64_MAX);
+        }
+        check(firstWait, "vkWaitForFences(immediate)");
     } catch (...) {
-        vkFreeCommandBuffers(handle, pool, 1, &commands.handle);
+        if (commands.handle) vkFreeCommandBuffers(handle, pool, 1, &commands.handle);
+        vkDestroyFence(handle, fence, nullptr);
         throw;
     }
     vkFreeCommandBuffers(handle, pool, 1, &commands.handle);
+    vkDestroyFence(handle, fence, nullptr);
+}
+void VulkanDevice::submitImmediate(const std::function<void(CommandList&)>& record) {
+    if (!record) throw std::invalid_argument("Missing immediate recording callback");
+    immediate([&](VulkanCommands& commands) { record(commands); });
 }
 void VulkanCommands::beginRenderPass(RenderPass& genericPass, Framebuffer& genericFrame, Extent2D extent,
                                      std::span<const ClearValue> clears) {
@@ -106,9 +130,24 @@ void VulkanCommands::setViewport(Extent2D extent) {
     vkCmdSetScissor(handle, 0, 1, &scissor);
 }
 void VulkanCommands::bindPipeline(GraphicsPipeline& pipeline) {
+    if (!inPass) throw std::logic_error("Graphics pipeline outside render pass");
     vkCmdBindPipeline(handle, VK_PIPELINE_BIND_POINT_GRAPHICS, owned<VulkanPipeline>(*owner, pipeline).handle);
 }
-void VulkanCommands::bindSet(PipelineLayout& genericLayout, std::uint32_t index, BindingSet& genericSet) {
+void VulkanCommands::bindComputePipeline(ComputePipeline& generic) {
+    if (inPass || !owner->caps.compute)
+        throw std::logic_error("Compute pipeline requires compute outside a render pass");
+    auto& pipeline = owned<VulkanComputePipeline>(*owner, generic);
+    if (computeBoundLayout != pipeline.layout) computeSets.clear();
+    computeBoundLayout = pipeline.layout;
+    computePipeline = &pipeline;
+    vkCmdBindPipeline(handle, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline.handle);
+}
+void VulkanCommands::bindSet(PipelineLayout& genericLayout, std::uint32_t index, BindingSet& genericSet,
+                             PipelineBindPoint point) {
+    if ((point == PipelineBindPoint::Compute && (inPass || !owner->caps.compute)) ||
+        (point == PipelineBindPoint::Graphics && !inPass) ||
+        (point != PipelineBindPoint::Graphics && point != PipelineBindPoint::Compute))
+        throw std::invalid_argument("Invalid descriptor bind point or render pass state");
     auto& layout = owned<VulkanPipelineLayout>(*owner, genericLayout);
     auto& set = owned<VulkanBindingSet>(*owner, genericSet);
     if (index >= layout.desc.sets.size()) throw std::invalid_argument("Binding set index exceeds pipeline layout");
@@ -120,7 +159,17 @@ void VulkanCommands::bindSet(PipelineLayout& genericLayout, std::uint32_t index,
                 return binding.binding == other.binding && binding.type == other.type && binding.stages == other.stages;
             }))
             throw std::invalid_argument("Binding set layout mismatch");
-    vkCmdBindDescriptorSets(handle, VK_PIPELINE_BIND_POINT_GRAPHICS, layout.handle, index, 1, &set.handle, 0, nullptr);
+    if (point == PipelineBindPoint::Compute) {
+        if (computePipeline && computePipeline->layout != &layout)
+            throw std::invalid_argument("Compute pipeline layout mismatch");
+        if (computeBoundLayout != &layout) computeSets.clear();
+        computeBoundLayout = &layout;
+        if (computeSets.size() <= index) computeSets.resize(index + 1);
+        computeSets[index] = &set;
+    }
+    vkCmdBindDescriptorSets(
+        handle, point == PipelineBindPoint::Graphics ? VK_PIPELINE_BIND_POINT_GRAPHICS : VK_PIPELINE_BIND_POINT_COMPUTE,
+        layout.handle, index, 1, &set.handle, 0, nullptr);
 }
 void VulkanCommands::bindVertexBuffer(Buffer& generic) {
     auto& buffer = owned<VulkanBuffer>(*owner, generic);
@@ -137,6 +186,9 @@ void VulkanCommands::pushConstants(PipelineLayout& generic, std::span<const std:
     auto& layout = owned<VulkanPipelineLayout>(*owner, generic);
     if (bytes.empty() || bytes.size() > layout.desc.pushConstantBytes || bytes.size() % 4)
         throw std::invalid_argument("Invalid push constant byte count");
+    if (contains(layout.desc.pushConstantStages, ShaderStage::Compute) &&
+        (inPass || !owner->caps.compute || (computePipeline && computePipeline->layout != &layout)))
+        throw std::invalid_argument("Invalid compute push constant state or layout");
     vkCmdPushConstants(handle, layout.handle, shaderStages(layout.desc.pushConstantStages), 0,
                        static_cast<std::uint32_t>(bytes.size()), bytes.data());
 }
@@ -148,11 +200,39 @@ void VulkanCommands::drawIndexed(std::uint32_t indices) {
     if (!inPass) throw std::logic_error("Draw outside render pass");
     vkCmdDrawIndexed(handle, indices, 1, 0, 0, 0);
 }
+void VulkanCommands::dispatch(std::uint32_t x, std::uint32_t y, std::uint32_t z) {
+    if (inPass || !owner->caps.compute || !computePipeline || !x || !y || !z)
+        throw std::invalid_argument("Dispatch requires a compute pipeline outside a render pass and nonzero groups");
+    const std::array groups{x, y, z};
+    for (std::size_t i = 0; i < groups.size(); ++i)
+        if (groups[i] > owner->caps.maximumComputeGroupCount[i])
+            throw std::invalid_argument("Dispatch group count exceeds device limit");
+    const auto setCount = computePipeline->layout->desc.sets.size();
+    if (computeBoundLayout != computePipeline->layout || computeSets.size() < setCount)
+        throw std::invalid_argument("Compute pipeline descriptor sets are not bound");
+    for (std::size_t i = 0; i < setCount; ++i)
+        if (!computeSets[i]) {
+            throw std::invalid_argument("Compute descriptor set is not bound");
+        } else {
+            for (const auto& binding : computeSets[i]->desc.bindings)
+                if (contains(binding.stages, ShaderStage::Compute) &&
+                    !computeSets[i]->initializedBindings.contains(binding.binding))
+                    throw std::invalid_argument("Compute descriptor binding is not initialized");
+        }
+    vkCmdDispatch(handle, x, y, z);
+}
 void VulkanCommands::transition(Texture& generic, ResourceState before, ResourceState after) {
     if (inPass || after == ResourceState::Undefined) throw std::invalid_argument("Invalid image transition");
     auto& texture = owned<VulkanTexture>(*owner, generic);
-    const auto source = stateScope(before), destination = stateScope(after);
-    if (before == after) return;
+    if ((before == ResourceState::Storage || after == ResourceState::Storage) &&
+        (!owner->caps.compute || !contains(texture.desc.usage, TextureUsage::Storage)))
+        throw std::invalid_argument("Storage transition requires a compute-capable storage texture");
+    auto source = stateScope(before), destination = stateScope(after);
+    if (!owner->caps.compute) {
+        source.stages &= ~VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+        destination.stages &= ~VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+    }
+    if (before == after && before != ResourceState::Storage) return;
     VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
     barrier.srcAccessMask = source.access;
     barrier.dstAccessMask = destination.access;
@@ -160,7 +240,8 @@ void VulkanCommands::transition(Texture& generic, ResourceState before, Resource
     barrier.newLayout = imageLayout(after);
     barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.image = texture.handle;
-    barrier.subresourceRange = {imageAspect(texture.desc.format), 0, 1, 0, 1};
+    barrier.subresourceRange = {imageAspect(texture.desc.format), 0, texture.desc.mipLevels, 0,
+                                textureLayerCount(texture.desc)};
     vkCmdPipelineBarrier(handle, source.stages, destination.stages, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 }
 void VulkanCommands::copyBuffer(Buffer& genericSource, Buffer& genericDestination, std::size_t bytes) {
@@ -182,19 +263,24 @@ void VulkanCommands::copyBuffer(Buffer& genericSource, Buffer& genericDestinatio
     vkCmdPipelineBarrier(handle, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 1,
                          &barrier, 0, nullptr);
 }
-void VulkanCommands::copyTextureToBuffer(Texture& genericSource, Buffer& genericDestination) {
+void VulkanCommands::copyTextureToBuffer(Texture& genericSource, Buffer& genericDestination,
+                                         TextureSubresource subresource) {
     if (inPass) throw std::logic_error("Copy inside render pass");
     auto& source = owned<VulkanTexture>(*owner, genericSource);
     auto& destination = owned<VulkanBuffer>(*owner, genericDestination);
-    auto bytes = static_cast<std::uint64_t>(source.desc.extent.width) * source.desc.extent.height *
-                 formatByteSize(source.desc.format);
+    const auto extent = mipExtent(source.desc, subresource.mipLevel);
+    const auto pixelCount = static_cast<std::uint64_t>(extent.width) * extent.height;
+    if (pixelCount > std::numeric_limits<std::uint64_t>::max() / formatByteSize(source.desc.format))
+        throw std::invalid_argument("Texture copy size overflows");
+    const auto bytes = pixelCount * formatByteSize(source.desc.format);
     if (isDepthFormat(source.desc.format) || source.desc.samples != 1 || bytes > destination.desc.size ||
         !contains(source.desc.usage, TextureUsage::CopySource) ||
-        !contains(destination.desc.usage, BufferUsage::CopyDestination))
+        !contains(destination.desc.usage, BufferUsage::CopyDestination) ||
+        subresource.layer >= textureLayerCount(source.desc))
         throw std::invalid_argument("Invalid texture readback copy");
     VkBufferImageCopy copy{};
-    copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-    copy.imageExtent = {source.desc.extent.width, source.desc.extent.height, 1};
+    copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, subresource.mipLevel, subresource.layer, 1};
+    copy.imageExtent = {extent.width, extent.height, 1};
     vkCmdCopyImageToBuffer(handle, source.handle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, destination.handle, 1, &copy);
     VkBufferMemoryBarrier barrier{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
     barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;

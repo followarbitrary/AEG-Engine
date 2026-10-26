@@ -38,9 +38,10 @@ struct alignas(16) SceneUniform {
     math::Vec4 shadowBias{};         // Constant and slope depth bias, PCF radius, reserved.
     math::Vec4 cascadeSplits{};      // Positive camera-view far distance of each cascade.
     math::Vec4 cascadeBlendStarts{}; // Next-cascade transition or final distance-fade start.
+    math::Vec4 environmentInfo{};    // Effective enable, intensity, world-Y rotation, prefilter maximum LOD.
 };
 static_assert(std::is_standard_layout_v<SceneUniform> && std::is_trivially_copyable_v<SceneUniform>);
-static_assert(alignof(SceneUniform) == 16 && sizeof(SceneUniform) == 1248);
+static_assert(alignof(SceneUniform) == 16 && sizeof(SceneUniform) == 1264);
 static_assert(offsetof(SceneUniform, viewProjection) == 0 && offsetof(SceneUniform, model) == 64);
 static_assert(offsetof(SceneUniform, parameters) == 128 && offsetof(SceneUniform, clipConvention) == 144);
 static_assert(offsetof(SceneUniform, cameraPosition) == 160 && offsetof(SceneUniform, cameraTowardViewer) == 176);
@@ -50,6 +51,7 @@ static_assert(offsetof(SceneUniform, lightInfo) == 400 && offsetof(SceneUniform,
 static_assert(offsetof(SceneUniform, lightViewProjections) == 928 && offsetof(SceneUniform, shadowInfo) == 1184);
 static_assert(offsetof(SceneUniform, shadowBias) == 1200 && offsetof(SceneUniform, cascadeSplits) == 1216);
 static_assert(offsetof(SceneUniform, cascadeBlendStarts) == 1232);
+static_assert(offsetof(SceneUniform, environmentInfo) == 1248);
 
 struct MaterialPush {
     aeg::math::Vec4 color{1};

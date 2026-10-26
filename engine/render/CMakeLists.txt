@@ -4,7 +4,9 @@ add_library(aeg_render STATIC
     public/AntialiasingSettings.hpp
     public/Light.hpp
     public/ShadowSettings.hpp
+    public/EnvironmentSettings.hpp
     private/Renderer.cpp
+    private/environment/EnvironmentBaker.cpp
     private/scene/GpuModel.cpp
     private/scene/ScenePass.cpp
     private/scene/ScenePipeline.cpp

@@ -1,0 +1,37 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "shared.glsl"
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout(set = 0, binding = 0) uniform samplerCube sourceEnvironment;
+layout(set = 0, binding = 1, rgba32f) uniform writeonly image2DArray outputPrefilter;
+
+void main() {
+    uvec3 pixel = gl_GlobalInvocationID;
+    if (pixel.x >= ibl.size || pixel.y >= ibl.size || pixel.z >= 6u) return;
+
+    vec3 n = iblCubeDirection(pixel.z, vec2(pixel.xy) + 0.5, ibl.size);
+    vec3 v = n;
+    mat3 frame = iblTangentFrame(n);
+    float roughness = clamp(ibl.roughness, 0.045, 1.0);
+    float sourceSize = float(ibl.sourceSize);
+    float texelSolidAngle = 4.0 * iblPi / (6.0 * sourceSize * sourceSize);
+    float maxLod = log2(sourceSize);
+    vec3 radiance = vec3(0.0);
+    float totalWeight = 0.0;
+    for (uint i = 0u; i < ibl.sampleCount; ++i) {
+        vec3 h = normalize(frame * iblGgxHalfVector(iblHammersley(i, ibl.sampleCount), roughness));
+        float voH = max(dot(v, h), 0.0);
+        vec3 l = normalize(2.0 * voH * h - v);
+        float noL = max(dot(n, l), 0.0);
+        if (noL <= 0.0) continue;
+        float noH = max(dot(n, h), 0.0);
+        float pdf = iblGgxDistribution(noH, roughness) * noH / max(4.0 * voH, 1e-8);
+        float sampleSolidAngle = 1.0 / (float(ibl.sampleCount) * max(pdf, 1e-8));
+        float lod = clamp(0.5 * log2(sampleSolidAngle / texelSolidAngle), 0.0, maxLod);
+        radiance += textureLod(sourceEnvironment, l, lod).rgb * noL;
+        totalWeight += noL;
+    }
+    // Normalizing NoL weights preserves constant radiance at every roughness.
+    imageStore(outputPrefilter, ivec3(pixel), vec4(radiance / max(totalWeight, 1e-8), 1.0));
+}

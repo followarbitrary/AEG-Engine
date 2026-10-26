@@ -1,5 +1,6 @@
 #include <RhiDevice.hpp>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 
 namespace {
@@ -10,6 +11,62 @@ template <class F> void rejects(F action) {
         return;
     }
     throw std::runtime_error("Invalid RHI description accepted");
+}
+void computeImageContracts() {
+    using namespace aeg::rhi;
+    // A wrong mip footprint or treating a cube as one layer makes real selected-mip
+    // readback and storage dispatch writes address the wrong memory.
+    TextureDesc cube{
+        {16, 16}, Format::Rgba32Float,   TextureUsage::Storage | TextureUsage::Sampled | TextureUsage::CopySource, 1,
+        5,        TextureDimension::Cube};
+    if (mipExtent(cube, 0) != Extent2D{16, 16} || mipExtent(cube, 3) != Extent2D{2, 2} ||
+        mipExtent(cube, 4) != Extent2D{1, 1} || textureLayerCount(cube) != 6)
+        throw std::runtime_error("Cube mip footprints or face count are incorrect");
+    validate(cube);
+    rejects([&] { (void)mipExtent(cube, 5); });
+    auto invalid = cube;
+    invalid.extent.height = 8;
+    rejects([&] { validate(invalid); });
+    invalid = cube;
+    invalid.samples = 4;
+    rejects([&] { validate(invalid); });
+    invalid = cube;
+    invalid.mipLevels = 6;
+    rejects([&] { validate(invalid); });
+    invalid = cube;
+    invalid.mipLevels = 0;
+    rejects([&] { validate(invalid); });
+    invalid = cube;
+    invalid.format = Format::D32Float;
+    rejects([&] { validate(invalid); });
+    invalid = cube;
+    invalid.dimension = static_cast<TextureDimension>(99);
+    rejects([&] { validate(invalid); });
+    TextureDesc rectangle{{9, 3}, Format::Rgba32Float, TextureUsage::Storage, 1, 4};
+    validate(rectangle);
+    if (textureLayerCount(rectangle) != 1 || mipExtent(rectangle, 1) != Extent2D{4, 1} ||
+        mipExtent(rectangle, 3) != Extent2D{1, 1})
+        throw std::runtime_error("Non-power-of-two mip footprint is incorrect");
+    rectangle.samples = 2;
+    rejects([&] { validate(rectangle); });
+    SamplerDesc sampler{Filter::Linear, AddressMode::Repeat, AddressMode::ClampToEdge, 4.f};
+    validate(sampler);
+    sampler.maxLod = -1;
+    rejects([&] { validate(sampler); });
+    sampler.maxLod = std::numeric_limits<float>::infinity();
+    rejects([&] { validate(sampler); });
+    sampler.maxLod = std::numeric_limits<float>::quiet_NaN();
+    rejects([&] { validate(sampler); });
+    sampler.maxLod = 0;
+    sampler.addressV = static_cast<AddressMode>(99);
+    rejects([&] { validate(sampler); });
+    struct Layout : PipelineLayout {
+    } layout;
+    struct ComputeShader : Shader {
+    } shader;
+    validate(ComputePipelineDesc{&layout, &shader});
+    rejects([&] { validate(ComputePipelineDesc{nullptr, &shader}); });
+    rejects([&] { validate(ComputePipelineDesc{&layout, nullptr}); });
 }
 void depthOnlyContracts() {
     using namespace aeg::rhi;
@@ -67,6 +124,7 @@ void depthOnlyContracts() {
 int main() {
     using namespace aeg::rhi;
     try {
+        computeImageContracts();
         validate(BufferDesc{32, BufferUsage::Uniform, MemoryUsage::Upload});
         rejects([] { validate(BufferDesc{}); });
         rejects([] { validate(BufferDesc{32, BufferUsage::None}); });

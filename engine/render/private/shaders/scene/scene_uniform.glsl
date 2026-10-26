@@ -23,5 +23,6 @@ layout(set = 0, binding = 0) uniform Scene {
     vec4 shadowBias;
     vec4 cascadeSplits;
     vec4 cascadeBlendStarts;
+    vec4 environmentInfo;
 }
 scene;

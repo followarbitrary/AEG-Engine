@@ -24,6 +24,7 @@ layout(push_constant) uniform Material {
 material;
 #include "normal_mapping.glsl"
 #include "pbr_lighting.glsl"
+#include "ibl_lighting.glsl"
 #include "punctual_lighting.glsl"
 #include "shadow_sampling.glsl"
 void main() {
@@ -49,6 +50,8 @@ void main() {
                      ? safePbrDirection(scene.cameraPosition.xyz - worldPosition, scene.cameraTowardViewer.xyz)
                      : scene.cameraTowardViewer.xyz;
         color = scene.parameters.x * clamp(base.rgb, vec3(0.0), vec3(1.0)) * (1.0 - material.pbrFactors.x);
+        if (scene.environmentInfo.x > 0.5)
+            color = iblLighting(base.rgb, material.pbrFactors.x, material.pbrFactors.y, n, v);
         for (int i = 0; i < int(scene.lightInfo.x); ++i) {
             vec3 towardLight, radiance;
             if (!punctualLight(scene.lights[i], worldPosition, towardLight, radiance)) continue;

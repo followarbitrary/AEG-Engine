@@ -143,18 +143,25 @@ void VulkanDevice::selectDevice() {
         std::vector<VkQueueFamilyProperties> queues(count);
         vkGetPhysicalDeviceQueueFamilyProperties(candidate, &count, queues.data());
         std::optional<std::uint32_t> graphics, present;
+        int queueScore = -1;
         for (std::uint32_t i = 0; i < count; ++i) {
             VkBool32 support{};
             check(vkGetPhysicalDeviceSurfaceSupportKHR(candidate, i, surface, &support),
                   "vkGetPhysicalDeviceSurfaceSupportKHR");
-            if (queues[i].queueCount && (queues[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)) graphics = i;
-            if (queues[i].queueCount && support) present = i;
-            if (queues[i].queueCount && (queues[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) && support) {
-                graphics = present = i;
-                break;
+            if (queues[i].queueCount && support && !present) present = i;
+            if (queues[i].queueCount && (queues[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)) {
+                const int score = ((queues[i].queueFlags & VK_QUEUE_COMPUTE_BIT) ? 4 : 0) + (support ? 2 : 0);
+                if (score > queueScore) {
+                    graphics = i;
+                    queueScore = score;
+                }
             }
         }
         if (!graphics || !present) continue;
+        VkBool32 graphicsPresent{};
+        check(vkGetPhysicalDeviceSurfaceSupportKHR(candidate, *graphics, surface, &graphicsPresent),
+              "vkGetPhysicalDeviceSurfaceSupportKHR(graphics)");
+        if (graphicsPresent) present = graphics;
         std::uint32_t formats{}, modes{};
         check(vkGetPhysicalDeviceSurfaceFormatsKHR(candidate, surface, &formats, nullptr),
               "vkGetPhysicalDeviceSurfaceFormatsKHR");
@@ -168,11 +175,16 @@ void VulkanDevice::selectDevice() {
             properties = props;
             graphicsFamily = *graphics;
             presentFamily = *present;
+            caps.compute = (queues[*graphics].queueFlags & VK_QUEUE_COMPUTE_BIT) != 0;
         }
     }
     if (!physical) throw std::runtime_error("No Vulkan 1.2 GPU with graphics and presentation support found");
     name = properties.deviceName;
     caps.maximumImageDimension = properties.limits.maxImageDimension2D;
+    caps.maximumCubeImageDimension = properties.limits.maxImageDimensionCube;
+    std::copy_n(properties.limits.maxComputeWorkGroupCount, 3, caps.maximumComputeGroupCount.begin());
+    std::copy_n(properties.limits.maxComputeWorkGroupSize, 3, caps.maximumComputeGroupSize.begin());
+    caps.maximumComputeInvocations = properties.limits.maxComputeWorkGroupInvocations;
     caps.maximumFramebufferDimension =
         std::min(properties.limits.maxFramebufferWidth, properties.limits.maxFramebufferHeight);
     caps.maximumColorAttachments = properties.limits.maxColorAttachments;
@@ -216,21 +228,28 @@ void VulkanDevice::createLogicalDevice() {
     commandPool.queueFamilyIndex = graphicsFamily;
     check(vkCreateCommandPool(handle, &commandPool, nullptr, &pool), "vkCreateCommandPool");
 }
-TextureSupport VulkanDevice::textureSupport(Format format, TextureUsage usage) const {
+TextureSupport VulkanDevice::textureSupport(Format format, TextureUsage usage, TextureDimension dimension) const {
     if (format == Format::Undefined || usage == TextureUsage::None) return {};
+    if (dimension != TextureDimension::Texture2D && dimension != TextureDimension::Cube)
+        throw std::invalid_argument("Unknown texture dimension");
+    if (contains(usage, TextureUsage::Storage) && !caps.compute) return {};
+    const VkImageCreateFlags flags = dimension == TextureDimension::Cube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0;
     VkImageFormatProperties info{};
     auto result = vkGetPhysicalDeviceImageFormatProperties(physical, nativeFormat(format), VK_IMAGE_TYPE_2D,
-                                                           VK_IMAGE_TILING_OPTIMAL, imageUsage(usage), 0, &info);
+                                                           VK_IMAGE_TILING_OPTIMAL, imageUsage(usage), flags, &info);
     if (result == VK_ERROR_FORMAT_NOT_SUPPORTED) return {};
     check(result, "vkGetPhysicalDeviceImageFormatProperties");
+    if (dimension == TextureDimension::Cube && info.maxArrayLayers < 6) return {};
     auto samples = info.sampleCounts;
     if (contains(usage, TextureUsage::ColorAttachment)) samples &= properties.limits.framebufferColorSampleCounts;
     if (contains(usage, TextureUsage::DepthAttachment)) samples &= properties.limits.framebufferDepthSampleCounts;
     VkFormatProperties features{};
     vkGetPhysicalDeviceFormatProperties(physical, nativeFormat(format), &features);
+    const auto maximum = dimension == TextureDimension::Cube ? properties.limits.maxImageDimensionCube
+                                                             : properties.limits.maxImageDimension2D;
     return {true,
             samples,
-            {info.maxExtent.width, info.maxExtent.height},
+            {std::min(info.maxExtent.width, maximum), std::min(info.maxExtent.height, maximum)},
             (features.optimalTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) != 0,
             (features.optimalTilingFeatures & VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT) != 0};
 }

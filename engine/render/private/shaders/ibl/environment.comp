@@ -1,0 +1,26 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "shared.glsl"
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout(set = 0, binding = 0) uniform sampler2D sourceEnvironment;
+layout(set = 0, binding = 1, rgba32f) uniform writeonly image2DArray outputEnvironment;
+
+void main() {
+    uvec3 pixel = gl_GlobalInvocationID;
+    if (pixel.x >= ibl.size || pixel.y >= ibl.size || pixel.z >= 6u) return;
+
+    // Mip zero samples the pixel center; coarser mips integrate a stratified
+    // 4x4 face footprint directly from the original linear HDR panorama.
+    uint gridSize = ibl.sampleCount == 1u ? 1u : 4u;
+    vec3 radiance = vec3(0.0);
+    for (uint y = 0u; y < gridSize; ++y) {
+        for (uint x = 0u; x < gridSize; ++x) {
+            vec2 offset = (vec2(x, y) + 0.5) / float(gridSize);
+            vec3 direction = iblCubeDirection(pixel.z, vec2(pixel.xy) + offset, ibl.size);
+            radiance += textureLod(sourceEnvironment, iblEquirectUv(direction), 0.0).rgb;
+        }
+    }
+    radiance /= float(gridSize * gridSize);
+    imageStore(outputEnvironment, ivec3(pixel), vec4(radiance, 1.0));
+}

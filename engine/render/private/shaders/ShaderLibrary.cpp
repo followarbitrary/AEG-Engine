@@ -8,6 +8,10 @@
 #include <embedded_shaders/model_taa.frag.spv.hpp>
 #include <embedded_shaders/shadow.vert.spv.hpp>
 #include <embedded_shaders/shadow.frag.spv.hpp>
+#include <embedded_shaders/environment.comp.spv.hpp>
+#include <embedded_shaders/irradiance.comp.spv.hpp>
+#include <embedded_shaders/prefilter.comp.spv.hpp>
+#include <embedded_shaders/brdf.comp.spv.hpp>
 #include <stdexcept>
 
 namespace aeg::render::detail {
@@ -31,6 +35,14 @@ std::span<const std::byte> embeddedShader(ShaderId shader) {
         return std::as_bytes(std::span{embedded_shaders::shadow_vert});
     case ShaderId::ShadowFragment:
         return std::as_bytes(std::span{embedded_shaders::shadow_frag});
+    case ShaderId::EnvironmentCompute:
+        return std::as_bytes(std::span{embedded_shaders::environment_comp});
+    case ShaderId::IrradianceCompute:
+        return std::as_bytes(std::span{embedded_shaders::irradiance_comp});
+    case ShaderId::PrefilterCompute:
+        return std::as_bytes(std::span{embedded_shaders::prefilter_comp});
+    case ShaderId::BrdfCompute:
+        return std::as_bytes(std::span{embedded_shaders::brdf_comp});
     }
     throw std::invalid_argument("Unknown embedded shader ID");
 }

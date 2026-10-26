@@ -7,6 +7,7 @@
 #include "viewport/ViewportTargets.hpp"
 #include "antialiasing/TemporalHistory.hpp"
 #include "shaders/ShaderLibrary.hpp"
+#include "environment/EnvironmentBaker.hpp"
 #include <Utf8Path.hpp>
 #include <algorithm>
 #include <array>
@@ -29,6 +30,11 @@ inline constexpr auto historyDepthFormat = rhi::Format::R32Float;
 inline constexpr auto outputUsage =
     rhi::TextureUsage::ColorAttachment | rhi::TextureUsage::Sampled | rhi::TextureUsage::CopySource;
 
+struct EnvironmentResources {
+    EnvironmentMaps maps;
+    std::unique_ptr<rhi::BindingSet> descriptor;
+};
+
 struct Renderer::Impl {
     rhi::Device& device;
     AntialiasingSettings aa;
@@ -36,15 +42,20 @@ struct Renderer::Impl {
     bool temporalSupported{};
     ShadowSettings shadowSettings;
     bool shadowSupported{};
+    EnvironmentSettings environmentSettings;
+    bool environmentSupported{};
     std::uint32_t maximumShadow{};
     rhi::Format shadowFormat{rhi::Format::Undefined};
     TemporalHistory temporalHistory, recordingHistory;
-    std::unique_ptr<rhi::BindingLayout> sceneLayout, materialLayout, shadowSetLayout, postSetLayout, temporalSetLayout;
-    std::unique_ptr<rhi::Sampler> sampler, viewportSampler, pointSampler;
+    std::unique_ptr<rhi::BindingLayout> sceneLayout, materialLayout, shadowSetLayout, postSetLayout, temporalSetLayout,
+        environmentSetLayout;
+    std::unique_ptr<rhi::Sampler> sampler, viewportSampler, pointSampler, environmentSampler;
     std::unique_ptr<rhi::Buffer> uniformBuffer;
     std::unique_ptr<rhi::Texture> fallbackShadowTexture;
     std::unique_ptr<rhi::BindingSet> fallbackShadowDescriptor;
     std::unique_ptr<rhi::BindingSet> sceneDescriptor;
+    std::unique_ptr<rhi::Texture> fallbackEnvironmentCube, fallbackEnvironmentLut;
+    std::unique_ptr<rhi::BindingSet> fallbackEnvironmentDescriptor;
     std::unique_ptr<rhi::PipelineLayout> pipelineLayout, shadowPipelineLayout, postLayout, temporalLayout;
     std::unique_ptr<rhi::RenderPass> postPass, temporalPass;
     std::unique_ptr<rhi::GraphicsPipeline> postPipeline, temporalPipeline;
@@ -53,6 +64,8 @@ struct Renderer::Impl {
     std::unique_ptr<GpuModel> model;
     std::unique_ptr<ShadowResources> shadow;
     std::unique_ptr<ViewportTargets> viewport;
+    std::unique_ptr<EnvironmentBaker> environmentBaker;
+    std::unique_ptr<EnvironmentResources> environmentResources;
     std::shared_ptr<rhi::Texture> submittedOutput, pendingOutput;
     RenderSettings pendingSettings;
     bool pendingFrame{};
@@ -80,6 +93,9 @@ struct Renderer::Impl {
     void resizeViewport(std::uint32_t width, std::uint32_t height);
     void setAntialiasing(const AntialiasingSettings& requested);
     void uploadModel(const ModelData& source);
+    void initializeEnvironmentSupport();
+    void uploadEnvironment(const assets::HdrImageData& image);
+    void setEnvironment(const EnvironmentSettings& settings);
     static bool perspectiveProjection(const aeg::math::Mat4& matrix);
     SceneUniform sceneUniform(const RenderSettings& settings);
     void drawScene(rhi::CommandList& commands, const RenderSettings& settings, const SceneUniform& uniform);

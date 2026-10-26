@@ -7,8 +7,15 @@ struct TextureDesc {
     Format format{Format::Rgba8Unorm};
     TextureUsage usage{TextureUsage::Sampled};
     std::uint32_t samples{1};
+    std::uint32_t mipLevels{1};
+    TextureDimension dimension{TextureDimension::Texture2D};
 };
 void validate(const TextureDesc& desc);
+struct TextureSubresource {
+    std::uint32_t mipLevel{}, layer{};
+};
+[[nodiscard]] Extent2D mipExtent(const TextureDesc& desc, std::uint32_t mip);
+[[nodiscard]] std::uint32_t textureLayerCount(const TextureDesc& desc);
 class Texture {
 public:
     virtual ~Texture() = default;
