@@ -18,8 +18,10 @@ layout(set = 0, binding = 0) uniform Scene {
     vec4 temporalInfo;
     vec4 lightInfo;
     GpuLight lights[8];
-    mat4 lightViewProjection;
+    mat4 lightViewProjections[4];
     vec4 shadowInfo;
     vec4 shadowBias;
+    vec4 cascadeSplits;
+    vec4 cascadeBlendStarts;
 }
 scene;

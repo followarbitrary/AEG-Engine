@@ -561,7 +561,7 @@ int main(int argc, char** argv) {
         renderer.frameSubmitted();
         require(renderer.temporalFrameCount() == 0, "Non-temporal frame advanced history");
         // Pin the shader ABI independently from the private uniform declaration.
-        require(device.uniform->bytes.size() == 1024, "Scene uniform ABI must be 1024 bytes");
+        require(device.uniform->bytes.size() == 1248, "Scene uniform ABI must be 1248 bytes");
         const auto uploaded = [&]<class T>(std::size_t offset) {
             T value{};
             std::memcpy(&value, device.uniform->bytes.data() + offset, sizeof(T));

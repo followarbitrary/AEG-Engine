@@ -179,6 +179,7 @@ int main(int argc, char** argv) {
         };
         camera();
         render::ShadowSettings shadow;
+        shadow.cascadeCount = 1;
         shadow.resolution = std::min(256u, renderer.maximumShadowResolution());
         renderer.uploadModel(fixture());
         const auto frame = [&] {

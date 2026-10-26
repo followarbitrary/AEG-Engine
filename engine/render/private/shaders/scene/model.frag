@@ -27,7 +27,7 @@ material;
 #include "punctual_lighting.glsl"
 #include "shadow_sampling.glsl"
 void main() {
-    vec2 shadowGradient = shadowDepthGradient(worldPosition);
+    ShadowGradients shadowGradients = shadowDepthGradients(worldPosition);
     vec4 base = texture(baseTexture, uv) * material.baseColor;
     if (material.alphaMode == 1 && base.a < material.alphaCutoff) discard;
     float opacity = material.alphaMode == 2 ? clamp(base.a, 0.0, 1.0) : 1.0;
@@ -52,7 +52,7 @@ void main() {
         for (int i = 0; i < int(scene.lightInfo.x); ++i) {
             vec3 towardLight, radiance;
             if (!punctualLight(scene.lights[i], worldPosition, towardLight, radiance)) continue;
-            float visibility = shadowVisibility(worldPosition, geometricNormal, towardLight, uint(i), shadowGradient);
+            float visibility = shadowVisibility(worldPosition, geometricNormal, towardLight, uint(i), shadowGradients);
             color +=
                 pbrDirectLighting(base.rgb, material.pbrFactors.x, material.pbrFactors.y, n, towardLight, v, radiance) *
                 visibility;

@@ -22,6 +22,21 @@ foreach(header IN LISTS aeg_rhi_public_headers)
 endforeach()
 
 if(TARGET aeg_render)
+    add_executable(aeg_cascade_fitting_tests ../render/CascadeFitting.cpp
+        ../../engine/render/private/shadow/ShadowFitting.cpp)
+    target_link_libraries(aeg_cascade_fitting_tests PRIVATE aeg::camera)
+    target_include_directories(aeg_cascade_fitting_tests PRIVATE
+        "${PROJECT_SOURCE_DIR}/engine/render/public" "${PROJECT_SOURCE_DIR}/engine/render/private")
+    aeg_project_options(aeg_cascade_fitting_tests)
+    add_test(NAME aeg_cascade_fitting COMMAND aeg_cascade_fitting_tests)
+    set_tests_properties(aeg_cascade_fitting PROPERTIES LABELS cpu)
+
+    add_executable(aeg_cascaded_shadow_commands_test ../render/CascadedShadowCommands.cpp)
+    target_link_libraries(aeg_cascaded_shadow_commands_test PRIVATE aeg::render)
+    aeg_project_options(aeg_cascaded_shadow_commands_test)
+    add_test(NAME aeg_cascaded_shadow_commands COMMAND aeg_cascaded_shadow_commands_test)
+    set_tests_properties(aeg_cascaded_shadow_commands PROPERTIES LABELS cpu)
+
     add_executable(aeg_shadow_commands_test ../render/ShadowCommands.cpp)
     target_link_libraries(aeg_shadow_commands_test PRIVATE aeg::render)
     aeg_project_options(aeg_shadow_commands_test)

@@ -153,7 +153,10 @@ void drawShadows(EditorState& state, render::Renderer& renderer) {
         ImGui::EndCombo();
     }
     const auto resolutionLabel = std::to_string(candidate.resolution);
-    if (ImGui::BeginCombo("分辨率###Shadow resolution", resolutionLabel.c_str())) {
+    const bool directional =
+        selectedValid && state.settings.lights[candidate.lightIndex].type == render::LightType::Directional;
+    if (ImGui::BeginCombo(directional ? "每级分辨率###Shadow resolution" : "分辨率###Shadow resolution",
+                          resolutionLabel.c_str())) {
         for (const auto resolution : {16u, 32u, 64u, 128u, 256u, 512u, 1024u, 2048u, 4096u}) {
             if (resolution > renderer.maximumShadowResolution()) continue;
             const auto label = std::to_string(resolution);
@@ -164,10 +167,52 @@ void drawShadows(EditorState& state, render::Renderer& renderer) {
         }
         ImGui::EndCombo();
     }
+    ImGui::BeginDisabled(!directional);
+    int cascades = static_cast<int>(candidate.cascadeCount);
+    if (ImGui::SliderInt("级联数量###Shadow cascades", &cascades, 1, static_cast<int>(render::kMaxShadowCascades))) {
+        candidate.cascadeCount = static_cast<std::uint32_t>(cascades);
+        changed = true;
+    }
+    ImGui::BeginDisabled(candidate.cascadeCount == 1);
+    changed |= ImGui::SliderFloat("分割比例###Cascade lambda", &candidate.splitLambda, 0, 1, "%.2f");
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("0 为均匀分割，1 为对数分割；越大越侧重近处精度。");
+    bool automaticDistance = candidate.maxDistance == 0;
+    if (ImGui::Checkbox("自动阴影距离###Auto shadow distance", &automaticDistance)) {
+        float distance = state.camera.distance() + state.model.bounds.radius() * 2;
+        if (!std::isfinite(distance)) distance = 100;
+        candidate.maxDistance = automaticDistance ? 0 : std::clamp(distance, 0.01f, 1.0e9f);
+        changed = true;
+    }
+    ImGui::BeginDisabled(automaticDistance);
+    float distance = automaticDistance ? 0 : candidate.maxDistance;
+    if (ImGui::DragFloat("阴影距离###Cascade distance", &distance, 0.1f, 0.01f, 1.0e9f, "%.2f",
+                         ImGuiSliderFlags_AlwaysClamp)) {
+        candidate.maxDistance = distance;
+        changed = true;
+    }
+    ImGui::EndDisabled();
+    float blend = candidate.blendFraction * 100, fade = candidate.distanceFadeFraction * 100;
+    if (ImGui::SliderFloat("级联过渡###Cascade blend", &blend, 0, 30, "%.0f%%")) {
+        candidate.blendFraction = blend / 100;
+        changed = true;
+    }
+    if (ImGui::SliderFloat("远端淡出###Cascade fade", &fade, 0, 50, "%.0f%%")) {
+        candidate.distanceFadeFraction = fade / 100;
+        changed = true;
+    }
+    ImGui::EndDisabled();
+    ImGui::EndDisabled();
+    constexpr const char* filters[]{"硬阴影 (1×1)", "PCF 3×3", "PCF 5×5"};
+    int filter = static_cast<int>(candidate.pcfRadius);
+    if (ImGui::Combo("过滤###Shadow PCF", &filter, filters, 3)) {
+        candidate.pcfRadius = static_cast<std::uint32_t>(filter);
+        changed = true;
+    }
     changed |= ImGui::SliderFloat("深度偏移###Shadow depth bias", &candidate.depthBias, 0, 0.02f, "%.5f");
     changed |= ImGui::SliderFloat("斜率偏移###Shadow slope bias", &candidate.slopeBias, 0, 0.05f, "%.5f");
     if (changed) applyShadows(state, renderer, candidate);
-    ImGui::TextWrapped("单张阴影贴图 · 3×3 PCF。点光源的六面阴影尚未实现。");
+    ImGui::TextWrapped(directional ? "方向光使用 CSM；1 级为整个模型的单张阴影。"
+                                   : "聚光灯使用单张阴影。点光源的六面阴影尚未实现。");
     if (candidate.enabled && !selectedValid) ImGui::TextWrapped("当前投影光源不可用，阴影暂停。");
     if (!state.shadowError.empty()) ImGui::TextWrapped("%s", state.shadowError.c_str());
 }

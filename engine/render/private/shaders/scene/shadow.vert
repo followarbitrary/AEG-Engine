@@ -4,7 +4,9 @@
 layout(location = 0) in vec3 inPosition;
 layout(location = 2) in vec2 inUV;
 layout(location = 0) out vec2 uv;
+layout(push_constant) uniform ShadowCascade { layout(offset = 48) uint index; }
+cascade;
 void main() {
-    gl_Position = scene.lightViewProjection * scene.model * vec4(inPosition, 1.0);
+    gl_Position = scene.lightViewProjections[cascade.index] * scene.model * vec4(inPosition, 1.0);
     uv = inUV;
 }

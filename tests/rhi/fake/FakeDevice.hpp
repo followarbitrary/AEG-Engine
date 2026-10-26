@@ -68,6 +68,8 @@ public:
     rhi::DeviceCapabilities caps{4096, 4096, 8, rhi::Format::D32Float, true};
     std::uint32_t samples{15};
     bool failTexture{};
+    // Zero disables the countdown; otherwise fail exactly that texture allocation.
+    std::uint32_t failNthTexture{};
     bool failPipeline{};
     bool failBindingSet{};
     bool failWaitIdle{};
@@ -104,6 +106,8 @@ public:
     std::unique_ptr<rhi::Texture> createTexture(const rhi::TextureDesc& desc) override {
         rhi::validate(desc);
         if (std::exchange(failTexture, false)) throw std::runtime_error("Injected texture allocation failure");
+        if (failNthTexture && --failNthTexture == 0)
+            throw std::runtime_error("Injected partial texture allocation failure");
         return std::make_unique<FakeTexture>(desc);
     }
     std::unique_ptr<rhi::Texture> uploadTexture(const rhi::TextureDesc& desc,

@@ -10,6 +10,7 @@ add_library(aeg_render STATIC
     private/scene/ScenePipeline.cpp
     private/shaders/ShaderLibrary.cpp
     private/shadow/ShadowPass.cpp
+    private/shadow/ShadowFitting.cpp
     private/viewport/ViewportTargets.cpp
     private/viewport/ViewportCapture.cpp
     private/antialiasing/Antialiasing.cpp

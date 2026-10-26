@@ -1,6 +1,7 @@
 #pragma once
 #include <math.hpp>
 #include <Light.hpp>
+#include <ShadowSettings.hpp>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -31,20 +32,24 @@ struct alignas(16) SceneUniform {
     aeg::math::Vec4 temporalInfo{};
     math::Vec4 lightInfo{};
     std::array<GpuLight, kMaxLights> lights{};
-    math::Mat4 lightViewProjection{math::identity()};
-    math::Vec4 shadowInfo{}; // Enabled, selected light index, inverse square-map resolution, reserved.
-    math::Vec4 shadowBias{}; // Constant and slope depth bias.
+    std::array<math::Mat4, kMaxShadowCascades> lightViewProjections{math::identity(), math::identity(),
+                                                                    math::identity(), math::identity()};
+    math::Vec4 shadowInfo{};         // Enabled, selected light index, inverse square-map resolution, active count.
+    math::Vec4 shadowBias{};         // Constant and slope depth bias, PCF radius, reserved.
+    math::Vec4 cascadeSplits{};      // Positive camera-view far distance of each cascade.
+    math::Vec4 cascadeBlendStarts{}; // Next-cascade transition or final distance-fade start.
 };
 static_assert(std::is_standard_layout_v<SceneUniform> && std::is_trivially_copyable_v<SceneUniform>);
-static_assert(alignof(SceneUniform) == 16 && sizeof(SceneUniform) == 1024);
+static_assert(alignof(SceneUniform) == 16 && sizeof(SceneUniform) == 1248);
 static_assert(offsetof(SceneUniform, viewProjection) == 0 && offsetof(SceneUniform, model) == 64);
 static_assert(offsetof(SceneUniform, parameters) == 128 && offsetof(SceneUniform, clipConvention) == 144);
 static_assert(offsetof(SceneUniform, cameraPosition) == 160 && offsetof(SceneUniform, cameraTowardViewer) == 176);
 static_assert(offsetof(SceneUniform, previousViewProjection) == 192 && offsetof(SceneUniform, previousModel) == 256);
 static_assert(offsetof(SceneUniform, currentViewProjection) == 320 && offsetof(SceneUniform, temporalInfo) == 384);
 static_assert(offsetof(SceneUniform, lightInfo) == 400 && offsetof(SceneUniform, lights) == 416);
-static_assert(offsetof(SceneUniform, lightViewProjection) == 928 && offsetof(SceneUniform, shadowInfo) == 992);
-static_assert(offsetof(SceneUniform, shadowBias) == 1008);
+static_assert(offsetof(SceneUniform, lightViewProjections) == 928 && offsetof(SceneUniform, shadowInfo) == 1184);
+static_assert(offsetof(SceneUniform, shadowBias) == 1200 && offsetof(SceneUniform, cascadeSplits) == 1216);
+static_assert(offsetof(SceneUniform, cascadeBlendStarts) == 1232);
 
 struct MaterialPush {
     aeg::math::Vec4 color{1};
@@ -59,4 +64,13 @@ static_assert(alignof(MaterialPush) == 16 && sizeof(MaterialPush) == 48 && offse
 static_assert(offsetof(MaterialPush, alphaCutoff) == 16 && offsetof(MaterialPush, alphaMode) == 20);
 static_assert(offsetof(MaterialPush, normalScale) == 24 && offsetof(MaterialPush, hasNormalMap) == 28);
 static_assert(offsetof(MaterialPush, pbrFactors) == 32);
+
+struct ShadowPush {
+    MaterialPush material;
+    std::uint32_t cascadeIndex{};
+    std::array<std::uint32_t, 3> padding{};
+};
+static_assert(std::is_standard_layout_v<ShadowPush> && std::is_trivially_copyable_v<ShadowPush>);
+static_assert(alignof(ShadowPush) == 16 && sizeof(ShadowPush) == 64);
+static_assert(offsetof(ShadowPush, material) == 0 && offsetof(ShadowPush, cascadeIndex) == 48);
 }

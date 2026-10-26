@@ -59,7 +59,10 @@ void Renderer::Impl::createDescriptors() {
     sceneLayout = device.createBindingLayout({{{0, UniformBuffer, Vertex | Fragment}}});
     materialLayout =
         device.createBindingLayout({{{0, CombinedTextureSampler, Fragment}, {1, CombinedTextureSampler, Fragment}}});
-    shadowSetLayout = device.createBindingLayout({{{0, CombinedTextureSampler, Fragment}}});
+    shadowSetLayout = device.createBindingLayout({{{0, CombinedTextureSampler, Fragment},
+                                                   {1, CombinedTextureSampler, Fragment},
+                                                   {2, CombinedTextureSampler, Fragment},
+                                                   {3, CombinedTextureSampler, Fragment}}});
     postSetLayout = device.createBindingLayout({{{0, CombinedTextureSampler, Fragment}}});
     sampler = device.createSampler({rhi::Filter::Linear, rhi::AddressMode::Repeat});
     viewportSampler = device.createSampler({rhi::Filter::Linear, rhi::AddressMode::ClampToEdge});
@@ -75,10 +78,14 @@ void Renderer::Impl::createDescriptors() {
     fallbackShadowTexture = device.uploadTexture(
         {{1, 1}, rhi::Format::Rgba8Unorm, rhi::TextureUsage::CopyDestination | rhi::TextureUsage::Sampled, 1},
         std::as_bytes(std::span(white)));
-    const std::array shadowWrites{rhi::BindingWrite{0, nullptr, fallbackShadowTexture.get(), pointSampler.get()}};
+    std::array<rhi::BindingWrite, kMaxShadowCascades> shadowWrites;
+    for (std::uint32_t i = 0; i < kMaxShadowCascades; ++i)
+        shadowWrites[i] = {i, nullptr, fallbackShadowTexture.get(), pointSampler.get()};
     fallbackShadowDescriptor = device.createBindingSet(*shadowSetLayout, shadowWrites);
     pipelineLayout = device.createPipelineLayout(
         {{sceneLayout.get(), materialLayout.get(), shadowSetLayout.get()}, sizeof(MaterialPush), Fragment});
+    shadowPipelineLayout =
+        device.createPipelineLayout({{sceneLayout.get(), materialLayout.get()}, sizeof(ShadowPush), Vertex | Fragment});
     postLayout = device.createPipelineLayout({{postSetLayout.get()}, sizeof(aeg::math::Vec2), Fragment});
     if (temporalSupported) {
         temporalSetLayout = device.createBindingLayout({{{0, CombinedTextureSampler, Fragment},

@@ -72,6 +72,22 @@ render::RenderSettings settings() {
     result.set_camera({math::identity(), math::perspective(1, 1, 0.1f, 100, {true, false}), {true, false}});
     return result;
 }
+void fourCascadeRecording() {
+    tests::FakeDevice device;
+    render::Renderer renderer(device);
+    renderer.uploadModel(fixture());
+    auto sceneSettings = settings();
+    sceneSettings.set_camera({math::identity(), math::perspective(1, 1, 0.1f, 20, {true, false}), {true, false}});
+    auto shadow = renderer.shadows();
+    require(shadow.cascadeCount == 4, "Directional shadows must default to four cascades");
+    shadow.enabled = true;
+    shadow.resolution = 64;
+    renderer.setShadows(shadow);
+    tests::FakeCommands commands;
+    renderer.recordFrame(commands, sceneSettings);
+    require(std::ranges::count(commands.passes, "shadow") == 4,
+            "Four-cascade directional shadows must record four depth passes");
+}
 void resourcesAndPolicy() {
     tests::FakeDevice device;
     render::Renderer renderer(device);
@@ -85,6 +101,10 @@ void resourcesAndPolicy() {
     renderer.recordFrame(off, sceneSettings);
     require(off.passes == std::vector<std::string>{"scene"}, "Disabled shadows emitted a depth pass");
     const auto& fallback = binding(bound(named(off, "scene"), 2), 0);
+    require(bound(named(off, "scene"), 2).writes.size() == 4, "Fallback must initialize all four shadow samplers");
+    for (std::uint32_t i = 1; i < render::kMaxShadowCascades; ++i)
+        require(binding(bound(named(off, "scene"), 2), i).texture == fallback.texture,
+                "Disabled cascade sampler does not use the initialized fallback");
     require(fallback.texture && fallback.sampler && !fallback.buffer &&
                 fallback.texture->description().format == rhi::Format::Rgba8Unorm &&
                 fallback.texture->description().extent == rhi::Extent2D{1, 1} &&
@@ -92,10 +112,11 @@ void resourcesAndPolicy() {
             "Disabled scene lacks a valid white shadow fallback binding");
     require(dynamic_cast<tests::FakeTexture&>(*fallback.texture).uploaded == std::vector<std::byte>(4, std::byte{255}),
             "Fallback shadow texel is not initialized white");
-    require(uploaded<math::Vec4>(device, 992).x == 0, "Disabled shadow uniform is enabled");
+    require(uploaded<math::Vec4>(device, 1184).x == 0, "Disabled shadow uniform is enabled");
     renderer.frameSubmitted();
     renderer.setAntialiasing({1, true, true});
     render::ShadowSettings shadow;
+    shadow.cascadeCount = 1;
     shadow.enabled = true;
     shadow.resolution = 128;
     renderer.setShadows(shadow);
@@ -126,6 +147,10 @@ void resourcesAndPolicy() {
     const auto& sampled = binding(bound(scene, 2), 0);
     require(sampled.texture == depth.framebuffer.attachments[0] && sampled.sampler,
             "Scene descriptor does not sample the actual rendered shadow texture");
+    require(bound(scene, 2).writes.size() == 4, "Single-map descriptor must initialize all four shadow samplers");
+    for (std::uint32_t i = 1; i < render::kMaxShadowCascades; ++i)
+        require(binding(bound(scene, 2), i).texture == fallback.texture,
+                "Unused single-map sampler does not use the initialized fallback");
     const auto& sampler = dynamic_cast<tests::FakeSampler&>(*sampled.sampler).desc;
     require(sampler.filter == rhi::Filter::Nearest, "Manual PCF requires nearest depth samples");
     require(binding(bound(depth, 0), 0).buffer == device.uniform &&
@@ -133,11 +158,15 @@ void resourcesAndPolicy() {
             "Shadow and scene do not share the scene uniform buffer");
     require(depth.draws.size() == 2 && scene.draws.size() == 3, "Opaque/Mask cast and Blend receives policy changed");
     for (const auto& draw : depth.draws) {
-        require(draw.constants.size() == 48, "Shadow material push ABI changed");
+        require(draw.constants.size() == 64, "Shadow material and cascade push ABI changed");
         const auto counterpart =
             std::ranges::find_if(scene.draws, [&](const auto& value) { return value.indices == draw.indices; });
-        require(counterpart != scene.draws.end() && counterpart->constants == draw.constants,
+        require(counterpart != scene.draws.end() && counterpart->constants.size() == 48 &&
+                    std::equal(counterpart->constants.begin(), counterpart->constants.end(), draw.constants.begin()),
                 "Shadow caster does not use the scene material alpha/cutoff constants");
+        std::uint32_t cascade{};
+        std::memcpy(&cascade, draw.constants.data() + 48, sizeof(cascade));
+        require(cascade == 0, "Single-map caster selected a different cascade");
         std::uint32_t mode{};
         float cutoff{};
         std::memcpy(&mode, draw.constants.data() + 20, sizeof(mode));
@@ -145,10 +174,11 @@ void resourcesAndPolicy() {
         require(mode != std::uint32_t(assets::AlphaMode::Blend) && cutoff == 0.37f,
                 "Blend cast or Mask cutoff changed");
     }
-    require(device.uniform->bytes.size() == 1024, "Shared scene uniform must be 1024 bytes");
-    require(uploaded<math::Vec4>(device, 992) == math::Vec4(1, 0, 1.0f / 128, 0) &&
-                uploaded<math::Vec4>(device, 1008).x == shadow.depthBias &&
-                uploaded<math::Vec4>(device, 1008).y == shadow.slopeBias,
+    require(device.uniform->bytes.size() == 1248, "Shared scene uniform must be 1248 bytes");
+    require(uploaded<math::Vec4>(device, 1184) == math::Vec4(1, 0, 1.0f / 128, 1) &&
+                uploaded<math::Vec4>(device, 1200).x == shadow.depthBias &&
+                uploaded<math::Vec4>(device, 1200).y == shadow.slopeBias &&
+                uploaded<math::Vec4>(device, 1200).z == float(shadow.pcfRadius),
             "Shadow metadata ABI changed");
     renderer.frameSubmitted();
     // Shadow clip convention stays canonical even when the scene changes axes,
@@ -184,7 +214,8 @@ void resourcesAndPolicy() {
     sceneSettings.lights[0].type = render::LightType::Point;
     tests::FakeCommands point;
     renderer.recordFrame(point, sceneSettings);
-    require(std::ranges::find(point.passes, "shadow") == point.passes.end() && uploaded<math::Vec4>(device, 992).x == 0,
+    require(std::ranges::find(point.passes, "shadow") == point.passes.end() &&
+                uploaded<math::Vec4>(device, 1184).x == 0,
             "Point selection incorrectly emitted a single-face shadow map");
     renderer.frameSubmitted();
     sceneSettings.lights[0].type = render::LightType::Spot;
@@ -193,7 +224,7 @@ void resourcesAndPolicy() {
     sceneSettings.lights[0].range = 30;
     tests::FakeCommands spot;
     renderer.recordFrame(spot, sceneSettings);
-    require(spot.passes.front() == "shadow" && uploaded<math::Vec4>(device, 992).x == 1 &&
+    require(spot.passes.front() == "shadow" && uploaded<math::Vec4>(device, 1184).x == 1 &&
                 math::is_finite(uploaded<math::Mat4>(device, 928)),
             "Valid spot selection did not render a shadow map");
 }
@@ -204,6 +235,7 @@ void capabilitiesAndRollback(const std::filesystem::path& capture) {
         render::Renderer renderer(device);
         require(renderer.supportsShadows(), "Depth format fallback lost shadow support");
         auto shadow = renderer.shadows();
+        shadow.cascadeCount = 1;
         shadow.enabled = true;
         shadow.resolution = 16;
         renderer.setShadows(shadow);
@@ -258,6 +290,7 @@ void capabilitiesAndRollback(const std::filesystem::path& capture) {
     renderer.uploadModel(fixture());
     renderer.setAntialiasing({1, true, true});
     auto shadow = renderer.shadows();
+    shadow.cascadeCount = 1;
     shadow.enabled = true;
     shadow.resolution = 64;
     renderer.setShadows(shadow);
@@ -331,6 +364,7 @@ void capabilitiesAndRollback(const std::filesystem::path& capture) {
 }
 int main(int argc, char** argv) {
     try {
+        fourCascadeRecording();
         resourcesAndPolicy();
         capabilitiesAndRollback(argc > 1 ? std::filesystem::path(argv[1])
                                          : std::filesystem::temp_directory_path() / "aeg-shadow-contract.ppm");

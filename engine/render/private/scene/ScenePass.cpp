@@ -182,7 +182,10 @@ void Renderer::Impl::drawScene(rhi::CommandList& commands, const RenderSettings&
     commands.setViewport(viewport->extent());
     commands.bindPipeline(*(settings.clipSpace.reversed_z ? scene.greater : scene.less));
     commands.bindSet(*pipelineLayout, 0, *sceneDescriptor);
-    commands.bindSet(*pipelineLayout, 2, uniform.shadowInfo.x > 0.5f ? *shadow->descriptor : *fallbackShadowDescriptor);
+    commands.bindSet(*pipelineLayout, 2,
+                     uniform.shadowInfo.x > 0.5f
+                         ? *shadow->descriptors[static_cast<std::uint32_t>(uniform.shadowInfo.w) - 1]
+                         : *fallbackShadowDescriptor);
     if (model) {
         const auto drawMesh = [&](const GpuMesh& mesh) {
             const auto& material = model->materials[mesh.material];

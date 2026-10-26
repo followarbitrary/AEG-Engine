@@ -45,7 +45,7 @@ struct Renderer::Impl {
     std::unique_ptr<rhi::Texture> fallbackShadowTexture;
     std::unique_ptr<rhi::BindingSet> fallbackShadowDescriptor;
     std::unique_ptr<rhi::BindingSet> sceneDescriptor;
-    std::unique_ptr<rhi::PipelineLayout> pipelineLayout, postLayout, temporalLayout;
+    std::unique_ptr<rhi::PipelineLayout> pipelineLayout, shadowPipelineLayout, postLayout, temporalLayout;
     std::unique_ptr<rhi::RenderPass> postPass, temporalPass;
     std::unique_ptr<rhi::GraphicsPipeline> postPipeline, temporalPipeline;
     std::array<std::unique_ptr<ScenePipeline>, 4> scenePipelines;
