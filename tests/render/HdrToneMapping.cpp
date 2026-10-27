@@ -154,6 +154,44 @@ double neutral(double value) {
     return std::clamp((value * (value + 0.0245786) - 0.000090537) / (value * (0.983729 * value + 0.432951) + 0.238081),
                       0.0, 1.0);
 }
+// Independent reference for the AgX fitted mapper. Constants are copied from
+// Filament's Apache-2.0 AgxToneMapper (which in turn cites Blender's AgX LUT
+// generation), with matrix orientation made explicit for row-vector math.
+Color agxReference(Color color) {
+    constexpr double srgbToRec2020[3][3] = {
+        {0.6274, 0.3293, 0.0433}, {0.0691, 0.9195, 0.0114}, {0.0164, 0.0880, 0.8956}};
+    constexpr double rec2020ToSrgb[3][3] = {
+        {1.6605, -0.5876, -0.0728}, {-0.1246, 1.1329, -0.0083}, {-0.0182, -0.1006, 1.1187}};
+    constexpr double input[3][3] = {{0.856627153315983, 0.0951212405381588, 0.0482516061458583},
+                                    {0.137318972929847, 0.761241990602591, 0.101439036467562},
+                                    {0.11189821299995, 0.0767994186031903, 0.811302368396859}};
+    constexpr double outputMatrix[3][3] = {{1.127100581814436, -0.110606643096603, -0.016493938338833},
+                                           {-0.141329763498438, 1.157823702216272, -0.016493938338833},
+                                           {-0.141329763498438, -0.110606643096603, 1.25193640659504}};
+    constexpr double minEv = -12.47393;
+    constexpr double maxEv = 4.026069;
+    constexpr double invRange = 1.0 / (maxEv - minEv);
+    auto multiply = [](const double matrix[3][3], Color value) {
+        return Color{matrix[0][0] * value[0] + matrix[0][1] * value[1] + matrix[0][2] * value[2],
+                     matrix[1][0] * value[0] + matrix[1][1] * value[1] + matrix[1][2] * value[2],
+                     matrix[2][0] * value[0] + matrix[2][1] * value[1] + matrix[2][2] * value[2]};
+    };
+    color = {std::max(0.0, color[0]), std::max(0.0, color[1]), std::max(0.0, color[2])};
+    color = multiply(srgbToRec2020, color);
+    color = multiply(input, color);
+    for (auto& channel : color)
+        channel = std::clamp((std::log2(std::max(channel, 1e-10)) - minEv) * invRange, 0.0, 1.0);
+    for (auto& channel : color) {
+        const double x2 = channel * channel, x4 = x2 * x2, x6 = x4 * x2;
+        channel = -17.86 * x6 * channel + 78.01 * x6 - 126.7 * x4 * channel + 92.06 * x4 - 28.72 * x2 * channel +
+                  4.361 * x2 - 0.1718 * channel + 0.002857;
+    }
+    color = multiply(outputMatrix, color);
+    for (auto& channel : color) channel = std::pow(std::max(channel, 0.0), 2.2);
+    color = multiply(rec2020ToSrgb, color);
+    for (auto& channel : color) channel = std::clamp(channel, 0.0, 1.0);
+    return color;
+}
 std::vector<std::uint8_t> output(rhi::Device& device, render::Renderer& renderer) {
     const auto texture = renderer.outputTexture();
     require(bool(texture), "Submitted renderer has no display output");
@@ -239,6 +277,12 @@ void suite(rhi::Device& realDevice, const std::filesystem::path& directory) {
         frame();
         return output(realDevice, renderer);
     };
+    auto agxClear = [&](Color color, float ev = 0) {
+        renderer.setToneMapping({render::ToneMapper::Agx, ev});
+        settings.background = {float(color[0]), float(color[1]), float(color[2]), 1};
+        frame();
+        return output(realDevice, renderer);
+    };
     constexpr std::array<double, 6> inputs{0.18, 0.5, 1, 2, 4, 16};
     constexpr std::array<double, 6> goldens{0.10559124722893, 0.37430831401646, 0.61911542694081,
                                             0.80356178264339, 0.90901376782661, 0.98993530991463};
@@ -261,6 +305,24 @@ void suite(rhi::Device& realDevice, const std::filesystem::path& directory) {
         pixel(clear(coloredInputs[i]), coloredGoldens[i], "Literal colored Hill matrix-fit golden");
     require(clear({1, 1, 1}, 1) == clear({2, 2, 2}), "EV +1 must double scene radiance once");
     require(clear({4, 4, 4}, -2) == clear({1, 1, 1}), "EV -2 must recover unclipped radiance four");
+
+    // AgX fitted neutral and chromatic output is independently pinned here.
+    constexpr std::array<double, 6> agxInputs{0.18, 0.5, 1, 2, 4, 16};
+    constexpr std::array<double, 6> agxGoldens{0.21484819280153, 0.42244778906279, 0.58292112391332,
+                                               0.73216256261178, 0.84904836619458, 0.96036377253473};
+    for (unsigned i = 0; i < agxInputs.size(); ++i)
+        pixel(agxClear({agxInputs[i], agxInputs[i], agxInputs[i]}), {agxGoldens[i], agxGoldens[i], agxGoldens[i]},
+              "Literal neutral AgX fitted golden");
+    constexpr std::array<Color, 5> agxColoredInputs{{{1, 0, 0}, {0, 1, 0}, {0, 0, 1}, {4, 1, 0.25}, {16, 0, 0}}};
+    constexpr std::array<Color, 5> agxColoredGoldens{{{0.71645869275795, 0.10705653463029, 0.06705302074050},
+                                                      {0.23690234612395, 0.57775901578949, 0.13189546430593},
+                                                      {0.03442223768487, 0.13600725852325, 0.72166951241225},
+                                                      {0.92164434398229, 0.61503693507495, 0.43427539088223},
+                                                      {1.00000000000000, 0.70606980380190, 0.60018014450228}}};
+    for (unsigned i = 0; i < agxColoredInputs.size(); ++i)
+        pixel(agxClear(agxColoredInputs[i]), agxColoredGoldens[i], "Literal colored AgX fitted golden");
+    require(agxClear({1, 1, 1}, 1) == agxClear({2, 2, 2}), "AgX EV +1 must double scene radiance once");
+    require(agxClear({4, 4, 4}, -2) == agxClear({1, 1, 1}), "AgX EV -2 must recover unclipped radiance four");
     int previous = -1;
     for (double value : {1.0, 2.0, 4.0, 16.0}) {
         const auto image = clear({value, value, value}, -4);
@@ -346,6 +408,21 @@ void suite(rhi::Device& realDevice, const std::filesystem::path& directory) {
         changed += mapped != filtered[i];
     }
     require(changed > 0, "FXAA did not filter the mapped HDR triangle edge");
+    renderer.setToneMapping({render::ToneMapper::Agx, 0});
+    renderer.uploadModel(plane({4, 4, 4}, 1, true));
+    frame();
+    require(device.fxaaInput != nullptr, "AgX FXAA must sample the display-linear tone result");
+    const auto agxToneInput = realDevice.readback(*device.fxaaInput);
+    const auto agxHdrInput = raw(realDevice, device.scene);
+    const auto agxFiltered = output(realDevice, renderer);
+    unsigned agxChanged{};
+    for (std::size_t i = 0; i < agxHdrInput.size(); i += 4) {
+        const int mapped = std::to_integer<unsigned char>(agxToneInput.pixels[i]);
+        close(mapped, quantized(agxReference({agxHdrInput[i], agxHdrInput[i + 1], agxHdrInput[i + 2]})[0]), 1,
+              "AgX FXAA input has already received the tone curve");
+        agxChanged += mapped != agxFiltered[i];
+    }
+    require(agxChanged > 0, "AgX FXAA did not filter the mapped HDR triangle edge");
     if (renderer.supportsTemporalAA()) {
         renderer.setAntialiasing({1, false, true});
         renderer.uploadModel(plane({4, 4, 4}));
@@ -450,6 +527,11 @@ void suite(rhi::Device& realDevice, const std::filesystem::path& directory) {
     if (renderer.supportsTemporalAA())
         for (auto* history : device.history) bounded(history);
     pixel(output(realDevice, renderer), {1, 1, 1}, "Maximum exposure of finite HDR remains white", 0);
+    renderer.setToneMapping({render::ToneMapper::Agx, 12});
+    settle(2);
+    const auto agxExtreme = output(realDevice, renderer);
+    const auto agxCeiling = agxReference({65504, 65504, 65504});
+    pixel(agxExtreme, agxCeiling, "AgX maximum exposure of finite HDR remains finite", 0);
     renderer.waitIdle();
     require(renderer.validationErrorCount() == 0, "HDR GPU contracts produced Vulkan validation errors");
 }

@@ -59,6 +59,7 @@ ctest --preset release
 .\build\debug\bin\aeg_editor.exe --msaa 4 --fxaa
 .\build\debug\bin\aeg_editor.exe --taa
 .\build\debug\bin\aeg_editor.exe --tone-mapper aces --exposure +1
+.\build\debug\bin\aeg_editor.exe --tone-mapper agx --exposure +1
 .\build\debug\bin\aeg_editor.exe --tone-mapper linear --exposure -2
 .\build\debug\bin\aeg_editor.exe --frames 12 --capture '.\build\viewport.ppm'
 .\build\debug\bin\aeg_editor.exe --no-validation
@@ -66,7 +67,8 @@ ctest --preset release
 
 `--model PATH` 选择 OBJ、glTF、GLB 或 PMX；`--font PATH` 指定支持中文的 TTF、OTF 或 TTC 字体；`--msaa 1|2|4|8` 选择场景采样数，1 为关闭；`--taa` 开启 TAA，启用时替代 MSAA；`--fxaa` 开启 FXAA 后处理，可跟随 MSAA 或 TAA；`--frames N` 在指定帧数后退出；`--capture PATH` 导出场景视口的 PPM 图像；`--hidden` 使用隐藏窗口，适合配合 `--frames` 自动验证；`--no-validation` 关闭 Vulkan 验证层。默认尝试启用验证层，未安装时仍可启动。参数缺失或未知参数会报告错误。
 
-`--tone-mapper aces|linear` 选择色调映射，默认为 `aces`；`--exposure EV` 设置曝光补偿，默认 0，要求有限且位于 `[-12,+12]`，支持显式正号。曝光增加 1 EV 会使映射前的亮度加倍，减少 1 EV 则减半。
+`--tone-mapper aces|agx|linear` 选择色调映射，默认为 `aces`；`--exposure EV` 设置曝光补偿，默认 0，要求有限且位于 `[-12,+12]`，支持显式正号。曝光增加 1 EV 会使映射前的亮度加倍，减少 1 EV 则减半。
+
 
 ## 使用方法
 
@@ -77,7 +79,7 @@ ctest --preset release
 - **变换 Gizmo**：当前模型默认为选中对象，在视口左上角或用 `W / E / R` 切换移动、旋转、缩放。拖动轴线、平面或旋转环可编辑整体变换，手柄以模型包围盒中心为轴心，属性面板同步更新。移动和旋转可切换局部／世界坐标，缩放使用局部坐标并保留负缩放符号；`Esc` 撤销本次拖动。拖动期间暂停自动旋转，释放后恢复；文本编辑期间快捷键暂停。当前不单独选择或变换子网格。
 - **PBR 光照**：在“材质”中设置所选材质的金属度和粗糙度，点击“应用 PBR 参数”；在“光照”中调整方向光、点光源、聚光灯及环境漫反射。普通相机环绕会改变高光位置，无光照模式仍直接显示基础颜色。
 - **IBL 环境光**：在“环境光 IBL”中开启，首次启用会用 compute 生成程序天空的环境光贴图；也可输入 2:1 Radiance `.hdr` 路径并加载。强度和水平旋转实时生效；环境更换时才运行 GPU 预处理，普通帧直接采样生成的贴图。
-- **色调映射**：在属性面板“色调映射”中选择默认的“ACES fitted”或“线性（对照）”，调整 `-12` 到 `+12` EV 的曝光，或点击“重置曝光与映射”恢复 ACES、0 EV。修改立即生效，保留 TAA 历史。
+- **色调映射**：在属性面板“色调映射”中选择“ACES fitted”、“AgX”或“线性（对照）”，调整 `-12` 到 `+12` EV 的曝光，或点击“重置曝光与映射”恢复 ACES、0 EV。修改立即生效，保留 TAA 历史。
 - **法线贴图**：导入模型时自动读取材质声明的法线图，缺少声明时按文件名查找配套图片；所有已支持格式共用此规则。仍可在属性面板“材质”中选择材质，输入 RGB 法线图片路径，应用、替换或清除贴图；相对路径以模型所在目录为基准，也支持绝对路径和中文路径。“光照”中的“使用法线贴图”和 0–4 的“法线强度”控制全部材质，默认启用、强度为 1；强度为 0 时使用原来的顶点法线。无光照模式不受法线贴图影响，界面同时显示带法线贴图的材质数。
 - **透明材质**：导入时自动读取透明模式和透明度；在属性面板“材质”中选择材质后，可切换“不透明／透明裁切／半透明”、调整不透明度及裁切阈值，再点击“应用透明设置”。修改只作用于所选材质，上传失败时保留原模型；修改成功后重置 TAA 历史。
 - **抗锯齿**：在属性面板的“抗锯齿”中选择 MSAA 关闭、2x、4x 或 8x，或开启“TAA 时域抗锯齿”；“FXAA 后处理”可独立开关。TAA 开启时有效采样数为 1，MSAA 选择禁用。界面显示历史帧数并提供“重置历史”；聚焦模型也会自动重置。界面只提供设备支持的采样档位，命令行请求不支持的 MSAA 档位时向下降级并显示提示。默认均关闭。
@@ -206,12 +208,13 @@ settings.lights[0].intensity = 3.0f; // 相对光照强度，不是物理光度�
 
 处理顺序为 **HDR 场景与透明混合 → MSAA 解析（如启用）→ HDR TAA（如启用）→ 曝光与色调映射 → FXAA（如启用）**。TAA 替代 MSAA，二者不会同时工作；半透明材质先在线性 HDR 中混合，再对混合结果统一映射。
 
-默认映射使用 Stephen Hill 的 **ACES fitted RRT+ODT 近似**，包含输入／输出颜色矩阵，输入与输出均采用线性 sRGB／Rec.709 原色。曝光在映射前乘以 `2^EV`；线性对照模式将曝光后的颜色限制到 `[0,1]`，便于比较高亮压缩。实现改编自 [BakingLab 的 ACES.hlsl](https://github.com/TheRealMJP/BakingLab/blob/master/BakingLab/ACES.hlsl)，MIT 许可与署名保存在 `engine/render/private/shaders/postprocess/ACES.LICENSE`。它是拟合近似，不是完整的 ACES 色彩管理或官方 ACES Output Transform。
+默认映射使用 Stephen Hill 的 **ACES fitted RRT+ODT 近似**；另有基于 Filament 最小拟合的 **AgX fitted**，两者都使用线性 sRGB／Rec.709 场景输入和显示线性输出。曝光在映射前乘以 `2^EV`；线性对照模式将曝光后的颜色限制到 `[0,1]`，便于比较高亮压缩。ACES 改编自 [BakingLab 的 ACES.hlsl](https://github.com/TheRealMJP/BakingLab/blob/master/BakingLab/ACES.hlsl)，MIT 许可与署名保存在 `engine/render/private/shaders/postprocess/ACES.LICENSE`；AgX 常量改编自 [Filament 的 AgxToneMapper](https://github.com/google/filament/blob/main/filament/src/ToneMapper.cpp)，Apache-2.0 说明保存在 `engine/render/private/shaders/postprocess/AGX.LICENSE`。两者都是拟合近似，不是完整的 ACES／AgX 色彩管理或显示设备配置。
 
 ```cpp
 #include <ToneMappingSettings.hpp>
 
 renderer.setToneMapping({.mapper = aeg::render::ToneMapper::Aces, .exposureEV = 1.0f});
+// renderer.setToneMapping({.mapper = aeg::render::ToneMapper::Agx, .exposureEV = 1.0f});
 const auto current = renderer.toneMapping();
 ```
 
@@ -291,7 +294,7 @@ renderer.setShadows(shadow);
 
 ## 范围与限制
 
-当前里程碑支持静态 OBJ / glTF / GLB / PMX 网格、节点变换、基础颜色、常见基础颜色纹理、RGB 法线贴图、深度测试、PBR 多光源、方向光 CSM 与聚光灯阴影、Compute IBL、HDR 场景与 ACES 色调映射。基础颜色纹理缺失或无法解码时使用白色回退并记录警告。
+当前里程碑支持静态 OBJ / glTF / GLB / PMX 网格、节点变换、基础颜色、常见基础颜色纹理、RGB 法线贴图、深度测试、PBR 多光源、方向光 CSM 与聚光灯阴影、Compute IBL、HDR 场景与 ACES／AgX 色调映射。基础颜色纹理缺失或无法解码时使用白色回退并记录警告。
 
 PMX 支持 UTF-8 / UTF-16LE、多个材质分组、基础 UV 贴图和中文相对贴图路径。导入时请保留模型配套的贴图目录；模型路径栏、拖放及 `--model` 共用导入器。显示的是静态初始姿态；没有 VMD 动作、骨骼蒙皮、Morph、刚体/关节模拟、描边、Toon 或球面贴图着色。材质与贴图支持不透明、裁切和半透明模式，零透明度的半透明材质隐藏。已验证 PMX 2.0；PMX 2.1 的部分 Morph 和软体等扩展受当前 Assimp 实现限制。
 
@@ -311,7 +314,7 @@ IBL 新增 63 次场景截图，并读取六个面及每级 mip 的浮点预处�
 
 2026-10-27 在本机 MSVC 19.51 / RTX 5070 / Vulkan SDK 1.4.357.0 上完成 Debug、Release 和 MinGW 编译。完整 Debug CTest **54/54 通过**，包含 25 项 CPU 测试与 29 项真实 GPU 测试；Release 和 MinGW 的 25 项 CPU 测试均通过。回归覆盖 SSE2／标量 Math、公开接口、相机与缩放范围、模型导入、法线贴图、自动查找、MMD 效果绑定、透明材质、PBR 材质参数、IBL、HDR／色调映射、字体、Gizmo、RHI、渲染命令及内嵌着色器。
 
-HDR 回归直接读取浮点场景与 TAA 历史，验证大于 1 的亮度、65504 有限上限、透明混合先于映射、MSAA 解析与 FXAA 的处理顺序，以及曝光变化保留未曝光历史。中性与彩色 ACES 使用独立固定数值核对，截图检查只执行一次 sRGB 编码；CPU 另验证格式回退、采样限制、参数拒绝与分配失败回滚。临时跳过 ACES、移除曝光、提前截断场景亮度或在曝光变化时清空历史，测试均检出预期错误，随后恢复原实现。真实窗口验证了 ACES／线性模式切换、曝光与重置，以及 IBL＋CSM＋TAA＋FXAA 组合；曝光调整后历史帧继续累积，运行 12,758 帧并正常退出，Vulkan 验证错误为零。
+HDR 回归直接读取浮点场景与 TAA 历史，验证大于 1 的亮度、65504 有限上限、透明混合先于映射、MSAA 解析与 FXAA 的处理顺序，以及曝光变化保留未曝光历史。中性与彩色 ACES 使用独立固定数值核对，截图检查只执行一次 sRGB 编码；CPU 另验证格式回退、采样限制、参数拒绝与分配失败回滚。临时跳过 ACES、移除曝光、提前截断场景亮度或在曝光变化时清空历史，测试均检出预期错误，随后恢复原实现。真实窗口验证了 ACES／线性模式切换、曝光与重置，以及 IBL＋CSM＋TAA＋FXAA 组合；曝光调整后历史帧继续累积，运行 12,758 帧并正常退出，Vulkan 验证错误为零。 AgX 回归额外验证了 sRGB／Rec.2020 原色转换、彩色 golden、曝光恒等式和 AgX→FXAA 顺序。
 
 PBR 新增四组材质 CPU 契约和 73 次解析 GPU 截图，使用独立双精度 Smith Lambda 参考及法向入射闭式解核对 BRDF；覆盖金属度、粗糙度零值、掠射角、光源颜色/强度、世界空间视线、正交/透视、镜像与非均匀变换、全部 AA/裁剪约定，以及 TAA 历史重置。分别改错 GGX 粗糙度、关闭 Fresnel 和跳过 Smith，测试均能检出，恢复后通过。Release 和 MinGW 另以实际 PMX 模型完成 32 帧 TAA+FXAA 渲染、截图可见性检查，Vulkan 验证错误均为零；真实窗口验证材质参数应用和光源强度即时更新。半透明 glTF 的可见性冒烟与 PMX 一样采用受控白色背景和无光照条件，保留原有对比度、覆盖率和颜色数量门槛；光照与混合的正确性由解析回归单独验证。
 

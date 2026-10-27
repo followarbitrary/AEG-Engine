@@ -69,6 +69,11 @@ void floatingSceneAndDisplayOrder() {
     const auto push = tonePush(commands);
     require(push.mapper == 1 && push.ev == 0 && push.padding == std::array<float, 2>{},
             "Default ACES push is incorrect");
+    renderer.setToneMapping({render::ToneMapper::Agx, 1});
+    tests::FakeCommands agx;
+    renderer.recordFrame(agx, {});
+    require(tonePush(agx).mapper == 2 && tonePush(agx).ev == 1,
+            "AgX mapper must be accepted and encoded with the stable mapper value");
     renderer.setAntialiasing({4, true, false});
     tests::FakeCommands msaa;
     renderer.recordFrame(msaa, {});
@@ -110,6 +115,14 @@ void exposurePreservesHdrHistory() {
     renderer.frameSubmitted();
     require(renderer.temporalFrameCount() == 3,
             "Postprocess-only setting changes reset or advanced history incorrectly");
+    const auto agxOutput = renderer.outputTexture();
+    device.failTexture = true;
+    device.failBindingSet = true;
+    renderer.setToneMapping({render::ToneMapper::Agx, 2});
+    require(renderer.temporalFrameCount() == 3 && renderer.outputTexture() == agxOutput,
+            "AgX mapper changes must preserve history and avoid allocating replacement resources");
+    device.failTexture = false;
+    device.failBindingSet = false;
     const auto original = renderer.toneMapping();
     for (float invalid :
          {-13.0f, 13.0f, std::numeric_limits<float>::infinity(), std::numeric_limits<float>::quiet_NaN()})

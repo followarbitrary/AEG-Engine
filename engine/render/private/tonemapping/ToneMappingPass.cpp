@@ -25,7 +25,8 @@ void Renderer::Impl::createToneMappingPass() {
 }
 
 void Renderer::Impl::setToneMapping(const ToneMappingSettings& requested) {
-    if ((requested.mapper != ToneMapper::Linear && requested.mapper != ToneMapper::Aces) ||
+    if ((requested.mapper != ToneMapper::Linear && requested.mapper != ToneMapper::Aces &&
+         requested.mapper != ToneMapper::Agx) ||
         !std::isfinite(requested.exposureEV) || requested.exposureEV < -12 || requested.exposureEV > 12)
         throw std::invalid_argument("Tone mapping requires a known mapper and finite exposure in [-12,+12] EV");
     if (requested == toneMappingSettings) return;

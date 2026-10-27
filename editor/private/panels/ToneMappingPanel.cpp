@@ -6,9 +6,9 @@ namespace aeg::editor {
 void drawToneMappingSection(EditorState& state, render::Renderer& renderer) {
     if (!ImGui::CollapsingHeader("色调映射###Tone mapping", ImGuiTreeNodeFlags_DefaultOpen)) return;
     auto candidate = renderer.toneMapping();
-    constexpr const char* names[]{"线性（对照）", "ACES fitted"};
+    constexpr const char* names[]{"线性（对照）", "ACES fitted", "AgX"};
     int mapper = static_cast<int>(candidate.mapper);
-    bool changed = ImGui::Combo("映射###Tone mapper", &mapper, names, 2);
+    bool changed = ImGui::Combo("映射###Tone mapper", &mapper, names, 3);
     if (changed) candidate.mapper = static_cast<render::ToneMapper>(mapper);
     changed |= ImGui::SliderFloat("曝光###Exposure EV", &candidate.exposureEV, -12, 12, "%.2f EV",
                                   ImGuiSliderFlags_AlwaysClamp);
