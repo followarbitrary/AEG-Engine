@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <EditorBackend.hpp>
+#include <ToneMappingSettings.hpp>
 
 namespace aeg::editor {
 struct EditorOptions {
@@ -15,6 +16,7 @@ struct EditorOptions {
     bool taa{false};
     bool validation{true};
     bool hidden{false};
+    render::ToneMappingSettings toneMapping;
 };
 int runEditor(const EditorOptions& options, const EditorBackendFactory& factory);
 }

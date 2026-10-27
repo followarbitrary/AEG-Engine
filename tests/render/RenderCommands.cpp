@@ -88,14 +88,14 @@ SceneAttachments sceneAttachments(const tests::FakeCommands& commands, tests::Fa
     require(scene.framebuffer.attachments.size() == (temporal || samples > 1 ? 3u : 2u),
             "Scene framebuffer attachment count changed");
     SceneAttachments result;
-    result.color = attachment(scene, 0, rhi::Format::Rgba8Unorm, samples, rhi::TextureUsage::ColorAttachment);
+    result.color = attachment(scene, 0, rhi::Format::Rgba16Float, samples, rhi::TextureUsage::ColorAttachment);
     result.depth = attachment(scene, 1, device.caps.depthFormat, samples, rhi::TextureUsage::DepthAttachment);
     require(result.color != result.depth, "Scene color and depth alias");
     if (temporal)
         result.motion = attachment(scene, 2, rhi::Format::Rgba32Float, 1,
                                    rhi::TextureUsage::ColorAttachment | rhi::TextureUsage::Sampled);
     if (samples > 1)
-        result.resolve = attachment(scene, 2, rhi::Format::Rgba8Unorm, 1,
+        result.resolve = attachment(scene, 2, rhi::Format::Rgba16Float, 1,
                                     rhi::TextureUsage::ColorAttachment | rhi::TextureUsage::Sampled);
     if (temporal || samples > 1)
         require(scene.framebuffer.attachments[2] != result.color && scene.framebuffer.attachments[2] != result.depth,
@@ -126,6 +126,13 @@ rhi::Texture* fxaaOutput(const tests::FakeCommands& commands, std::size_t index,
                              rhi::TextureUsage::ColorAttachment | rhi::TextureUsage::Sampled);
     require(output != source, "FXAA reads its own output");
     return output;
+}
+rhi::Texture* toneOutput(const tests::FakeCommands& commands, std::size_t index, rhi::Texture* source) {
+    require(commands.passes.at(index) == "tone", "Mandatory tone pass is missing");
+    const auto& tone = pass(commands, index);
+    require(tone.draws.size() == 1 && tone.draws.front().constants.size() == 16,
+            "Tone mapping must record a complete 16-byte display push");
+    return fxaaOutput(commands, index, source);
 }
 struct TemporalAttachments {
     rhi::Texture* previousColor{};
@@ -160,7 +167,8 @@ TemporalAttachments temporalAttachments(const tests::FakeCommands& commands, tes
     require(result.previousColor != scene.color && result.previousColor != scene.motion &&
                 result.previousDepth != scene.color && result.previousDepth != scene.motion,
             "TAA history aliases scene inputs");
-    require(fxaaOutput(commands, 2, result.currentColor) == finalOutput, "Final output does not use FXAA framebuffer");
+    require(fxaaOutput(commands, 3, toneOutput(commands, 2, result.currentColor)) == finalOutput,
+            "Final output does not use FXAA after HDR tone mapping");
     return result;
 }
 void transparencyContracts() {
@@ -491,7 +499,7 @@ int main(int argc, char** argv) {
         render::RenderSettings settings;
         tests::FakeCommands first;
         renderer.recordFrame(first, settings);
-        require(first.passes == std::vector<std::string>{"scene", "taa", "fxaa"}, "RHI pass ordering changed");
+        require(first.passes == std::vector<std::string>{"scene", "taa", "tone", "fxaa"}, "RHI pass ordering changed");
         require(first.indexedDraws == 1, "Model draw bypassed command interface");
         const auto initial = temporalAttachments(first, device, renderer.outputTexture().get());
         require(pass(first, 0).framebuffer.extent == rhi::Extent2D{17, 13}, "Scene framebuffer extent changed");
@@ -539,26 +547,28 @@ int main(int argc, char** argv) {
         renderer.setAntialiasing({4, true, false});
         tests::FakeCommands msaa;
         renderer.recordFrame(msaa, settings);
-        require(msaa.passes == std::vector<std::string>{"scene", "fxaa"}, "MSAA/FXAA pass ordering changed");
+        require(msaa.passes == std::vector<std::string>{"scene", "tone", "fxaa"},
+                "MSAA/tone/FXAA pass ordering changed");
         const auto multisampled = sceneAttachments(msaa, device, false, 4);
-        require(fxaaOutput(msaa, 1, multisampled.resolve) == renderer.outputTexture().get(),
+        require(fxaaOutput(msaa, 2, toneOutput(msaa, 1, multisampled.resolve)) == renderer.outputTexture().get(),
                 "MSAA final output does not use FXAA framebuffer");
         renderer.frameSubmitted();
         renderer.setAntialiasing({1, true, false});
         tests::FakeCommands singleFxaa;
         renderer.recordFrame(singleFxaa, settings);
-        require(singleFxaa.passes == std::vector<std::string>{"scene", "fxaa"},
+        require(singleFxaa.passes == std::vector<std::string>{"scene", "tone", "fxaa"},
                 "Single-sample FXAA pass ordering changed");
         const auto single = sceneAttachments(singleFxaa, device, false);
-        require(fxaaOutput(singleFxaa, 1, single.color) == renderer.outputTexture().get(),
+        require(fxaaOutput(singleFxaa, 2, toneOutput(singleFxaa, 1, single.color)) == renderer.outputTexture().get(),
                 "Single-sample final output does not use FXAA framebuffer");
         renderer.frameSubmitted();
         renderer.setAntialiasing({1, false, false});
         tests::FakeCommands scene;
         renderer.recordFrame(scene, settings);
-        require(scene.passes == std::vector<std::string>{"scene"}, "Disabled AA emitted postprocess");
-        require(sceneAttachments(scene, device, false).color == renderer.outputTexture().get(),
-                "Plain single-sample output is not the scene color attachment");
+        require(scene.passes == std::vector<std::string>{"scene", "tone"},
+                "Disabled AA omitted mandatory tone mapping");
+        require(toneOutput(scene, 1, sceneAttachments(scene, device, false).color) == renderer.outputTexture().get(),
+                "Plain single-sample output is not the display-linear tone target");
         renderer.frameSubmitted();
         require(renderer.temporalFrameCount() == 0, "Non-temporal frame advanced history");
         // Pin the shader ABI independently from the private uniform declaration.
@@ -614,12 +624,15 @@ int main(int argc, char** argv) {
             }
         renderer.setAntialiasing({1, true, true});
         const auto temporalValid = [](const tests::FakeCommands& commands) {
-            for (const auto& bytes : commands.constants)
-                if (bytes.size() == 16) {
-                    std::uint32_t value{};
-                    std::memcpy(&value, bytes.data() + 12, sizeof(value));
-                    return value;
-                }
+            const auto at = std::ranges::find(commands.passes, "taa");
+            if (at != commands.passes.end()) {
+                const auto& draws = commands.recordedPasses.at(std::size_t(at - commands.passes.begin())).draws;
+                require(draws.size() == 1 && draws.front().constants.size() == 16,
+                        "Temporal push constants have the wrong size");
+                std::uint32_t value{};
+                std::memcpy(&value, draws.front().constants.data() + 12, sizeof(value));
+                return value;
+            }
             throw std::runtime_error("Temporal push constants missing");
         };
         tests::FakeCommands historyFirst;

@@ -23,7 +23,7 @@ namespace aeg::render {
 using assets::MaterialData;
 using assets::ModelData;
 using assets::Vertex;
-inline constexpr auto sceneFormat = rhi::Format::Rgba8Unorm;
+inline constexpr auto displayFormat = rhi::Format::Rgba8Unorm;
 inline constexpr auto motionFormat = rhi::Format::Rgba32Float;
 inline constexpr auto historyFormat = rhi::Format::Rgba16Float;
 inline constexpr auto historyDepthFormat = rhi::Format::R32Float;
@@ -38,6 +38,8 @@ struct EnvironmentResources {
 struct Renderer::Impl {
     rhi::Device& device;
     AntialiasingSettings aa;
+    ToneMappingSettings toneMappingSettings;
+    rhi::Format sceneFormat{rhi::Format::Undefined};
     std::uint32_t sampleMask{1}, maximumViewport{1}, maximumTemporalViewport{1};
     bool temporalSupported{};
     ShadowSettings shadowSettings;
@@ -56,9 +58,9 @@ struct Renderer::Impl {
     std::unique_ptr<rhi::BindingSet> sceneDescriptor;
     std::unique_ptr<rhi::Texture> fallbackEnvironmentCube, fallbackEnvironmentLut;
     std::unique_ptr<rhi::BindingSet> fallbackEnvironmentDescriptor;
-    std::unique_ptr<rhi::PipelineLayout> pipelineLayout, shadowPipelineLayout, postLayout, temporalLayout;
-    std::unique_ptr<rhi::RenderPass> postPass, temporalPass;
-    std::unique_ptr<rhi::GraphicsPipeline> postPipeline, temporalPipeline;
+    std::unique_ptr<rhi::PipelineLayout> pipelineLayout, shadowPipelineLayout, postLayout, temporalLayout, toneLayout;
+    std::unique_ptr<rhi::RenderPass> postPass, temporalPass, tonePass;
+    std::unique_ptr<rhi::GraphicsPipeline> postPipeline, temporalPipeline, tonePipeline;
     std::array<std::unique_ptr<ScenePipeline>, 4> scenePipelines;
     std::unique_ptr<ScenePipeline> temporalScene;
     std::unique_ptr<GpuModel> model;
@@ -80,6 +82,8 @@ struct Renderer::Impl {
     void drawShadow(rhi::CommandList& commands, const SceneUniform& uniform);
     void createScenePass(ScenePipeline& target);
     void createPostPass();
+    void createToneMappingPass();
+    void setToneMapping(const ToneMappingSettings& settings);
     std::unique_ptr<rhi::GraphicsPipeline>
     createPipeline(rhi::RenderPass& pass, rhi::PipelineLayout& layout, std::uint32_t samples, bool scene,
                    detail::ShaderId vertexId, detail::ShaderId fragmentId, std::uint32_t colorAttachmentCount = 1,
@@ -100,7 +104,7 @@ struct Renderer::Impl {
     SceneUniform sceneUniform(const RenderSettings& settings);
     void drawScene(rhi::CommandList& commands, const RenderSettings& settings, const SceneUniform& uniform);
     void drawTemporal(rhi::CommandList& commands);
-    void pointFinalDescriptorAtTemporalOutput();
+    void drawToneMapping(rhi::CommandList& commands);
     void drawFxaa(rhi::CommandList& commands);
     void recordFrame(rhi::CommandList& commands, const RenderSettings& settings);
     void frameSubmitted();

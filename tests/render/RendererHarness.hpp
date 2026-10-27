@@ -18,7 +18,11 @@ public:
                   backend.gui = rhi::vulkan::createVulkanGuiRenderer(*backend.device, *backend.swapchain);
                   return backend;
               },
-              validation) {}
+              validation) {
+        // Existing analytical material/light tests explicitly exercise linear
+        // output. The dedicated HDR suite tests the renderer's ACES default.
+        renderer().setToneMapping({render::ToneMapper::Linear, 0});
+    }
     void uploadModel(const assets::ModelData& model) { renderer().uploadModel(model); }
     void setAntialiasing(const render::AntialiasingSettings& settings) { renderer().setAntialiasing(settings); }
     render::AntialiasingSettings antialiasing() { return renderer().antialiasing(); }

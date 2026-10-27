@@ -1,5 +1,6 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
+#include "../common/hdr.glsl"
 layout(location = 0) in vec3 normal;
 layout(location = 1) in vec2 uv;
 layout(location = 4) in vec4 tangentFrame;
@@ -61,7 +62,7 @@ void main() {
                 visibility;
         }
     }
-    outColor = vec4(color, opacity);
+    outColor = vec4(finiteHdrRadiance(color), opacity);
 #ifdef AEG_TAA
     if (material.alphaMode == 2) {
         // Blended surfaces do not own a single opaque depth or motion vector.

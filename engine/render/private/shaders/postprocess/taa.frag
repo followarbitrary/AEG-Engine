@@ -1,4 +1,7 @@
 #version 450
+#extension GL_GOOGLE_include_directive : require
+
+#include "../common/hdr.glsl"
 
 layout(location = 0) in vec2 uv;
 layout(location = 0) out vec4 outColor;
@@ -17,7 +20,7 @@ temporal;
 void main() {
     ivec2 resolution = textureSize(currentColor, 0);
     ivec2 pixel = clamp(ivec2(gl_FragCoord.xy), ivec2(0), resolution - 1);
-    vec3 current = texelFetch(currentColor, pixel, 0).rgb;
+    vec3 current = finiteHdrRadiance(texelFetch(currentColor, pixel, 0).rgb);
     vec3 minimumColor = current;
     vec3 maximumColor = current;
     vec4 selectedMotion = texelFetch(motionDepth, pixel, 0);
@@ -31,7 +34,7 @@ void main() {
     for (int y = -1; y <= 1; ++y) {
         for (int x = -1; x <= 1; ++x) {
             ivec2 neighbor = clamp(pixel + ivec2(x, y), ivec2(0), resolution - 1);
-            vec3 color = texelFetch(currentColor, neighbor, 0).rgb;
+            vec3 color = finiteHdrRadiance(texelFetch(currentColor, neighbor, 0).rgb);
             minimumColor = min(minimumColor, color);
             maximumColor = max(maximumColor, color);
             vec4 motion = texelFetch(motionDepth, neighbor, 0);
@@ -63,7 +66,7 @@ void main() {
     if (storedDepth < 0.0 || abs(storedDepth - expectedDepth) > depthTolerance) return;
 
     // Only historical RGB is filtered. Current samples stay raw for temporal accumulation.
-    vec3 history = textureLod(historyColor, historyUV, 0.0).rgb;
+    vec3 history = finiteHdrRadiance(textureLod(historyColor, historyUV, 0.0).rgb);
     history = clamp(history, minimumColor, maximumColor);
-    outColor = vec4(mix(current, history, clamp(temporal.historyWeight, 0.0, 0.9)), 1.0);
+    outColor = vec4(finiteHdrRadiance(mix(current, history, clamp(temporal.historyWeight, 0.0, 0.9))), 1.0);
 }

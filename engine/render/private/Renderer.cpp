@@ -14,8 +14,23 @@ Renderer::Impl::~Impl() noexcept {
 
 void Renderer::Impl::initialize() {
     const auto& caps = device.capabilities();
+    for (const auto format : {rhi::Format::Rgba16Float, rhi::Format::Rgba32Float}) {
+        const auto attachment = device.textureSupport(format, rhi::TextureUsage::ColorAttachment);
+        const auto sampled = device.textureSupport(format, outputUsage);
+        if (attachment.supported && sampled.supported && attachment.colorBlending && sampled.colorBlending &&
+            sampled.linearFiltering && (attachment.sampleMask & sampled.sampleMask & 1u) &&
+            attachment.maximumExtent.width && attachment.maximumExtent.height && sampled.maximumExtent.width &&
+            sampled.maximumExtent.height) {
+            sceneFormat = format;
+            break;
+        }
+    }
+    if (sceneFormat == rhi::Format::Undefined)
+        throw std::runtime_error("HDR scene rendering requires sampled, filterable RGBA16F or RGBA32F attachments "
+                                 "with alpha blending and single sampling");
     const auto color = device.textureSupport(sceneFormat, rhi::TextureUsage::ColorAttachment);
     const auto single = device.textureSupport(sceneFormat, outputUsage);
+    const auto display = device.textureSupport(displayFormat, outputUsage);
     const auto depth = device.textureSupport(caps.depthFormat, rhi::TextureUsage::DepthAttachment);
     sampleMask = color.sampleMask & depth.sampleMask & 15u;
     if (!rhi::isDepthFormat(caps.depthFormat) || !color.supported || !single.supported || !depth.supported ||
@@ -24,9 +39,12 @@ void Renderer::Impl::initialize() {
     if (!single.linearFiltering) throw std::runtime_error("Scene format does not support linear sampling");
     if (!color.colorBlending || !single.colorBlending)
         throw std::runtime_error("Scene format does not support material alpha blending");
+    if (!display.supported || !(display.sampleMask & 1u) || !display.linearFiltering)
+        throw std::runtime_error("Display output requires sampled, linearly filterable RGBA8 single sampling");
     maximumViewport = std::min({caps.maximumImageDimension, caps.maximumFramebufferDimension, color.maximumExtent.width,
                                 color.maximumExtent.height, single.maximumExtent.width, single.maximumExtent.height,
-                                depth.maximumExtent.width, depth.maximumExtent.height, 8192u});
+                                display.maximumExtent.width, display.maximumExtent.height, depth.maximumExtent.width,
+                                depth.maximumExtent.height, 8192u});
     if (!maximumViewport) throw std::runtime_error("Invalid viewport attachment limits");
     maximumTemporalViewport = maximumViewport;
     temporalSupported = caps.maximumColorAttachments >= 2 && caps.independentBlend;
@@ -46,6 +64,7 @@ void Renderer::Impl::initialize() {
     createDescriptors();
     scenePipeline(1);
     createPostPass();
+    createToneMappingPass();
     postPipeline = createPipeline(*postPass, *postLayout, 1, false, detail::ShaderId::FullscreenVertex,
                                   detail::ShaderId::FxaaFragment);
     if (temporalSupported)
@@ -183,7 +202,7 @@ void Renderer::Impl::invalidateOutput() noexcept {
 std::shared_ptr<rhi::Texture> Renderer::Impl::outputTexture() const {
     if (pendingFrame) return pendingOutput;
     if (submittedOutput) return submittedOutput;
-    return viewport->filtered ? viewport->filtered : viewport->color;
+    return viewport->filtered ? viewport->filtered : viewport->toneMapped;
 }
 
 void Renderer::Impl::recordFrame(rhi::CommandList& commands, const RenderSettings& settings) {
@@ -197,12 +216,10 @@ void Renderer::Impl::recordFrame(rhi::CommandList& commands, const RenderSetting
     std::memcpy(uniformBuffer->mapped().data(), &uniform, sizeof(uniform));
     drawShadow(commands, uniform);
     drawScene(commands, settings, uniform);
-    pointFinalDescriptorAtTemporalOutput();
     drawTemporal(commands);
+    drawToneMapping(commands);
     drawFxaa(commands);
-    pendingOutput = aa.fxaa  ? viewport->filtered
-                    : aa.taa ? viewport->historyColor[1u - recordingHistory.readIndex]
-                             : viewport->color;
+    pendingOutput = aa.fxaa ? viewport->filtered : viewport->toneMapped;
     pendingSettings = settings;
     pendingFrame = true;
 }
@@ -232,6 +249,8 @@ void Renderer::setEnvironment(const EnvironmentSettings& settings) { impl_->setE
 EnvironmentSettings Renderer::environment() const { return impl_->environmentSettings; }
 bool Renderer::supportsEnvironment() const { return impl_->environmentSupported; }
 bool Renderer::hasEnvironment() const { return bool(impl_->environmentResources); }
+void Renderer::setToneMapping(const ToneMappingSettings& settings) { impl_->setToneMapping(settings); }
+ToneMappingSettings Renderer::toneMapping() const { return impl_->toneMappingSettings; }
 void Renderer::setAntialiasing(const AntialiasingSettings& settings) { impl_->setAntialiasing(settings); }
 AntialiasingSettings Renderer::antialiasing() const { return impl_->aa; }
 std::uint32_t Renderer::supportedMsaaSamples() const { return impl_->sampleMask; }

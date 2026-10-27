@@ -3,6 +3,7 @@
 #include <Utf8Path.hpp>
 
 #include <charconv>
+#include <cmath>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
@@ -93,7 +94,8 @@ std::vector<std::string> arguments([[maybe_unused]] int argc, [[maybe_unused]] c
 void printHelp() {
     std::cout << "AEG Engine - Vulkan 模型查看器\n"
                  "用法：aeg_editor [--model PATH] [--font PATH] [--frames N] [--capture PATH] "
-                 "[--msaa 1|2|4|8] [--fxaa] [--taa] [--no-validation] [--hidden]\n"
+                 "[--msaa 1|2|4|8] [--fxaa] [--taa] [--tone-mapper aces|linear] [--exposure EV] [--no-validation] "
+                 "[--hidden]\n"
                  "  --model PATH       打开 OBJ、glTF、GLB 或 PMX 模型\n"
                  "  --font PATH        指定支持中文的 TTF、OTF 或 TTC 字体\n"
                  "  --frames N         渲染 N 帧后退出（正整数）\n"
@@ -101,6 +103,8 @@ void printHelp() {
                  "  --msaa 1|2|4|8     设置场景多重采样，1 为关闭（默认）；不支持时向下降级\n"
                  "  --fxaa             启用场景 FXAA 后处理，可与 MSAA 或 TAA 同时使用\n"
                  "  --taa              启用时域抗锯齿，替代 MSAA（有效采样数为 1）\n"
+                 "  --tone-mapper TYPE  aces（默认）或 linear 对照模式\n"
+                 "  --exposure EV      设置曝光补偿，范围 -12 到 +12，默认 0\n"
                  "  --no-validation    关闭 Vulkan 验证层\n"
                  "  --hidden           使用隐藏窗口渲染，不抢占焦点\n"
                  "  --help             显示此帮助\n"
@@ -137,13 +141,31 @@ int runCommandLine(int argc, char** argv, const editor::EditorBackendFactory& fa
                 options.taa = true;
                 continue;
             }
-            if (arg != "--model" && arg != "--font" && arg != "--frames" && arg != "--capture" && arg != "--msaa")
+            if (arg != "--model" && arg != "--font" && arg != "--frames" && arg != "--capture" && arg != "--msaa" &&
+                arg != "--tone-mapper" && arg != "--exposure")
                 throw std::runtime_error("未知参数：" + arg + "。使用 --help 查看帮助。");
             if (i + 1 == args.size() || args[i + 1].starts_with("--"))
                 throw std::runtime_error("参数 " + arg + " 缺少值。");
             const auto& value = args[++i];
             if (value.empty()) throw std::runtime_error("参数 " + arg + " 的值不能为空。");
-            if (arg == "--frames") {
+            if (arg == "--tone-mapper") {
+                if (value != "aces" && value != "linear")
+                    throw std::runtime_error("--tone-mapper 只接受 aces 或 linear。");
+                options.toneMapping.mapper = value == "aces" ? render::ToneMapper::Aces : render::ToneMapper::Linear;
+            } else if (arg == "--exposure") {
+                float exposure = 0;
+                auto* begin = value.data();
+                if (value.front() == '+') {
+                    ++begin;
+                    if (begin == value.data() + value.size() || *begin == '+' || *begin == '-')
+                        throw std::runtime_error("--exposure 需要一个有效的曝光数值。");
+                }
+                const auto [end, error] = std::from_chars(begin, value.data() + value.size(), exposure);
+                if (error != std::errc{} || end != value.data() + value.size() || !std::isfinite(exposure) ||
+                    exposure < -12 || exposure > 12)
+                    throw std::runtime_error("--exposure 需要 -12 到 +12 之间的有限数值。");
+                options.toneMapping.exposureEV = exposure;
+            } else if (arg == "--frames") {
                 std::uint32_t count = 0;
                 const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), count);
                 if (error != std::errc{} || end != value.data() + value.size() || count == 0)

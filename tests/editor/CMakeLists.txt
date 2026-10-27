@@ -27,3 +27,6 @@ target_link_libraries(aeg_orientation_gizmo_tests PRIVATE aeg::editor aeg::camer
 aeg_project_options(aeg_orientation_gizmo_tests)
 add_test(NAME aeg_orientation_gizmo COMMAND aeg_orientation_gizmo_tests)
 set_tests_properties(aeg_orientation_gizmo PROPERTIES LABELS cpu TIMEOUT 60)
+add_test(NAME aeg_tone_mapping_cli COMMAND "${CMAKE_COMMAND}"
+    "-DEDITOR=$<TARGET_FILE:aeg_editor>" -P "${PROJECT_SOURCE_DIR}/cmake/ToneMappingCli.cmake")
+set_tests_properties(aeg_tone_mapping_cli PROPERTIES LABELS cpu TIMEOUT 60)

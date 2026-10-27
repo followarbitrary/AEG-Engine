@@ -99,7 +99,7 @@ void resourcesAndPolicy() {
     auto sceneSettings = settings();
     tests::FakeCommands off;
     renderer.recordFrame(off, sceneSettings);
-    require(off.passes == std::vector<std::string>{"scene"}, "Disabled shadows emitted a depth pass");
+    require(off.passes == std::vector<std::string>{"scene", "tone"}, "Disabled shadows emitted a depth pass");
     const auto& fallback = binding(bound(named(off, "scene"), 2), 0);
     require(bound(named(off, "scene"), 2).writes.size() == 4, "Fallback must initialize all four shadow samplers");
     for (std::uint32_t i = 1; i < render::kMaxShadowCascades; ++i)
@@ -122,8 +122,8 @@ void resourcesAndPolicy() {
     renderer.setShadows(shadow);
     tests::FakeCommands on;
     renderer.recordFrame(on, sceneSettings);
-    require(on.passes == std::vector<std::string>{"shadow", "scene", "taa", "fxaa"},
-            "Shadow/scene/TAA/FXAA ordering changed");
+    require(on.passes == std::vector<std::string>{"shadow", "scene", "taa", "tone", "fxaa"},
+            "Shadow/scene/TAA/tone/FXAA ordering changed");
     const auto& depth = named(on, "shadow");
     require(depth.description.colors.empty() && depth.description.depth == 0u && depth.description.resolves.empty() &&
                 depth.description.attachments.size() == 1 && depth.framebuffer.attachments.size() == 1 &&

@@ -7,10 +7,9 @@ void Renderer::Impl::captureViewport(const std::filesystem::path& path) {
     device.waitIdle();
     const auto readback = device.readback(*submittedOutput);
     const auto viewportWidth = viewport->width, viewportHeight = viewport->height;
-    const bool halfFloat = readback.format == rhi::Format::Rgba16Float;
-    if (readback.extent != viewport->extent() || (readback.format != sceneFormat && !halfFloat))
+    if (readback.extent != viewport->extent() || readback.format != displayFormat)
         throw std::runtime_error("Unexpected viewport readback format or extent");
-    const auto pixelBytes = halfFloat ? 8u : 4u;
+    constexpr auto pixelBytes = 4u;
     const auto bytes = static_cast<std::size_t>(viewportWidth) * viewportHeight * pixelBytes;
     if (readback.pixels.size() != bytes) throw std::runtime_error("Incomplete viewport readback");
     if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path());
@@ -21,16 +20,8 @@ void Renderer::Impl::captureViewport(const std::filesystem::path& path) {
     std::vector<unsigned char> rgb(static_cast<std::size_t>(viewportWidth) * viewportHeight * 3);
     for (std::size_t i = 0, j = 0; i < bytes; i += pixelBytes, j += 3)
         for (std::size_t c = 0; c < 3; ++c) {
-            float linear = pixels[i + c] / 255.0f;
-            if (halfFloat) {
-                const auto half = std::uint16_t(pixels[i + c * 2]) | (std::uint16_t(pixels[i + c * 2 + 1]) << 8);
-                const auto exponent = (half >> 10) & 31, fraction = half & 1023;
-                linear = exponent == 31 ? (fraction ? 0.0f : 1.0f)
-                                        : std::ldexp(exponent ? 1.0f + float(fraction) / 1024 : float(fraction) / 1024,
-                                                     exponent ? int(exponent) - 15 : -14);
-                if (half & 0x8000) linear = -linear;
-            }
-            linear = std::clamp(linear, 0.0f, 1.0f);
+            // Display-linear RGBA8 quantization precedes the single sRGB encoding.
+            const float linear = pixels[i + c] / 255.0f;
             const float srgb = linear <= 0.0031308f ? linear * 12.92f : 1.055f * std::pow(linear, 1.0f / 2.4f) - 0.055f;
             rgb[j + c] = static_cast<unsigned char>(std::clamp(srgb * 255.0f, 0.0f, 255.0f) + 0.5f);
         }

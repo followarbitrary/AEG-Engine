@@ -10,6 +10,7 @@ add_library(aeg_editor_module STATIC
     private/panels/ScenePanel.cpp
     private/panels/ImportPanel.cpp
     private/panels/InspectorPanel.cpp
+    private/panels/ToneMappingPanel.cpp
     private/panels/MaterialPanel.cpp
     private/panels/LightPanel.cpp
     private/panels/EnvironmentPanel.cpp

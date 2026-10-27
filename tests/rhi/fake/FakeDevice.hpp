@@ -156,6 +156,12 @@ public:
     std::unique_ptr<FakeCommands> immediateCommands;
     void enableCompute() { caps.compute = true; }
     bool colorBlending{true};
+    struct TextureSupportOverride {
+        rhi::Format format;
+        rhi::TextureUsage usage;
+        rhi::TextureSupport support;
+    };
+    std::vector<TextureSupportOverride> textureSupportOverrides;
     // Independent sampled-depth capabilities: D32, D16, D24. Ordinary scene
     // depth support keeps the historical fake-device behavior.
     std::array<bool, 3> depthSampledSupport{true, true, true};
@@ -169,6 +175,8 @@ public:
     rhi::TextureSupport
     textureSupport(rhi::Format format, rhi::TextureUsage usage,
                    rhi::TextureDimension dimension = rhi::TextureDimension::Texture2D) const override {
+        for (const auto& entry : textureSupportOverrides)
+            if (entry.format == format && entry.usage == usage) return entry.support;
         if (dimension != rhi::TextureDimension::Texture2D && dimension != rhi::TextureDimension::Cube)
             throw std::invalid_argument("Unknown fake texture dimension");
         if (dimension == rhi::TextureDimension::Cube && !cubeSupport) return {};
@@ -333,6 +341,10 @@ public:
         activePass_->pipeline = dynamic_cast<FakePipeline&>(pipeline).desc;
         if (activePass_->pipeline.pass != activePass_->pass)
             throw std::runtime_error("Pipeline belongs to the wrong render pass");
+        if (!activePass_->description.depth && activePass_->description.colors.size() == 1) {
+            const auto& layout = dynamic_cast<FakePipelineLayout&>(*activePass_->pipeline.layout).desc;
+            passes.back() = layout.pushConstantBytes == 16 ? "tone" : "fxaa";
+        }
     }
     void bindComputePipeline(rhi::ComputePipeline& pipeline) override {
         if (activePass_ || (caps_ && !caps_->compute)) throw std::runtime_error("Invalid fake compute pipeline bind");
@@ -376,7 +388,10 @@ public:
         constants.emplace_back(bytes.begin(), bytes.end());
         currentConstants_.assign(bytes.begin(), bytes.end());
     }
-    void draw(std::uint32_t) override {}
+    void draw(std::uint32_t) override {
+        if (!activePass_) throw std::runtime_error("Fake draw outside render pass");
+        activePass_->draws.push_back({activePass_->pipeline, currentConstants_, nullptr});
+    }
     void drawIndexed(std::uint32_t) override {
         if (!activePass_) throw std::runtime_error("Fake draw outside render pass");
         ++indexedDraws;

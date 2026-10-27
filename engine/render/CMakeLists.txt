@@ -5,7 +5,9 @@ add_library(aeg_render STATIC
     public/Light.hpp
     public/ShadowSettings.hpp
     public/EnvironmentSettings.hpp
+    public/ToneMappingSettings.hpp
     private/Renderer.cpp
+    private/tonemapping/ToneMappingPass.cpp
     private/environment/EnvironmentBaker.cpp
     private/scene/GpuModel.cpp
     private/scene/ScenePass.cpp

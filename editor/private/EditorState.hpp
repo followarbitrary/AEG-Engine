@@ -45,6 +45,7 @@ struct EditorState {
     std::uint32_t supportedMsaa{1};
     bool supportedTaa{false};
     std::string antialiasingNotice;
+    std::string toneMappingError;
     assets::ModelData model;
     camera::OrbitCamera camera;
     Transform transform;
@@ -89,6 +90,7 @@ void resetMaterialEditor(EditorState& state);
 void drawMaterialSection(EditorState& state, render::Renderer& renderer);
 void drawLightingSection(EditorState& state, render::Renderer& renderer);
 void drawEnvironmentSection(EditorState& state, render::Renderer& renderer);
+void drawToneMappingSection(EditorState& state, render::Renderer& renderer);
 void drawInspectorPanel(EditorState& state, render::Renderer& renderer);
 void drawViewportPanel(EditorState& state, render::Renderer& renderer, EditorGraphics& graphics);
 }

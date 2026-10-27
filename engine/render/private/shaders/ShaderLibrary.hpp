@@ -16,7 +16,8 @@ enum class ShaderId {
     EnvironmentCompute,
     IrradianceCompute,
     PrefilterCompute,
-    BrdfCompute
+    BrdfCompute,
+    ToneMappingFragment
 };
 
 [[nodiscard]] std::span<const std::byte> embeddedShader(ShaderId shader);

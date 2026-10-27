@@ -1,14 +1,16 @@
 function(aeg_compile_vulkan_shaders target_name source_root output_variable)
     set(embed_script "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/EmbedSpirv.cmake")
     set(shader_outputs)
+    set(hdr_include "${source_root}/common/hdr.glsl")
     set(scene_includes
+        "${hdr_include}"
         "${source_root}/scene/normal_mapping.glsl"
         "${source_root}/scene/ibl_lighting.glsl"
         "${source_root}/scene/pbr_lighting.glsl"
         "${source_root}/scene/punctual_lighting.glsl"
         "${source_root}/scene/scene_uniform.glsl"
         "${source_root}/scene/shadow_sampling.glsl")
-    foreach(shader model.vert model.frag shadow.vert shadow.frag fullscreen.vert fxaa.frag taa.frag
+    foreach(shader model.vert model.frag shadow.vert shadow.frag fullscreen.vert fxaa.frag taa.frag tonemap.frag
                    environment.comp irradiance.comp prefilter.comp brdf.comp)
         if(shader MATCHES "\\.comp$")
             set(source "${source_root}/ibl/${shader}")
@@ -18,7 +20,7 @@ function(aeg_compile_vulkan_shaders target_name source_root output_variable)
             set(includes ${scene_includes})
         else()
             set(source "${source_root}/postprocess/${shader}")
-            set(includes ${scene_includes})
+            set(includes "${hdr_include}")
         endif()
         set(output "${CMAKE_BINARY_DIR}/compiled-shaders/${shader}.spv")
         add_custom_command(OUTPUT "${output}"

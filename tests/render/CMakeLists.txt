@@ -156,3 +156,8 @@ target_include_directories(aeg_compute_contracts_test PRIVATE "${PROJECT_SOURCE_
 aeg_project_options(aeg_compute_contracts_test)
 add_test(NAME aeg_compute_contracts COMMAND aeg_compute_contracts_test)
 set_tests_properties(aeg_compute_contracts PROPERTIES LABELS gpu TIMEOUT 120)
+add_executable(aeg_hdr_tone_mapping_test HdrToneMapping.cpp)
+target_link_libraries(aeg_hdr_tone_mapping_test PRIVATE aeg::render aeg::rhi_vulkan glfw)
+aeg_project_options(aeg_hdr_tone_mapping_test)
+add_test(NAME aeg_hdr_tone_mapping COMMAND aeg_hdr_tone_mapping_test "${CMAKE_BINARY_DIR}/hdr-tone-mapping")
+set_tests_properties(aeg_hdr_tone_mapping PROPERTIES LABELS gpu TIMEOUT 180)

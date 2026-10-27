@@ -136,9 +136,12 @@ void checkRecorded(tests::FakeDevice& device, RecordingCommands& recorded, unsig
     expected.push_back("scene");
     if (postprocess) {
         expected.push_back("taa");
+        expected.push_back("tone");
         expected.push_back("fxaa");
+    } else {
+        expected.push_back("tone");
     }
-    require(commands.passes == expected, "Cascade passes must precede scene, TAA and FXAA");
+    require(commands.passes == expected, "Cascade passes must precede scene, TAA, tone mapping and FXAA");
     require(device.uniform->bytes.size() == 1264, "Cascade scene uniform ABI must be 1264 bytes");
     require(uploaded<math::Vec4>(device, 1184) == math::Vec4(1, 0, 1.0f / resolution, float(count)),
             "Cascade enable, light index, inverse resolution or active-count ABI is wrong");
@@ -268,7 +271,7 @@ void invalidFitDisablesWholeFrame() {
         if (failure) sceneSettings.viewProjection.at(0, 0) = std::numeric_limits<float>::quiet_NaN();
         RecordingCommands invalid(device);
         renderer.recordFrame(invalid, sceneSettings);
-        require(invalid.commands.passes == std::vector<std::string>{"scene", "taa", "fxaa"},
+        require(invalid.commands.passes == std::vector<std::string>{"scene", "taa", "tone", "fxaa"},
                 "Invalid camera fit emitted partial or stale cascade passes");
         const auto info = uploaded<math::Vec4>(device, 1184);
         require(info.x == 0 && info.w == 0 && math::is_finite(info),

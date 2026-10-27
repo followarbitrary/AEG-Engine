@@ -4,6 +4,7 @@
 #include <RenderSettings.hpp>
 #include <ShadowSettings.hpp>
 #include <EnvironmentSettings.hpp>
+#include <ToneMappingSettings.hpp>
 #include <EnvironmentImage.hpp>
 #include <RhiDevice.hpp>
 #include <filesystem>
@@ -22,6 +23,8 @@ public:
     [[nodiscard]] EnvironmentSettings environment() const;
     [[nodiscard]] bool supportsEnvironment() const;
     [[nodiscard]] bool hasEnvironment() const;
+    void setToneMapping(const ToneMappingSettings& settings);
+    [[nodiscard]] ToneMappingSettings toneMapping() const;
     void setAntialiasing(const AntialiasingSettings& settings);
     [[nodiscard]] AntialiasingSettings antialiasing() const;
     [[nodiscard]] std::uint32_t supportedMsaaSamples() const;

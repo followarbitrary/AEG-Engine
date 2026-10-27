@@ -25,6 +25,7 @@ int runEditor(const EditorOptions& options, const EditorBackendFactory& factory)
     EditorGraphics graphics(lifetime.window, factory, options.validation);
     auto& renderer = graphics.renderer();
     renderer.setAntialiasing({options.msaaSamples, options.fxaa, options.taa});
+    renderer.setToneMapping(options.toneMapping);
     EditorState state;
     state.antialiasing = renderer.antialiasing();
     state.supportedMsaa = renderer.supportedMsaaSamples();

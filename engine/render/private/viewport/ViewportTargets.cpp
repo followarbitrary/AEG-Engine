@@ -28,10 +28,14 @@ std::unique_ptr<ViewportTargets> Renderer::Impl::createViewport(std::uint32_t wi
     if (multisampled || settings.taa)
         frame.attachments.push_back(settings.taa ? candidate->motion.get() : candidate->color.get());
     candidate->sceneFrame = device.createFramebuffer(frame);
+    candidate->toneMapped = create(displayFormat, outputUsage);
+    candidate->toneFrame = device.createFramebuffer({tonePass.get(), {candidate->toneMapped.get()}, {width, height}});
+    const std::array sceneToneWrites{rhi::BindingWrite{0, nullptr, candidate->color.get(), viewportSampler.get()}};
+    candidate->toneDescriptors[0] = device.createBindingSet(*postSetLayout, sceneToneWrites);
     if (settings.fxaa) {
-        candidate->filtered = create(sceneFormat, outputUsage);
+        candidate->filtered = create(displayFormat, outputUsage);
         candidate->postFrame = device.createFramebuffer({postPass.get(), {candidate->filtered.get()}, {width, height}});
-        const std::array writes{rhi::BindingWrite{0, nullptr, candidate->color.get(), viewportSampler.get()}};
+        const std::array writes{rhi::BindingWrite{0, nullptr, candidate->toneMapped.get(), viewportSampler.get()}};
         candidate->postDescriptor = device.createBindingSet(*postSetLayout, writes);
     }
     if (settings.taa) {
@@ -48,6 +52,9 @@ std::unique_ptr<ViewportTargets> Renderer::Impl::createViewport(std::uint32_t wi
                 rhi::BindingWrite{2, nullptr, candidate->historyColor[i].get(), viewportSampler.get()},
                 rhi::BindingWrite{3, nullptr, candidate->historyDepth[i].get(), pointSampler.get()}};
             candidate->temporalDescriptors[i] = device.createBindingSet(*temporalSetLayout, writes);
+            const std::array toneWrites{
+                rhi::BindingWrite{0, nullptr, candidate->historyColor[i].get(), viewportSampler.get()}};
+            candidate->toneDescriptors[i + 1] = device.createBindingSet(*postSetLayout, toneWrites);
         }
     }
     return candidate;

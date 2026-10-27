@@ -12,6 +12,7 @@
 #include <embedded_shaders/irradiance.comp.spv.hpp>
 #include <embedded_shaders/prefilter.comp.spv.hpp>
 #include <embedded_shaders/brdf.comp.spv.hpp>
+#include <embedded_shaders/tonemap.frag.spv.hpp>
 #include <stdexcept>
 
 namespace aeg::render::detail {
@@ -43,6 +44,8 @@ std::span<const std::byte> embeddedShader(ShaderId shader) {
         return std::as_bytes(std::span{embedded_shaders::prefilter_comp});
     case ShaderId::BrdfCompute:
         return std::as_bytes(std::span{embedded_shaders::brdf_comp});
+    case ShaderId::ToneMappingFragment:
+        return std::as_bytes(std::span{embedded_shaders::tonemap_frag});
     }
     throw std::invalid_argument("Unknown embedded shader ID");
 }

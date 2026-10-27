@@ -83,6 +83,7 @@ int main(int argc, char** argv) {
         std::pair{ShaderId::IrradianceCompute, "irradiance.comp.spv"},
         std::pair{ShaderId::PrefilterCompute, "prefilter.comp.spv"},
         std::pair{ShaderId::BrdfCompute, "brdf.comp.spv"},
+        std::pair{ShaderId::ToneMappingFragment, "tonemap.frag.spv"},
     };
     int failures = 0;
     for (const auto& [id, filename] : shaders) {

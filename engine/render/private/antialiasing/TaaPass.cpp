@@ -35,10 +35,4 @@ void Renderer::Impl::drawTemporal(rhi::CommandList& commands) {
     commands.endRenderPass();
 }
 
-void Renderer::Impl::pointFinalDescriptorAtTemporalOutput() {
-    if (!aa.taa || !aa.fxaa) return;
-    const std::array writes{rhi::BindingWrite{0, nullptr, viewport->historyColor[1u - recordingHistory.readIndex].get(),
-                                              viewportSampler.get()}};
-    viewport->postDescriptor->update(writes);
-}
 }

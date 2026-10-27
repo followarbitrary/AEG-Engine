@@ -43,6 +43,7 @@ void drawInspectorPanel(EditorState& state, render::Renderer& renderer) {
                 frameRequested = true;
             }
         }
+        drawToneMappingSection(state, renderer);
         drawMaterialSection(state, renderer);
         drawLightingSection(state, renderer);
         if (ImGui::CollapsingHeader("抗锯齿###Antialiasing", ImGuiTreeNodeFlags_DefaultOpen)) {

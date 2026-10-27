@@ -2,7 +2,7 @@
 
 namespace aeg::render {
 void Renderer::Impl::createPostPass() {
-    const rhi::AttachmentDesc color{sceneFormat,
+    const rhi::AttachmentDesc color{displayFormat,
                                     1,
                                     rhi::LoadOp::Discard,
                                     rhi::StoreOp::Store,

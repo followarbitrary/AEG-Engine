@@ -177,7 +177,11 @@ void Renderer::Impl::drawScene(rhi::CommandList& commands, const RenderSettings&
     // Finish allocations and lazy pipeline creation before beginning a command pass.
     if (!transparent.empty()) scenePipeline(aa.msaaSamples, aa.taa, settings.clipSpace.reversed_z, true);
     std::array<rhi::ClearValue, 3> clears{};
-    clears[0].color = {settings.background.x, settings.background.y, settings.background.z, 1};
+    const auto finiteRadiance = [](float value) {
+        return std::isnan(value) ? 0.0f : std::clamp(value, 0.0f, 65504.0f);
+    };
+    clears[0].color = {finiteRadiance(settings.background.x), finiteRadiance(settings.background.y),
+                       finiteRadiance(settings.background.z), 1};
     clears[1].depth = settings.clipSpace.reversed_z ? 0.0f : 1.0f;
     clears[2].color = {0, 0, -1, -1};
     commands.beginRenderPass(*scene.pass, *viewport->sceneFrame, viewport->extent(),

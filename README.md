@@ -58,11 +58,15 @@ ctest --preset release
 .\build\debug\bin\aeg_editor.exe --font 'D:\Fonts\NotoSansSC-Regular.ttf'
 .\build\debug\bin\aeg_editor.exe --msaa 4 --fxaa
 .\build\debug\bin\aeg_editor.exe --taa
+.\build\debug\bin\aeg_editor.exe --tone-mapper aces --exposure +1
+.\build\debug\bin\aeg_editor.exe --tone-mapper linear --exposure -2
 .\build\debug\bin\aeg_editor.exe --frames 12 --capture '.\build\viewport.ppm'
 .\build\debug\bin\aeg_editor.exe --no-validation
 ```
 
 `--model PATH` 选择 OBJ、glTF、GLB 或 PMX；`--font PATH` 指定支持中文的 TTF、OTF 或 TTC 字体；`--msaa 1|2|4|8` 选择场景采样数，1 为关闭；`--taa` 开启 TAA，启用时替代 MSAA；`--fxaa` 开启 FXAA 后处理，可跟随 MSAA 或 TAA；`--frames N` 在指定帧数后退出；`--capture PATH` 导出场景视口的 PPM 图像；`--hidden` 使用隐藏窗口，适合配合 `--frames` 自动验证；`--no-validation` 关闭 Vulkan 验证层。默认尝试启用验证层，未安装时仍可启动。参数缺失或未知参数会报告错误。
+
+`--tone-mapper aces|linear` 选择色调映射，默认为 `aces`；`--exposure EV` 设置曝光补偿，默认 0，要求有限且位于 `[-12,+12]`，支持显式正号。曝光增加 1 EV 会使映射前的亮度加倍，减少 1 EV 则减半。
 
 ## 使用方法
 
@@ -73,6 +77,7 @@ ctest --preset release
 - **变换 Gizmo**：当前模型默认为选中对象，在视口左上角或用 `W / E / R` 切换移动、旋转、缩放。拖动轴线、平面或旋转环可编辑整体变换，手柄以模型包围盒中心为轴心，属性面板同步更新。移动和旋转可切换局部／世界坐标，缩放使用局部坐标并保留负缩放符号；`Esc` 撤销本次拖动。拖动期间暂停自动旋转，释放后恢复；文本编辑期间快捷键暂停。当前不单独选择或变换子网格。
 - **PBR 光照**：在“材质”中设置所选材质的金属度和粗糙度，点击“应用 PBR 参数”；在“光照”中调整方向光、点光源、聚光灯及环境漫反射。普通相机环绕会改变高光位置，无光照模式仍直接显示基础颜色。
 - **IBL 环境光**：在“环境光 IBL”中开启，首次启用会用 compute 生成程序天空的环境光贴图；也可输入 2:1 Radiance `.hdr` 路径并加载。强度和水平旋转实时生效；环境更换时才运行 GPU 预处理，普通帧直接采样生成的贴图。
+- **色调映射**：在属性面板“色调映射”中选择默认的“ACES fitted”或“线性（对照）”，调整 `-12` 到 `+12` EV 的曝光，或点击“重置曝光与映射”恢复 ACES、0 EV。修改立即生效，保留 TAA 历史。
 - **法线贴图**：导入模型时自动读取材质声明的法线图，缺少声明时按文件名查找配套图片；所有已支持格式共用此规则。仍可在属性面板“材质”中选择材质，输入 RGB 法线图片路径，应用、替换或清除贴图；相对路径以模型所在目录为基准，也支持绝对路径和中文路径。“光照”中的“使用法线贴图”和 0–4 的“法线强度”控制全部材质，默认启用、强度为 1；强度为 0 时使用原来的顶点法线。无光照模式不受法线贴图影响，界面同时显示带法线贴图的材质数。
 - **透明材质**：导入时自动读取透明模式和透明度；在属性面板“材质”中选择材质后，可切换“不透明／透明裁切／半透明”、调整不透明度及裁切阈值，再点击“应用透明设置”。修改只作用于所选材质，上传失败时保留原模型；修改成功后重置 TAA 历史。
 - **抗锯齿**：在属性面板的“抗锯齿”中选择 MSAA 关闭、2x、4x 或 8x，或开启“TAA 时域抗锯齿”；“FXAA 后处理”可独立开关。TAA 开启时有效采样数为 1，MSAA 选择禁用。界面显示历史帧数并提供“重置历史”；聚焦模型也会自动重置。界面只提供设备支持的采样档位，命令行请求不支持的 MSAA 档位时向下降级并显示提示。默认均关闭。
@@ -94,11 +99,11 @@ ctest --preset release
 
 ## 抗锯齿渲染
 
-MSAA 使用匹配采样数的场景颜色与深度附件，再解析到单采样场景图像；采样能力同时查询设备上限及实际颜色/深度格式。FXAA 在场景解析之后，根据感知亮度检测边缘并做有界方向搜索及亚像素过滤。所有抗锯齿均只作用于模型视口，ImGui 界面和文字保持清晰。
+MSAA 使用匹配采样数的 HDR 场景颜色与深度附件，再解析到单采样 HDR 场景图像；采样能力同时查询设备上限及实际颜色/深度格式。FXAA 在色调映射之后，根据感知亮度检测边缘并做有界方向搜索及亚像素过滤。所有抗锯齿均只作用于模型视口，ImGui 界面和文字保持清晰。
 
 FXAA 保持线性 RGB 输出，使用线性过滤和边缘钳制；平坦区域直接保留原色。它属于空间近似抗锯齿，细节处可能略有柔化。截图导出的是最终抗锯齿结果。切换或缩放时先创建完整的新视口资源，成功后再替换，失败时保留此前有效设置和资源。
 
-TAA 使用 8 相位 Halton 子像素抖动、排除抖动的相机/模型运动矢量、深度历史校验、3×3 邻域约束，以及双缓冲历史颜色/深度累积。历史权重在预热后最多为 0.9。它使用单采样场景替代 MSAA，随后可以再做 FXAA；TAA 单独开启时，截图会读取最终的 RGBA16F 历史颜色并转换为 PPM。
+TAA 使用 8 相位 Halton 子像素抖动、排除抖动的相机/模型运动矢量、深度历史校验、3×3 邻域约束，以及双缓冲历史颜色/深度累积。历史权重在预热后最多为 0.9。它使用单采样场景替代 MSAA，在未曝光的线性 HDR 空间累积，随后执行曝光与色调映射，并可再做 FXAA。截图始终读取最终的 SDR 输出，执行一次 sRGB 编码后写入 PPM。
 
 模型成功替换、视口缩放、抗锯齿切换、光照/背景变化、投影类型切换和聚焦模型会清空历史。普通相机环绕、平移、缩放及模型变换通过运动重投影继续累积。API `resetTemporalHistory()` 可在其他相机跳切时显式重置，且保留已经显示的最后一帧。仅成功提交的 GPU 帧才推进历史与抖动序列。
 
@@ -191,9 +196,28 @@ settings.lights[0].intensity = 3.0f; // 相对光照强度，不是物理光度�
 
 `setMaterialPbr` 对索引、有限值和范围进行完整验证，失败保持整个模型不变；编辑器在 GPU 上传成功后才替换 CPU 模型。`RenderSettings::set_camera()` 同时传递矩阵、裁剪约定和世界空间视线，正交相机使用固定视线。直接赋值 `viewProjection` 的调用方也必须同步 `cameraPosition` 和 `cameraTowardViewer`。光源颜色、强度和材质改变会重置 TAA 历史；普通相机移动继续重投影。
 
-关闭 IBL 时，环境漫反射是 `ambient * baseColor * (1-metallic)` 的近似补光，只添加一次；开启后由环境漫反射和镜面反射替代。场景仍使用现有线性 LDR 输出，高强度高光会饱和；HDR 环境预处理保持浮点值，曝光及最终输出色调映射尚未加入。
+关闭 IBL 时，环境漫反射是 `ambient * baseColor * (1-metallic)` 的近似补光，只添加一次；开启后由环境漫反射和镜面反射替代。直接光与 IBL 在线性 HDR 场景中相加，大于 1 的高光与环境亮度保留到最终色调映射。
 
 公式参考 [Filament 材质模型](https://google.github.io/filament/main/filament.html)；材质因子约定参考 [glTF 2.0 规范](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#metallic-roughness-material)。
+
+## HDR 与色调映射
+
+场景颜色优先使用线性 `RGBA16Float`，实际附件、采样、线性过滤及 Alpha 混合能力不满足时尝试 `RGBA32Float`。两种格式均不支持时会明确报告 HDR 初始化失败。MSAA 的可选档位取决于选定 HDR 格式与深度格式共同支持的采样数。
+
+处理顺序为 **HDR 场景与透明混合 → MSAA 解析（如启用）→ HDR TAA（如启用）→ 曝光与色调映射 → FXAA（如启用）**。TAA 替代 MSAA，二者不会同时工作；半透明材质先在线性 HDR 中混合，再对混合结果统一映射。
+
+默认映射使用 Stephen Hill 的 **ACES fitted RRT+ODT 近似**，包含输入／输出颜色矩阵，输入与输出均采用线性 sRGB／Rec.709 原色。曝光在映射前乘以 `2^EV`；线性对照模式将曝光后的颜色限制到 `[0,1]`，便于比较高亮压缩。实现改编自 [BakingLab 的 ACES.hlsl](https://github.com/TheRealMJP/BakingLab/blob/master/BakingLab/ACES.hlsl)，MIT 许可与署名保存在 `engine/render/private/shaders/postprocess/ACES.LICENSE`。它是拟合近似，不是完整的 ACES 色彩管理或官方 ACES Output Transform。
+
+```cpp
+#include <ToneMappingSettings.hpp>
+
+renderer.setToneMapping({.mapper = aeg::render::ToneMapper::Aces, .exposureEV = 1.0f});
+const auto current = renderer.toneMapping();
+```
+
+`setToneMapping()` 拒绝无效枚举、非有限曝光和超出 `[-12,+12]` 的值，失败时保留原设置。修改映射或曝光不重建视口资源、不重置未曝光的 TAA 历史；已提交画面保持有效，后续帧使用新参数。
+
+两种场景格式均将工作亮度限制为有限的 `[0,65504]`，与半精度 TAA 历史一致：NaN、负数和负无穷归零，正无穷及过高亮度限制到 65504。因此亮度超过上限的能量不会保留。映射后的 SDR 输出仍为线性 `RGBA8Unorm`，呈现与截图分别在各自输出路径中进行一次 sRGB 编码；8 位线性量化会限制暗部精度。当前未实现 HDR10 显示输出、自动曝光或 Bloom。
 
 ## Compute IBL
 
@@ -267,7 +291,7 @@ renderer.setShadows(shadow);
 
 ## 范围与限制
 
-当前里程碑支持静态 OBJ / glTF / GLB / PMX 网格、节点变换、基础颜色、常见基础颜色纹理、RGB 法线贴图、深度测试、PBR 多光源、方向光 CSM 与聚光灯阴影。基础颜色纹理缺失或无法解码时使用白色回退并记录警告。
+当前里程碑支持静态 OBJ / glTF / GLB / PMX 网格、节点变换、基础颜色、常见基础颜色纹理、RGB 法线贴图、深度测试、PBR 多光源、方向光 CSM 与聚光灯阴影、Compute IBL、HDR 场景与 ACES 色调映射。基础颜色纹理缺失或无法解码时使用白色回退并记录警告。
 
 PMX 支持 UTF-8 / UTF-16LE、多个材质分组、基础 UV 贴图和中文相对贴图路径。导入时请保留模型配套的贴图目录；模型路径栏、拖放及 `--model` 共用导入器。显示的是静态初始姿态；没有 VMD 动作、骨骼蒙皮、Morph、刚体/关节模拟、描边、Toon 或球面贴图着色。材质与贴图支持不透明、裁切和半透明模式，零透明度的半透明材质隐藏。已验证 PMX 2.0；PMX 2.1 的部分 Morph 和软体等扩展受当前 Assimp 实现限制。
 
@@ -285,7 +309,9 @@ Gizmo 回归通过真实 ImGui 输入事件覆盖移动、旋转、缩放、模�
 
 IBL 新增 63 次场景截图，并读取六个面及每级 mip 的浮点预处理结果。回归验证 HDR 亮度保留、黑／常量环境、辐照度 π 因子、独立双精度半球积分的 DFG、方向与接缝、粗糙度滤波、法线贴图、全部 AA／裁剪约定，以及上传／失败回滚与 TAA。真实 Vulkan 测试覆盖 Storage→Storage 屏障、面／mip 读回、错误 dispatch／描述符和废弃命令恢复，验证错误为零。临时移除 π 因子、改变 LUT 权重或固定运行时 LOD 为 0 均触发预期失败，恢复后通过。真实窗口验证了首次开启、强度 1.90、旋转 90°、中文 HDR 路径加载、程序天空替换及 CSM＋TAA＋FXAA，运行 17,591 帧并正常退出，验证错误为零。
 
-2026-10-26 在本机 MSVC 19.51 / RTX 5070 / Vulkan SDK 1.4.357.0 上完成 Debug、Release 和 MinGW 编译。完整 Debug CTest **51/51 通过**，包含 23 项 CPU 测试与 28 项真实 GPU 测试；Release 和 MinGW 的 23 项 CPU 测试均通过。回归覆盖 SSE2／标量 Math、公开接口、相机与缩放范围、模型导入、法线贴图、自动查找、MMD 效果绑定、透明材质、PBR 材质参数、IBL、字体、Gizmo、RHI、渲染命令及内嵌着色器。
+2026-10-27 在本机 MSVC 19.51 / RTX 5070 / Vulkan SDK 1.4.357.0 上完成 Debug、Release 和 MinGW 编译。完整 Debug CTest **54/54 通过**，包含 25 项 CPU 测试与 29 项真实 GPU 测试；Release 和 MinGW 的 25 项 CPU 测试均通过。回归覆盖 SSE2／标量 Math、公开接口、相机与缩放范围、模型导入、法线贴图、自动查找、MMD 效果绑定、透明材质、PBR 材质参数、IBL、HDR／色调映射、字体、Gizmo、RHI、渲染命令及内嵌着色器。
+
+HDR 回归直接读取浮点场景与 TAA 历史，验证大于 1 的亮度、65504 有限上限、透明混合先于映射、MSAA 解析与 FXAA 的处理顺序，以及曝光变化保留未曝光历史。中性与彩色 ACES 使用独立固定数值核对，截图检查只执行一次 sRGB 编码；CPU 另验证格式回退、采样限制、参数拒绝与分配失败回滚。临时跳过 ACES、移除曝光、提前截断场景亮度或在曝光变化时清空历史，测试均检出预期错误，随后恢复原实现。真实窗口验证了 ACES／线性模式切换、曝光与重置，以及 IBL＋CSM＋TAA＋FXAA 组合；曝光调整后历史帧继续累积，运行 12,758 帧并正常退出，Vulkan 验证错误为零。
 
 PBR 新增四组材质 CPU 契约和 73 次解析 GPU 截图，使用独立双精度 Smith Lambda 参考及法向入射闭式解核对 BRDF；覆盖金属度、粗糙度零值、掠射角、光源颜色/强度、世界空间视线、正交/透视、镜像与非均匀变换、全部 AA/裁剪约定，以及 TAA 历史重置。分别改错 GGX 粗糙度、关闭 Fresnel 和跳过 Smith，测试均能检出，恢复后通过。Release 和 MinGW 另以实际 PMX 模型完成 32 帧 TAA+FXAA 渲染、截图可见性检查，Vulkan 验证错误均为零；真实窗口验证材质参数应用和光源强度即时更新。半透明 glTF 的可见性冒烟与 PMX 一样采用受控白色背景和无光照条件，保留原有对比度、覆盖率和颜色数量门槛；光照与混合的正确性由解析回归单独验证。
 
@@ -295,7 +321,7 @@ Math 的普通 SSE2 和强制标量实现分别通过 16,724 个检查，覆盖�
 
 透明材质 CPU 回归覆盖 glTF／GLB 模式、OBJ 的 d／Tr／RGBA／map_d、PMX 编码与签名识别、参数校验、完整回滚及法线属性保持。GPU 使用 139 张截图检查解析混合颜色、多层与输入顺序、遮挡、Alpha 0／1、贴图与因子相乘、裁切、法线光照、各投影/裁剪约定、全部可用 AA 组合及 TAA 历史保护。强制输出 Alpha 为 1 会检出混色错误；禁用透明响应标记会使重投影误差从 0.0465 升至 4.5116，超过阈值 0.35，恢复原着色器后通过。实际 PMX 透明场景使用受控背景和光照，保持原可见性检查的对比度、覆盖率及颜色数量要求。真实窗口另验证了所选材质的半透明编辑及 TAA+FXAA，Vulkan 验证错误为零。
 
-内嵌着色器测试逐字节比较十三份静态数据与构建生成的 SPIR-V，检查大小、对齐、魔数、静态存储及无效枚举；生成器测试检查错误输入诊断和原输出保留。独立 Ninja 构建验证完整并行生成、GLSL／包含文件／提取脚本修改后的增量依赖和重复空构建。隔离部署测试只复制可执行文件和运行库，不携带 `shaders/` 或 SPIR-V 文件，分别执行 MSAA 4x＋FXAA 和 TAA＋FXAA，并检查非空场景截图及验证错误为零。Debug、Release、MinGW 均通过该部署验证。
+内嵌着色器测试逐字节比较十四份静态数据与构建生成的 SPIR-V，检查大小、对齐、魔数、静态存储及无效枚举；生成器测试检查错误输入诊断和原输出保留。独立 Ninja 构建验证完整并行生成、GLSL／包含文件／提取脚本修改后的增量依赖和重复空构建。隔离部署测试只复制可执行文件和运行库，不携带 `shaders/` 或 SPIR-V 文件，分别执行 MSAA 4x＋FXAA 和 TAA＋FXAA，并检查非空场景截图及验证错误为零。Debug、Release、MinGW 均通过该部署验证。
 
 抗锯齿 GPU 回归检查斜边的实际像素覆盖、纯色和模型内部颜色、MSAA/FXAA 叠加后的最终截图、恢复关闭后的像素一致性，以及单像素/奇数尺寸、窗口缩放、重复切换、错误参数和模型替换。当前 RTX 5070 支持全部四档；缺少部分采样档位的物理设备尚未实测。MinGW 命令行已另验证所有档位叠加 FXAA 的真实渲染，Vulkan 验证错误均为零。
 
@@ -357,7 +383,7 @@ ctest --test-dir build/math-standalone --output-on-failure
 | `engine/rhi/vulkan/` | `aeg::rhi_vulkan` | `aeg::rhi::vulkan`，Vulkan 设备、内存、同步、交换链及着色器编译适配 |
 | `engine/gui/` | `aeg::gui` | `aeg::gui`，ImGui 绘制及纹理注册适配接口 |
 | `engine/rhi/vulkan/private/imgui/` | `aeg::rhi_vulkan_gui` | Vulkan ImGui 适配实现，可访问后端内部原生句柄 |
-| `engine/render/` | `aeg::render` | `aeg::render`，通过 RHI 实现场景、材质、视口、抗锯齿、截图 |
+| `engine/render/` | `aeg::render` | `aeg::render`，通过 RHI 实现场景、材质、IBL、视口、抗锯齿、色调映射、截图 |
 | `editor/` | `aeg::editor` | `aeg::editor`，窗口、帧协调、GUI 纹理生命周期、停靠、面板与字体 |
 | `apps/editor/private/` | `aeg_editor` | 全局 main、`aeg::app` 命令行入口与 Vulkan 工厂装配 |
 | `tests/{math,foundation,camera,assets,rhi,render,editor}/` | 对应测试目标 | 与功能目录对应的 CPU/GPU 回归；数据保留在 `tests/fixtures/` |
@@ -373,21 +399,23 @@ engine/render/
 ├─ public/
 │  ├─ Renderer.hpp
 │  ├─ RenderSettings.hpp
-│  └─ AntialiasingSettings.hpp
+│  ├─ AntialiasingSettings.hpp
+│  └─ ToneMappingSettings.hpp
 └─ private/
    ├─ Renderer.cpp
    ├─ RendererImpl.hpp
    ├─ scene/
    ├─ viewport/
    ├─ antialiasing/
-   └─ shaders/{scene,postprocess}/
+   ├─ tonemapping/
+   └─ shaders/{common,scene,postprocess,ibl}/
 ```
 
-RHI 的十个公开头文件平铺在 `engine/rhi/public/`，只依赖 C++ 标准库，不包含 Vulkan、GLFW、ImGui、Windows 或模型数据类型。Vulkan 资源、命令与呈现实现分别放在 `engine/rhi/vulkan/private/{device,resources,bindings,pipelines,commands,presentation}/`。模型和材质上传、场景绘制、视口、MSAA／TAA／FXAA 与截图转换均通过真实 RHI 对象和命令实现，通用 Renderer 不调用 Vulkan，也不持有 ImGui 或窗口对象。
+RHI 的十个公开头文件平铺在 `engine/rhi/public/`，只依赖 C++ 标准库，不包含 Vulkan、GLFW、ImGui、Windows 或模型数据类型。Vulkan 资源、命令与呈现实现分别放在 `engine/rhi/vulkan/private/{device,resources,bindings,pipelines,commands,presentation}/`。模型和材质上传、场景绘制、视口、MSAA／TAA／FXAA、色调映射与截图转换均通过真实 RHI 对象和命令实现，通用 Renderer 不调用 Vulkan，也不持有 ImGui 或窗口对象。
 
 ImGui 分成 core、GLFW 平台和 Vulkan 绘制三个目标。应用入口在创建窗口后通过工厂回调装配 Vulkan 设备、交换链和 GUI 适配器；`EditorGraphics` 协调等待与获取图像、UI 构建、场景与后处理、UI 绘制、提交及呈现。只有成功提交才推进 TAA 历史，呈现要求重建不会回滚已提交帧。GUI 使用稳定的纹理注册标识，并保留输出图像所有权直到注册更新或移除。
 
-GLSL 保留在渲染模块，Vulkan 专用编译规则和 SPIR-V 头文件提取分别位于 `cmake/VulkanShaders.cmake`、`cmake/EmbedSpirv.cmake`。`ShaderLibrary` 通过枚举返回十三份内嵌数据的只读 `span`，普通场景、TAA 场景、阴影、全屏、FXAA 与 TAA 管线都使用这一入口；`Renderer` 只接收 RHI 设备，不再接收着色器目录。CMake 为渲染库本身声明生成依赖，直接构建 `aeg_render` 也会先生成所需头文件。修改 GLSL、包含文件或提取脚本后会自动更新生成结果，内容相同时保留头文件时间戳，避免无效重编译。生成文件保留在构建目录，不加入源码仓库。
+GLSL 保留在渲染模块，Vulkan 专用编译规则和 SPIR-V 头文件提取分别位于 `cmake/VulkanShaders.cmake`、`cmake/EmbedSpirv.cmake`。`ShaderLibrary` 通过枚举返回十四份内嵌数据的只读 `span`，场景、阴影、全屏后处理、色调映射与 IBL 计算管线都使用这一入口；`Renderer` 只接收 RHI 设备，不再接收着色器目录。CMake 为渲染库本身声明生成依赖，直接构建 `aeg_render` 也会先生成所需头文件。修改 GLSL、包含文件或提取脚本后会自动更新生成结果，内容相同时保留头文件时间戳，避免无效重编译。生成文件保留在构建目录，不加入源码仓库。
 
 使用模块时链接其 CMake 目标，通过扁平头文件名引用公开接口：
 
@@ -414,7 +442,7 @@ cmake --build build/rhi-standalone
 ctest --test-dir build/rhi-standalone --output-on-failure
 ```
 
-模拟 RHI 命令测试只链接通用 Renderer，检查场景→TAA→FXAA 顺序、材质颜色空间、未提交帧不推进历史、重复提交通知、替换失败回退、历史重置保留最后画面及缩放后拒绝过期截图。真实 GPU 回归继续保留法线贴图、AA、重投影与生命周期的像素和错误路径断言。
+模拟 RHI 命令测试只链接通用 Renderer，检查场景→TAA→色调映射→FXAA 顺序、材质颜色空间、未提交帧不推进历史、重复提交通知、替换失败回退、历史重置保留最后画面及缩放后拒绝过期截图。真实 GPU 回归继续保留法线贴图、AA、重投影与生命周期的像素和错误路径断言。
 
 固定依赖版本及 SHA256 校验在 `cmake/Dependencies.cmake`：
 
