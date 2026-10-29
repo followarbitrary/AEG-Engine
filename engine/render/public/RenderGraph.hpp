@@ -1,6 +1,8 @@
 #pragma once
 
 #include <RhiSwapchain.hpp>
+#include <RhiCommandList.hpp>
+#include <RhiDevice.hpp>
 #include <RhiTexture.hpp>
 #include <cstdint>
 #include <functional>
@@ -8,12 +10,16 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
 namespace aeg::render {
+
+using FrameToken = std::uint64_t;
+class TransientTexturePool;
 
 class RenderGraph {
 public:
@@ -50,7 +56,16 @@ public:
     }
 
     struct PassContext {
-        [[nodiscard]] rhi::Texture* texture(Handle) const { return nullptr; }
+        [[nodiscard]] rhi::Texture& texture(Handle handle) const {
+            if (!resolver_) throw std::logic_error("RenderGraph PassContext is not active");
+            auto* resolved = resolver_(handle);
+            if (!resolved) throw std::invalid_argument("RenderGraph handle has no physical texture");
+            return *resolved;
+        }
+
+    private:
+        friend class RenderGraph;
+        std::function<rhi::Texture*(Handle)> resolver_;
     };
     using ExecuteCallback = std::function<void(PassContext&)>;
 
@@ -135,6 +150,7 @@ public:
 
     CompileResult compile(std::span<const Handle> outputs);
     CompileResult compile(std::initializer_list<Handle> outputs) { return compile(std::span(outputs)); }
+    void execute(rhi::CommandList&, rhi::Device&, TransientTexturePool&, FrameToken);
     void reset();
     [[nodiscard]] std::string debugDump() const;
 

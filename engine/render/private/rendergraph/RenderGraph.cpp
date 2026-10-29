@@ -1,4 +1,5 @@
 #include <RenderGraph.hpp>
+#include "TransientTexturePool.hpp"
 
 #include <algorithm>
 #include <limits>
@@ -99,9 +100,11 @@ struct RenderGraph::Impl {
         bool transient{};
         bool swapchain{};
         rhi::Texture* texture{};
+        rhi::Swapchain* swapchainOwner{};
         rhi::ResourceState* trackedState{};
         rhi::ResourceState initialState{rhi::ResourceState::Undefined};
         std::optional<rhi::ResourceState> finalState;
+        std::unique_ptr<rhi::Texture> owned;
     };
     struct Declaration {
         Handle resource;
@@ -122,6 +125,8 @@ struct RenderGraph::Impl {
     std::vector<Pass> passes;
     CompileResult lastResult;
     std::string dump;
+    bool compiled{};
+    bool executed{};
 
     Resource& resource(Handle handle) {
         if (!handle || handle.generation != generation || handle.index >= resources.size())
@@ -167,16 +172,18 @@ RenderGraph& RenderGraph::operator=(RenderGraph&&) noexcept = default;
 RenderGraph::Handle RenderGraph::createTexture(const rhi::TextureDesc& description, std::string name, bool transient) {
     rhi::validate(description);
     const Handle handle{static_cast<std::uint32_t>(impl_->resources.size()), impl_->generation};
-    impl_->resources.push_back({handle, description, std::move(name), false, transient, false, nullptr, nullptr,
+    impl_->resources.push_back({handle, description, std::move(name), false, transient, false, nullptr, nullptr, nullptr,
                                 rhi::ResourceState::Undefined, std::nullopt});
+    impl_->compiled = false;
     return handle;
 }
 
 RenderGraph::Handle RenderGraph::importTexture(rhi::Texture& texture, rhi::ResourceState& trackedState, std::string name) {
     rhi::validate(texture.description());
     const Handle handle{static_cast<std::uint32_t>(impl_->resources.size()), impl_->generation};
-    impl_->resources.push_back({handle, texture.description(), std::move(name), true, false, false, &texture,
+    impl_->resources.push_back({handle, texture.description(), std::move(name), true, false, false, &texture, nullptr,
                                 &trackedState, trackedState, std::nullopt});
+    impl_->compiled = false;
     return handle;
 }
 
@@ -184,34 +191,47 @@ RenderGraph::Handle RenderGraph::importSwapchain(rhi::Swapchain& swapchain, std:
     auto& texture = swapchain.image();
     rhi::validate(texture.description());
     const Handle handle{static_cast<std::uint32_t>(impl_->resources.size()), impl_->generation};
-    impl_->resources.push_back({handle, texture.description(), std::move(name), true, false, true, &texture, nullptr,
-                                swapchain.imageState(), rhi::ResourceState::Present});
+    impl_->resources.push_back({handle, texture.description(), std::move(name), true, false, true, &texture, &swapchain,
+                                nullptr, swapchain.imageState(), rhi::ResourceState::Present});
+    impl_->compiled = false;
     return handle;
 }
 
 RenderGraph::PassBuilder RenderGraph::addPass(std::string name, PassType type, PassFlags flags,
                                                ExecuteCallback execute) {
     impl_->passes.push_back({std::move(name), type, flags, std::move(execute), {}});
+    impl_->compiled = false;
     return PassBuilder(this, impl_->passes.size() - 1);
 }
 RenderGraph::PassBuilder& RenderGraph::PassBuilder::read(Handle resource, Usage usage) {
     if (!graph_ || index_ >= graph_->impl_->passes.size()) throw std::logic_error("Invalid RenderGraph pass builder");
     graph_->impl_->passes[index_].declarations.push_back({resource, usage, true, false});
+    graph_->impl_->compiled = false;
     return *this;
 }
 RenderGraph::PassBuilder& RenderGraph::PassBuilder::write(Handle resource, Usage usage) {
     if (!graph_ || index_ >= graph_->impl_->passes.size()) throw std::logic_error("Invalid RenderGraph pass builder");
     graph_->impl_->passes[index_].declarations.push_back({resource, usage, false, true});
+    graph_->impl_->compiled = false;
     return *this;
 }
 RenderGraph::PassBuilder& RenderGraph::PassBuilder::readWrite(Handle resource, Usage usage) {
     if (!graph_ || index_ >= graph_->impl_->passes.size()) throw std::logic_error("Invalid RenderGraph pass builder");
     graph_->impl_->passes[index_].declarations.push_back({resource, usage, true, true});
+    graph_->impl_->compiled = false;
     return *this;
 }
 
 RenderGraph::CompileResult RenderGraph::compile(std::span<const Handle> outputs) {
     auto& impl = *impl_;
+    impl.compiled = false;
+    impl.executed = false;
+    for (auto& resource : impl.resources) {
+        if (resource.trackedState)
+            resource.initialState = *resource.trackedState;
+        else if (resource.swapchainOwner)
+            resource.initialState = resource.swapchainOwner->imageState();
+    }
     const auto passCount = impl.passes.size();
     const auto resourceCount = impl.resources.size();
     std::vector<std::vector<std::size_t>> outgoing(passCount), incoming(passCount);
@@ -424,7 +444,144 @@ RenderGraph::CompileResult RenderGraph::compile(std::span<const Handle> outputs)
              << ",dimension=" << static_cast<int>(resource.description.dimension) << " first=" << resource.firstUse
              << " last=" << resource.lastUse << "\n";
     impl.dump = dump.str();
+    impl.compiled = true;
+    impl.executed = false;
     return result;
+}
+
+void RenderGraph::execute(rhi::CommandList& commands, rhi::Device& device, TransientTexturePool& pool,
+                          FrameToken frameToken) {
+    auto& impl = *impl_;
+    if (!impl.compiled)
+        throw std::logic_error("RenderGraph must be compiled before execute");
+    if (impl.executed)
+        throw std::logic_error("RenderGraph was already executed; compile it again before reuse");
+
+    std::vector<rhi::Texture*> physical(impl.resources.size());
+    std::vector<rhi::Texture*> transient;
+    try {
+        for (std::size_t index = 0; index < impl.resources.size(); ++index) {
+            auto& resource = impl.resources[index];
+            if (resource.imported) {
+                physical[index] = resource.texture;
+            } else if (resource.transient) {
+                if (index < impl.lastResult.resources.size() &&
+                    impl.lastResult.resources[index].firstUse != invalidIndex) {
+                    physical[index] = &pool.acquire(resource.description);
+                    transient.push_back(physical[index]);
+                }
+            } else {
+                if (!resource.owned) resource.owned = device.createTexture(resource.description);
+                physical[index] = resource.owned.get();
+            }
+            resource.texture = physical[index];
+        }
+
+        const auto resolve = [&](Handle handle) -> rhi::Texture* {
+            auto& resource = impl.resource(handle);
+            return physical[resource.handle.index];
+        };
+        const auto emitBarrier = [&](const Barrier& barrier) {
+            auto* texture = resolve(barrier.resource);
+            if (!texture) throw std::logic_error("RenderGraph barrier references an unbound texture");
+            commands.transition(*texture, barrier.before, barrier.after);
+        };
+
+        for (std::size_t passIndex = 0; passIndex < impl.lastResult.passes.size(); ++passIndex) {
+            const auto& compiled = impl.lastResult.passes[passIndex];
+            const auto& source = impl.passes[compiled.originalIndex];
+            for (const auto& barrier : compiled.preBarriers) emitBarrier(barrier);
+
+            PassContext context;
+            context.resolver_ = resolve;
+            if (compiled.type == PassType::Graphics) {
+                std::vector<rhi::Texture*> attachments;
+                std::vector<std::uint32_t> colors;
+                std::optional<std::uint32_t> depth;
+                rhi::Swapchain* externalSwapchain = nullptr;
+                for (const auto& usage : compiled.usages) {
+                    if (usage.usage != Usage::ColorWrite && usage.usage != Usage::DepthWrite) continue;
+                    auto& resource = impl.resource(usage.resource);
+                    if (resource.swapchain) externalSwapchain = resource.swapchainOwner;
+                    const auto attachmentIndex = static_cast<std::uint32_t>(attachments.size());
+                    attachments.push_back(resolve(usage.resource));
+                    if (usage.usage == Usage::DepthWrite)
+                        depth = attachmentIndex;
+                    else
+                        colors.push_back(attachmentIndex);
+                }
+                if (attachments.empty()) throw std::invalid_argument("Graphics RenderGraph pass has no attachments");
+
+                std::unique_ptr<rhi::RenderPass> ownedPass;
+                std::unique_ptr<rhi::Framebuffer> ownedFramebuffer;
+                rhi::RenderPass* renderPass = nullptr;
+                rhi::Framebuffer* framebuffer = nullptr;
+                rhi::Extent2D extent = attachments.front()->description().extent;
+                std::vector<rhi::ClearValue> clearValues;
+                if (externalSwapchain) {
+                    renderPass = &externalSwapchain->renderPass();
+                    framebuffer = &externalSwapchain->framebuffer();
+                    extent = externalSwapchain->extent();
+                    clearValues.resize(attachments.size());
+                } else {
+                    rhi::RenderPassDesc description;
+                    description.colors = colors;
+                    description.depth = depth;
+                    description.attachments.reserve(attachments.size());
+                    for (const auto* attachment : attachments) {
+                        const auto isDepth = rhi::isDepthFormat(attachment->description().format);
+                        description.attachments.push_back({attachment->description().format,
+                                                           attachment->description().samples,
+                                                           rhi::LoadOp::Discard,
+                                                           rhi::StoreOp::Store,
+                                                           isDepth ? rhi::ResourceState::DepthAttachment
+                                                                   : rhi::ResourceState::ColorAttachment,
+                                                           isDepth ? rhi::ResourceState::DepthAttachment
+                                                                   : rhi::ResourceState::ColorAttachment});
+                    }
+                    ownedPass = device.createRenderPass(description);
+                    rhi::FramebufferDesc framebufferDescription{ownedPass.get(), attachments, extent};
+                    ownedFramebuffer = device.createFramebuffer(framebufferDescription);
+                    renderPass = ownedPass.get();
+                    framebuffer = ownedFramebuffer.get();
+                }
+
+                bool active = false;
+                try {
+                    commands.beginRenderPass(*renderPass, *framebuffer, extent, clearValues);
+                    active = true;
+                    if (source.callback) source.callback(context);
+                    commands.endRenderPass();
+                    active = false;
+                } catch (...) {
+                    if (active) commands.endRenderPass();
+                    throw;
+                }
+            } else if (source.callback) {
+                source.callback(context);
+            }
+            for (const auto& barrier : compiled.postBarriers) emitBarrier(barrier);
+        }
+
+        for (auto& resource : impl.resources) {
+            if (resource.trackedState || resource.owned || resource.transient) {
+                auto current = resource.initialState;
+                for (const auto& pass : impl.lastResult.passes) {
+                    for (const auto& usage : pass.usages)
+                        if (usage.resource == resource.handle) current = usageState(usage.usage);
+                    for (const auto& barrier : pass.postBarriers)
+                        if (barrier.resource == resource.handle) current = barrier.after;
+                }
+                resource.initialState = current;
+                if (resource.trackedState) *resource.trackedState = current;
+            }
+        }
+        for (auto* texture : transient) pool.retire(*texture, frameToken);
+        impl.executed = true;
+    } catch (...) {
+        for (auto* texture : transient) pool.releaseImmediately(*texture);
+        throw;
+    }
 }
 
 void RenderGraph::reset() {
@@ -432,6 +589,8 @@ void RenderGraph::reset() {
     impl_->passes.clear();
     impl_->lastResult = {};
     impl_->dump.clear();
+    impl_->compiled = false;
+    impl_->executed = false;
     if (++impl_->generation == 0) impl_->generation = 1;
 }
 std::string RenderGraph::debugDump() const { return impl_->dump; }

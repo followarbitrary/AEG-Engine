@@ -25,7 +25,8 @@ if(TARGET aeg_render)
     add_executable(aeg_render_graph_contracts ../render/RenderGraphContracts.cpp)
     target_link_libraries(aeg_render_graph_contracts PRIVATE aeg::render)
     target_include_directories(aeg_render_graph_contracts PRIVATE
-        "${PROJECT_SOURCE_DIR}/tests/rhi")
+        "${PROJECT_SOURCE_DIR}/tests/rhi"
+        "${PROJECT_SOURCE_DIR}/engine/render/private")
     aeg_project_options(aeg_render_graph_contracts)
     add_test(NAME aeg_render_graph_contracts COMMAND aeg_render_graph_contracts)
     set_tests_properties(aeg_render_graph_contracts PROPERTIES LABELS cpu)

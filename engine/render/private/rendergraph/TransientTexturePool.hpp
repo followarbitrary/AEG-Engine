@@ -1,0 +1,39 @@
+#pragma once
+
+#include <RenderGraph.hpp>
+#include <RhiDevice.hpp>
+#include <memory>
+#include <vector>
+
+namespace aeg::render {
+
+class TransientTexturePool {
+public:
+    explicit TransientTexturePool(rhi::Device& device) : device_(device) {}
+    ~TransientTexturePool() = default;
+
+    TransientTexturePool(const TransientTexturePool&) = delete;
+    TransientTexturePool& operator=(const TransientTexturePool&) = delete;
+
+    rhi::Texture& acquire(const RenderGraph::TextureDesc& description);
+    void retire(rhi::Texture&, FrameToken);
+    void releaseImmediately(rhi::Texture&);
+    void reclaimCompletedFrame(FrameToken);
+    [[nodiscard]] std::size_t poolHitCount() const { return poolHits_; }
+
+private:
+    struct Entry {
+        std::unique_ptr<rhi::Texture> texture;
+        RenderGraph::TextureDesc description;
+        std::optional<FrameToken> retired;
+        bool immediatelyAvailable{};
+    };
+
+    static bool compatible(const RenderGraph::TextureDesc&, const RenderGraph::TextureDesc&);
+    rhi::Device& device_;
+    std::vector<Entry> entries_;
+    FrameToken completedToken_{};
+    std::size_t poolHits_{};
+};
+
+} // namespace aeg::render

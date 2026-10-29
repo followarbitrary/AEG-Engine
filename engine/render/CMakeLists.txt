@@ -21,7 +21,8 @@ add_library(aeg_render STATIC
     private/antialiasing/Antialiasing.cpp
     private/antialiasing/TaaPass.cpp
     private/antialiasing/FxaaPass.cpp
-    private/rendergraph/RenderGraph.cpp)
+    private/rendergraph/RenderGraph.cpp
+    private/rendergraph/TransientTexturePool.cpp)
 add_library(aeg::render ALIAS aeg_render)
 target_include_directories(aeg_render
     PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/public"
