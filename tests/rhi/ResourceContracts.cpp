@@ -1,9 +1,41 @@
 #include <RhiDevice.hpp>
+#include <RhiSwapchain.hpp>
+#include "fake/FakeDevice.hpp"
 #include <iostream>
 #include <limits>
 #include <stdexcept>
 
 namespace {
+struct FakeSwapchainContract final : aeg::rhi::Swapchain {
+    aeg::tests::FakeTexture texture{{{64, 64}, aeg::rhi::Format::Rgba8Unorm,
+                                     aeg::rhi::TextureUsage::ColorAttachment}};
+    aeg::tests::FakeCommands commands;
+    aeg::tests::FakePass pass{{{{aeg::rhi::Format::Rgba8Unorm, 1, aeg::rhi::LoadOp::Clear,
+                                 aeg::rhi::StoreOp::Store, aeg::rhi::ResourceState::ColorAttachment,
+                                 aeg::rhi::ResourceState::ColorAttachment}},
+                               {0}, std::nullopt, {}}};
+    aeg::tests::FakeFramebuffer frame{{&pass, {&texture}, {64, 64}}};
+    aeg::rhi::ResourceState state{aeg::rhi::ResourceState::Undefined};
+    bool beginFrame() override { return true; }
+    aeg::rhi::CommandList& commandList() override { return commands; }
+    aeg::rhi::RenderPass& renderPass() override { return pass; }
+    aeg::rhi::Framebuffer& framebuffer() override { return frame; }
+    aeg::rhi::Extent2D extent() const override { return {64, 64}; }
+    std::uint32_t minimumImageCount() const override { return 2; }
+    std::uint32_t imageCount() const override { return 2; }
+    void submit() override {}
+    void present() override { state = aeg::rhi::ResourceState::Present; }
+    aeg::rhi::Texture& image() override { return texture; }
+    aeg::rhi::ResourceState imageState() const override { return state; }
+};
+void swapchainImageContracts() {
+    FakeSwapchainContract swapchain;
+    if (&swapchain.image() != &swapchain.texture || swapchain.imageState() != aeg::rhi::ResourceState::Undefined)
+        throw std::runtime_error("Swapchain image contract did not expose Undefined image");
+    swapchain.present();
+    if (swapchain.imageState() != aeg::rhi::ResourceState::Present)
+        throw std::runtime_error("Swapchain image state did not transition to Present");
+}
 template <class F> void rejects(F action) {
     try {
         action();
@@ -134,6 +166,7 @@ int main() {
         rejects([] { validate(TextureDesc{{64, 32}, Format::D32Float, TextureUsage::ColorAttachment}); });
         rejects([] { validate(TextureDesc{{64, 32}, Format::Rgba8Unorm, TextureUsage::DepthAttachment}); });
         depthOnlyContracts();
+        swapchainImageContracts();
         RenderPassDesc pass;
         pass.attachments = {
             {Format::Rgba8Unorm, 4, LoadOp::Clear, StoreOp::Discard, ResourceState::Undefined,

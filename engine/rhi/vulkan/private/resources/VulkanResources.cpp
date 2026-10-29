@@ -64,6 +64,7 @@ VulkanBuffer::~VulkanBuffer() {
     if (memory) vkFreeMemory(owner->handle, memory, nullptr);
 }
 VulkanTexture::~VulkanTexture() {
+    if (nonOwning) return;
     for (const auto storageView : storageViews)
         if (storageView) vkDestroyImageView(owner->handle, storageView, nullptr);
     if (view) vkDestroyImageView(owner->handle, view, nullptr);

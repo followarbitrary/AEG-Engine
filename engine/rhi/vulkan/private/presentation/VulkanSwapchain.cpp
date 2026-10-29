@@ -22,6 +22,8 @@ VulkanSwapchain::VulkanSwapchain(VulkanDevice& device) : owner(&device), command
 VulkanSwapchain::~VulkanSwapchain() { cleanup(); }
 void VulkanSwapchain::destroyImages() noexcept {
     frames.clear();
+    images.clear();
+    imageStates.clear();
     for (auto view : views) vkDestroyImageView(owner->handle, view, nullptr);
     for (auto semaphore : finished) vkDestroySemaphore(owner->handle, semaphore, nullptr);
     views.clear();
@@ -110,21 +112,23 @@ void VulkanSwapchain::create() {
     info.clipped = VK_TRUE;
     check(vkCreateSwapchainKHR(owner->handle, &info, nullptr, &handle), "vkCreateSwapchainKHR");
     check(vkGetSwapchainImagesKHR(owner->handle, handle, &count, nullptr), "vkGetSwapchainImagesKHR");
-    std::vector<VkImage> images(count);
-    check(vkGetSwapchainImagesKHR(owner->handle, handle, &count, images.data()), "vkGetSwapchainImagesKHR");
+    std::vector<VkImage> nativeImages(count);
+    check(vkGetSwapchainImagesKHR(owner->handle, handle, &count, nativeImages.data()), "vkGetSwapchainImagesKHR");
     if (!pass) {
         RenderPassDesc desc;
-        desc.attachments.push_back({genericFormat(format), 1, LoadOp::Clear, StoreOp::Store, ResourceState::Undefined,
-                                    ResourceState::Present});
+        desc.attachments.push_back({genericFormat(format), 1, LoadOp::Clear, StoreOp::Store,
+                                    ResourceState::ColorAttachment, ResourceState::ColorAttachment});
         desc.colors.push_back(0);
         pass = owner->createRenderPass(desc);
     }
     auto& nativePass = owned<VulkanRenderPass>(*owner, *pass);
     // Reserve before creating native objects so a vector allocation cannot strand a native handle.
-    views.reserve(images.size());
-    frames.reserve(images.size());
-    finished.reserve(images.size());
-    for (auto image : images) {
+    views.reserve(nativeImages.size());
+    frames.reserve(nativeImages.size());
+    finished.reserve(nativeImages.size());
+    images.reserve(nativeImages.size());
+    imageStates.reserve(nativeImages.size());
+    for (auto image : nativeImages) {
         VkImageViewCreateInfo view{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
         view.image = image;
         view.viewType = VK_IMAGE_VIEW_TYPE_2D;
@@ -133,6 +137,14 @@ void VulkanSwapchain::create() {
         VkImageView nativeView{};
         check(vkCreateImageView(owner->handle, &view, nullptr, &nativeView), "vkCreateImageView(swapchain)");
         views.push_back(nativeView);
+        auto texture = std::make_unique<VulkanTexture>(*owner,
+                                                       TextureDesc{{size.width, size.height}, genericFormat(format),
+                                                                   TextureUsage::ColorAttachment});
+        texture->handle = image;
+        texture->view = nativeView;
+        texture->nonOwning = true;
+        images.push_back(std::move(texture));
+        imageStates.push_back(ResourceState::Undefined);
         auto frame = std::make_unique<VulkanFramebuffer>(*owner);
         frame->pass = &nativePass;
         frame->size = size;
@@ -191,6 +203,14 @@ Framebuffer& VulkanSwapchain::framebuffer() {
     if (!acquiredFrame) throw std::logic_error("No acquired swapchain framebuffer");
     return *frames.at(imageIndex);
 }
+Texture& VulkanSwapchain::image() {
+    if (!acquiredFrame) throw std::logic_error("No acquired swapchain image");
+    return *images.at(imageIndex);
+}
+ResourceState VulkanSwapchain::imageState() const {
+    if (!acquiredFrame) throw std::logic_error("No acquired swapchain image");
+    return imageStates.at(imageIndex);
+}
 void VulkanSwapchain::submit() {
     if (!acquiredFrame || submitted || commands.inPass)
         throw std::logic_error("Swapchain frame is not ready to submit");
@@ -220,10 +240,13 @@ void VulkanSwapchain::present() {
     info.pImageIndices = &imageIndex;
     const auto result = vkQueuePresentKHR(owner->presentQueue, &info);
     submitted = false;
-    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR)
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
         rebuild = true;
-    else
+        if (result == VK_SUBOPTIMAL_KHR) imageStates.at(imageIndex) = ResourceState::Present;
+    } else {
         check(result, "vkQueuePresentKHR");
+        imageStates.at(imageIndex) = ResourceState::Present;
+    }
 }
 VkRenderPass nativeRenderPass(Device& device, Swapchain& swapchain) {
     auto& native = nativeDevice(device);

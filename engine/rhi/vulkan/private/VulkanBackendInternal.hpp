@@ -63,6 +63,7 @@ public:
     VkDeviceMemory memory{};
     VkImageView view{};
     std::vector<VkImageView> storageViews;
+    bool nonOwning{};
     VulkanTexture(VulkanDevice& device, TextureDesc description) : owner(&device), desc(description) {}
     ~VulkanTexture() override;
     const TextureDesc& description() const override { return desc; }
@@ -230,6 +231,8 @@ public:
     bool rebuild{}, acquiredFrame{}, submitted{};
     std::unique_ptr<RenderPass> pass;
     std::vector<std::unique_ptr<VulkanFramebuffer>> frames;
+    std::vector<std::unique_ptr<VulkanTexture>> images;
+    std::vector<ResourceState> imageStates;
     std::vector<VkImageView> views;
     std::vector<VkSemaphore> finished;
     VulkanCommands commands;
@@ -244,6 +247,8 @@ public:
     Extent2D extent() const override { return size; }
     std::uint32_t minimumImageCount() const override { return minimum; }
     std::uint32_t imageCount() const override { return static_cast<std::uint32_t>(frames.size()); }
+    Texture& image() override;
+    ResourceState imageState() const override;
     void submit() override;
     void present() override;
     void create();
