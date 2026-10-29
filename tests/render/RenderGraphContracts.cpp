@@ -312,6 +312,99 @@ void culledTransientAllocationContract() {
     aeg::tests::FakeCommands commands(&device.caps);
     graph.execute(commands, device, pool, FrameToken{1});
 }
+
+void computeStorageAndCullingContracts() {
+    aeg::tests::FakeDevice device;
+    Pool pool(device);
+    aeg::tests::FakeCommands commands(&device.caps);
+    Graph graph;
+    const auto storage = graph.createTexture(
+        {{8, 8}, aeg::rhi::Format::Rgba8Unorm, aeg::rhi::TextureUsage::Storage}, "compute", true);
+    bool firstInPass = true;
+    bool secondInPass = true;
+    graph.addPass("compute write", Graph::PassType::Compute, {}, [&](Graph::PassContext& context) {
+        firstInPass = commands.inRenderPass();
+        require(&context.texture(storage) != nullptr, "Compute callback could not resolve storage texture");
+    }).write(storage, Graph::Usage::StorageWrite);
+    graph.addPass("compute read modify", Graph::PassType::Compute, {}, [&](Graph::PassContext&) {
+        secondInPass = commands.inRenderPass();
+    }).readWrite(storage);
+    const auto result = graph.compile({storage});
+    require(result.passes.size() == 2, "Compute storage passes were not retained");
+    require(result.passes[0].preBarriers.size() == 1 && result.passes[0].preBarriers[0].after == State::Storage,
+            "Compute storage write did not enter GENERAL storage state");
+    require(result.passes[1].preBarriers.size() == 1 && result.passes[1].preBarriers[0].before == State::Storage &&
+                result.passes[1].preBarriers[0].after == State::Storage,
+            "Storage write to read-modify-write did not emit a memory barrier");
+    graph.execute(commands, device, pool, FrameToken{1});
+    require(!firstInPass && !secondInPass, "Compute callback ran inside a graphics render pass");
+
+    Graph invalid;
+    const auto invalidStorage = invalid.createTexture(
+        {{4, 4}, aeg::rhi::Format::Rgba8Unorm, aeg::rhi::TextureUsage::Storage}, "invalid", false);
+    invalid.addPass("graphics storage", Graph::PassType::Graphics, {}, {}).write(invalidStorage, Graph::Usage::StorageWrite);
+    rejects([&] { invalid.compile({invalidStorage}); }, "Storage usage was accepted by a graphics pass");
+
+    Graph roots;
+    const auto dead = roots.createTexture(
+        {{4, 4}, aeg::rhi::Format::Rgba8Unorm, aeg::rhi::TextureUsage::ColorAttachment}, "dead", true);
+    const auto retained = roots.createTexture(
+        {{4, 4}, aeg::rhi::Format::Rgba8Unorm, aeg::rhi::TextureUsage::ColorAttachment}, "retained", true);
+    roots.addPass("dead pass", Graph::PassType::Graphics, {}, {}).write(dead, Graph::Usage::ColorWrite);
+    roots.addPass("never cull", Graph::PassType::Graphics, Graph::PassFlags::NeverCull, {})
+        .write(retained, Graph::Usage::ColorWrite);
+    const auto rootsResult = roots.compile({});
+    require(rootsResult.passes.size() == 1 && rootsResult.passes.front().name == "never cull",
+            "No-output compilation did not cull dead passes while retaining NeverCull");
+    require(rootsResult.resources[dead.index].firstUse == std::numeric_limits<std::size_t>::max() &&
+                rootsResult.resources[retained.index].firstUse == 0,
+            "Culled/root transient lifetime metadata is incorrect");
+}
+
+void debugOrderingAndFrameReclamationContracts() {
+    Graph graph;
+    const auto first = graph.createTexture({{4, 4}, aeg::rhi::Format::Rgba8Unorm,
+                                            aeg::rhi::TextureUsage::ColorAttachment}, "first", false);
+    const auto second = graph.createTexture({{4, 4}, aeg::rhi::Format::Rgba8Unorm,
+                                             aeg::rhi::TextureUsage::ColorAttachment}, "second", false);
+    graph.addPass("first", Graph::PassType::Graphics, {}, {}).write(first, Graph::Usage::ColorWrite);
+    graph.addPass("second", Graph::PassType::Graphics, {}, {}).write(second, Graph::Usage::ColorWrite);
+    graph.compile({first, second});
+    const auto dump = graph.debugDump();
+    const auto firstPosition = dump.find("[0] first");
+    const auto secondPosition = dump.find("[1] second");
+    require(firstPosition != std::string::npos && secondPosition != std::string::npos && firstPosition < secondPosition,
+            "Graph debug dump pass ordering is not deterministic");
+
+    aeg::tests::FakeDevice device;
+    Pool pool(device);
+    const aeg::rhi::TextureDesc desc{{8, 8}, aeg::rhi::Format::Rgba8Unorm,
+                                     aeg::rhi::TextureUsage::ColorAttachment};
+    auto& frameOne = pool.acquire(desc);
+    pool.retire(frameOne, FrameToken{10});
+    pool.reclaimCompletedFrame(FrameToken{10});
+    auto& frameTwo = pool.acquire(desc);
+    require(&frameTwo != &frameOne, "Frame-token reclamation reused a texture before GPU completion");
+    pool.retire(frameTwo, FrameToken{11});
+    pool.reclaimCompletedFrame(FrameToken{12});
+    auto& rebuilt = pool.acquire(desc);
+    require(&rebuilt == &frameOne || &rebuilt == &frameTwo,
+            "Resize/rebuild frame-token reclamation did not release completed textures");
+
+    aeg::tests::FakeDevice importedDevice;
+    auto importedTexture = importedDevice.createTexture(
+        {{8, 8}, aeg::rhi::Format::Rgba8Unorm, aeg::rhi::TextureUsage::Storage});
+    State importedState = State::Storage;
+    Graph importedGraph;
+    const auto imported = importedGraph.importTexture(*importedTexture, importedState, "imported storage");
+    importedGraph.addPass("first storage read", Graph::PassType::Compute, {}, {})
+        .read(imported, Graph::Usage::StorageRead);
+    const auto importedResult = importedGraph.compile({imported});
+    require(importedResult.passes.size() == 1 && importedResult.passes[0].preBarriers.size() == 1 &&
+                importedResult.passes[0].preBarriers[0].before == State::Storage &&
+                importedResult.passes[0].preBarriers[0].after == State::Storage,
+            "First use of imported storage did not emit a Storage-to-Storage dependency barrier");
+}
 }
 
 int main() {
@@ -326,6 +419,8 @@ int main() {
         externalSwapchainExecutionContract();
         repeatedExecutionContract();
         culledTransientAllocationContract();
+        computeStorageAndCullingContracts();
+        debugOrderingAndFrameReclamationContracts();
         std::cout << "PASS RenderGraph contracts\n";
         return 0;
     } catch (const std::exception& error) {

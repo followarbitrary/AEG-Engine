@@ -155,9 +155,11 @@ struct RenderGraph::Impl {
             fail("ColorWrite requires ColorAttachment texture usage");
         if (usage == Usage::DepthWrite && !hasUsage(desc.usage, rhi::TextureUsage::DepthAttachment))
             fail("DepthWrite requires DepthAttachment texture usage");
-        if ((usage == Usage::StorageRead || usage == Usage::StorageWrite || usage == Usage::StorageReadWrite) &&
-            !hasUsage(desc.usage, rhi::TextureUsage::Storage))
-            fail("Storage usage requires Storage texture usage");
+        if (usage == Usage::StorageRead || usage == Usage::StorageWrite || usage == Usage::StorageReadWrite) {
+            if (pass.type != PassType::Compute) fail("Storage usage requires a compute pass");
+            if (!hasUsage(desc.usage, rhi::TextureUsage::Storage))
+                fail("Storage usage requires Storage texture usage");
+        }
         if (usage == Usage::CopySrc && !hasUsage(desc.usage, rhi::TextureUsage::CopySource))
             fail("CopySrc requires CopySource texture usage");
         if (usage == Usage::CopyDst && !hasUsage(desc.usage, rhi::TextureUsage::CopyDestination))
@@ -409,7 +411,11 @@ RenderGraph::CompileResult RenderGraph::compile(std::span<const Handle> outputs)
             firstUse[index] = std::min(firstUse[index], compiled);
             lastUse[index] = compiled;
             const auto desired = usageState(declaration.usage);
-            if (current[index] != desired) {
+            // Storage resources remain in GENERAL layout across compute passes,
+            // but a write/read-modify-write boundary still needs an explicit
+            // memory dependency. RHI backends represent this as Storage ->
+            // Storage so access scopes are refreshed without changing layout.
+            if (current[index] != desired || desired == rhi::ResourceState::Storage) {
                 pass.preBarriers.push_back({declaration.resource, current[index], desired, compiled});
                 current[index] = desired;
             }
@@ -427,7 +433,7 @@ RenderGraph::CompileResult RenderGraph::compile(std::span<const Handle> outputs)
     impl.lastResult = result;
     std::ostringstream dump;
     dump << "RenderGraph\npasses:\n";
-    for (const auto& pass : result.allPasses) {
+    const auto appendDumpPass = [&](const CompiledPass& pass) {
         dump << "  [" << pass.originalIndex << "] " << pass.name << " type=" << passTypeName(pass.type)
              << " flags=" << static_cast<std::uint32_t>(pass.flags) << " culled=" << (pass.culled ? "true" : "false")
              << "\n";
@@ -442,7 +448,13 @@ RenderGraph::CompileResult RenderGraph::compile(std::span<const Handle> outputs)
                 dump << "    post " << impl.resources[barrier.resource.index].name << " " << stateName(barrier.before)
                      << " -> " << stateName(barrier.after) << "\n";
         }
-    }
+    };
+    // Retained entries are emitted in their compiled/topological execution
+    // order. Culled entries follow in declaration order so every pass remains
+    // visible while the dump mirrors actual recording order for live work.
+    for (const auto& pass : result.passes) appendDumpPass(pass);
+    for (const auto& pass : result.allPasses)
+        if (pass.culled) appendDumpPass(pass);
     dump << "resources:\n";
     for (const auto& resource : result.resources)
         dump << "  " << resource.name << " imported=" << (resource.imported ? "true" : "false")

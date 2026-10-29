@@ -14,6 +14,7 @@ struct EditorGraphics::Impl {
     std::unique_ptr<render::TransientTexturePool> graphPool;
     render::FrameToken graphFrame{};
     std::string graphDump;
+    bool graphDebug{};
     ImTextureID texture{};
     bool platformInitialized{};
 
@@ -53,6 +54,7 @@ EditorGraphics::EditorGraphics(GLFWwindow* window, const EditorBackendFactory& f
     if (!ImGui_ImplGlfw_InitForOther(window, true)) throw std::runtime_error("ImGui GLFW initialization failed");
     impl_->platformInitialized = true;
     impl_->backend = factory(native, validation);
+    impl_->graphDebug = validation;
     if (!impl_->backend.device || !impl_->backend.swapchain || !impl_->backend.gui)
         throw std::runtime_error("Editor backend factory returned incomplete graphics services");
     impl_->scene = std::make_unique<render::Renderer>(*impl_->backend.device);
@@ -91,7 +93,10 @@ void EditorGraphics::drawFrame(render::RenderSettings& settings, const std::func
         .write(swapchain, render::RenderGraph::Usage::ColorWrite);
     const auto compiled = graph.compile({swapchain});
     (void)compiled;
-    impl_->graphDump = graph.debugDump();
+    if (impl_->graphDebug)
+        impl_->graphDump = graph.debugDump();
+    else
+        impl_->graphDump.clear();
     graph.execute(commands, *backend.device, *impl_->graphPool, frameToken);
     backend.swapchain->submit();
     impl_->scene->frameSubmitted();
