@@ -22,6 +22,14 @@ foreach(header IN LISTS aeg_rhi_public_headers)
 endforeach()
 
 if(TARGET aeg_render)
+    add_executable(aeg_render_graph_contracts ../render/RenderGraphContracts.cpp)
+    target_link_libraries(aeg_render_graph_contracts PRIVATE aeg::render)
+    target_include_directories(aeg_render_graph_contracts PRIVATE
+        "${PROJECT_SOURCE_DIR}/tests/rhi")
+    aeg_project_options(aeg_render_graph_contracts)
+    add_test(NAME aeg_render_graph_contracts COMMAND aeg_render_graph_contracts)
+    set_tests_properties(aeg_render_graph_contracts PROPERTIES LABELS cpu)
+
     add_executable(aeg_hdr_commands_test ../render/HdrCommands.cpp)
     target_link_libraries(aeg_hdr_commands_test PRIVATE aeg::render)
     aeg_project_options(aeg_hdr_commands_test)

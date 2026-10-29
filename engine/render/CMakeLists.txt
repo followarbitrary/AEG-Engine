@@ -6,6 +6,7 @@ add_library(aeg_render STATIC
     public/ShadowSettings.hpp
     public/EnvironmentSettings.hpp
     public/ToneMappingSettings.hpp
+    public/RenderGraph.hpp
     private/Renderer.cpp
     private/tonemapping/ToneMappingPass.cpp
     private/environment/EnvironmentBaker.cpp
@@ -19,7 +20,8 @@ add_library(aeg_render STATIC
     private/viewport/ViewportCapture.cpp
     private/antialiasing/Antialiasing.cpp
     private/antialiasing/TaaPass.cpp
-    private/antialiasing/FxaaPass.cpp)
+    private/antialiasing/FxaaPass.cpp
+    private/rendergraph/RenderGraph.cpp)
 add_library(aeg::render ALIAS aeg_render)
 target_include_directories(aeg_render
     PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/public"
