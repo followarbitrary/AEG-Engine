@@ -8,6 +8,9 @@ struct ViewportTargets {
     bool historyInitialized{};
     std::shared_ptr<rhi::Texture> color, depth, multisample, filtered, motion, toneMapped;
     std::array<std::shared_ptr<rhi::Texture>, 2> historyColor, historyDepth;
+    // Imported TAA images retain their state between graph executions. The
+    // graph owns the transitions while the viewport retains the textures.
+    std::array<rhi::ResourceState, 2> historyColorState{}, historyDepthState{};
     std::unique_ptr<rhi::BindingSet> postDescriptor;
     std::array<std::unique_ptr<rhi::BindingSet>, 2> temporalDescriptors;
     std::array<std::unique_ptr<rhi::BindingSet>, 3> toneDescriptors;

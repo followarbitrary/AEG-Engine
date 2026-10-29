@@ -16,6 +16,7 @@ public:
     TransientTexturePool& operator=(const TransientTexturePool&) = delete;
 
     rhi::Texture& acquire(const RenderGraph::TextureDesc& description);
+    [[nodiscard]] std::shared_ptr<rhi::Texture> lease(rhi::Texture& texture) const;
     void retire(rhi::Texture&, FrameToken);
     void releaseImmediately(rhi::Texture&);
     void reclaimCompletedFrame(FrameToken);
@@ -23,7 +24,7 @@ public:
 
 private:
     struct Entry {
-        std::unique_ptr<rhi::Texture> texture;
+        std::shared_ptr<rhi::Texture> texture;
         RenderGraph::TextureDesc description;
         std::optional<FrameToken> retired;
         bool immediatelyAvailable{};

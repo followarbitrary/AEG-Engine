@@ -345,6 +345,17 @@ void computeStorageAndCullingContracts() {
     invalid.addPass("graphics storage", Graph::PassType::Graphics, {}, {}).write(invalidStorage, Graph::Usage::StorageWrite);
     rejects([&] { invalid.compile({invalidStorage}); }, "Storage usage was accepted by a graphics pass");
 
+    Graph invalidGraphics;
+    const auto color = invalidGraphics.createTexture(
+        {{4, 4}, aeg::rhi::Format::Rgba8Unorm, aeg::rhi::TextureUsage::ColorAttachment}, "color", false);
+    invalidGraphics.addPass("compute color", Graph::PassType::Compute, {}, {}).write(color, Graph::Usage::ColorWrite);
+    rejects([&] { invalidGraphics.compile({color}); }, "Color attachment usage was accepted by a compute pass");
+    Graph invalidCopy;
+    const auto copyTarget = invalidCopy.createTexture(
+        {{4, 4}, aeg::rhi::Format::Rgba8Unorm, aeg::rhi::TextureUsage::CopyDestination}, "copy", false);
+    invalidCopy.addPass("graphics copy", Graph::PassType::Graphics, {}, {}).write(copyTarget, Graph::Usage::CopyDst);
+    rejects([&] { invalidCopy.compile({copyTarget}); }, "Copy usage was accepted by a graphics pass");
+
     Graph roots;
     const auto dead = roots.createTexture(
         {{4, 4}, aeg::rhi::Format::Rgba8Unorm, aeg::rhi::TextureUsage::ColorAttachment}, "dead", true);

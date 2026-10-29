@@ -44,6 +44,7 @@ public:
     const std::string& deviceName() { return renderer().deviceName(); }
     std::uint32_t validationErrorCount() { return renderer().validationErrorCount(); }
     const std::string& renderGraphDump() const { return graphics_.renderGraphDump(); }
+    const std::string& rendererGraphDump() { return renderer().renderGraphDump(); }
 
     render::Renderer& renderer() { return graphics_.renderer(); }
 

@@ -44,6 +44,8 @@ public:
     void waitIdle();
     [[nodiscard]] const std::string& deviceName() const;
     [[nodiscard]] std::uint32_t validationErrorCount() const;
+    // Validation/debug snapshot of the renderer's internal migration graph.
+    [[nodiscard]] const std::string& renderGraphDump() const;
 
 private:
     struct Impl;

@@ -167,9 +167,38 @@ TemporalAttachments temporalAttachments(const tests::FakeCommands& commands, tes
     require(result.previousColor != scene.color && result.previousColor != scene.motion &&
                 result.previousDepth != scene.color && result.previousDepth != scene.motion,
             "TAA history aliases scene inputs");
-    require(fxaaOutput(commands, 3, toneOutput(commands, 2, result.currentColor)) == finalOutput,
-            "Final output does not use FXAA after HDR tone mapping");
+    const auto fxaaFinal = fxaaOutput(commands, 3, toneOutput(commands, 2, result.currentColor));
+    require(fxaaFinal == finalOutput, "Final output does not use FXAA after HDR tone mapping");
     return result;
+}
+void transientOutputLeaseContract() {
+    tests::FakeDevice device;
+    std::shared_ptr<rhi::Texture> held;
+    rhi::TextureDesc expected;
+    {
+        render::Renderer renderer(device);
+        renderer.resizeViewport(11, 9);
+        renderer.setAntialiasing({1, true, true});
+        tests::FakeCommands first;
+        renderer.recordFrame(first, {});
+        require(renderer.renderGraphDump().find("pre taa-history-color-1 Undefined -> Sampled") != std::string::npos,
+                "Initial TAA read history did not receive its graph transition");
+        renderer.frameSubmitted();
+        held = renderer.outputTexture();
+        expected = held->description();
+        tests::FakeCommands second;
+        renderer.recordFrame(second, {});
+        require(renderer.renderGraphDump().find("resource=taa-history-color-1") == std::string::npos,
+                "TAA graph planned a transition for the temporal write image");
+        require(renderer.outputTexture().get() == held.get(),
+                "Fence-completed transient output changed identity while an external lease was held");
+        renderer.frameSubmitted();
+    }
+    require(bool(held), "External output lease was unexpectedly empty after Renderer teardown");
+    const auto& actual = held->description();
+    require(actual.extent == expected.extent && actual.format == expected.format &&
+                actual.usage == expected.usage && actual.samples == expected.samples,
+            "External output lease did not keep the transient image alive through Renderer teardown");
 }
 void transparencyContracts() {
     tests::FakeDevice device;
@@ -476,6 +505,7 @@ int main(int argc, char** argv) {
     if (argc != 2) return 1;
     try {
         using namespace aeg;
+        transientOutputLeaseContract();
         transparencyContracts();
         pbrContracts();
         tests::FakeDevice device;
@@ -500,6 +530,29 @@ int main(int argc, char** argv) {
         tests::FakeCommands first;
         renderer.recordFrame(first, settings);
         require(first.passes == std::vector<std::string>{"scene", "taa", "tone", "fxaa"}, "RHI pass ordering changed");
+        const auto& graphDump = renderer.renderGraphDump();
+        const auto resourceLine = [&](const char* name) {
+            const auto begin = graphDump.find(name);
+            if (begin == std::string::npos) return std::string{};
+            const auto end = graphDump.find('\n', begin);
+            return graphDump.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
+        };
+        require(resourceLine("  taa-history-color-1 imported").find("imported=true transient=false") !=
+                        std::string::npos &&
+                    resourceLine("  taa-history-color-1 imported").find("first=0 last=0") != std::string::npos,
+                "TAA history color was not imported with a single-use graph lifetime");
+        require(resourceLine("  taa-history-depth-1 imported").find("imported=true transient=false") !=
+                        std::string::npos &&
+                    resourceLine("  taa-history-depth-1 imported").find("first=0 last=0") != std::string::npos,
+                "TAA history depth was not imported with a single-use graph lifetime");
+        require(graphDump.find("resource=taa-history-color-0") == std::string::npos &&
+                    graphDump.find("resource=taa-history-depth-0") == std::string::npos,
+                "TAA graph claimed ownership of the temporal write images");
+        require(resourceLine("  fxaa-intermediate imported").find("imported=false transient=true") !=
+                        std::string::npos &&
+                    resourceLine("  fxaa-intermediate imported").find("desc=17x13") != std::string::npos &&
+                    resourceLine("  fxaa-intermediate imported").find("first=0 last=0") != std::string::npos,
+                "FXAA intermediate was not graph-owned with the expected lifetime");
         require(first.indexedDraws == 1, "Model draw bypassed command interface");
         const auto initial = temporalAttachments(first, device, renderer.outputTexture().get());
         require(pass(first, 0).framebuffer.extent == rhi::Extent2D{17, 13}, "Scene framebuffer extent changed");

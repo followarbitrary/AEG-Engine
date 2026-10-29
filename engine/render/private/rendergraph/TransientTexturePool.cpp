@@ -24,8 +24,14 @@ rhi::Texture& TransientTexturePool::acquire(const RenderGraph::TextureDesc& desc
     }
     auto texture = device_.createTexture(description);
     if (!texture) throw std::runtime_error("Transient texture allocation returned null");
-    entries_.push_back({std::move(texture), description, std::nullopt, false});
+    entries_.push_back({std::shared_ptr<rhi::Texture>(std::move(texture)), description, std::nullopt, false});
     return *entries_.back().texture;
+}
+
+std::shared_ptr<rhi::Texture> TransientTexturePool::lease(rhi::Texture& texture) const {
+    const auto found = std::ranges::find_if(entries_, [&](const auto& entry) { return entry.texture.get() == &texture; });
+    if (found == entries_.end()) throw std::invalid_argument("Transient pool cannot lease an unknown texture");
+    return found->texture;
 }
 
 void TransientTexturePool::retire(rhi::Texture& texture, FrameToken token) {

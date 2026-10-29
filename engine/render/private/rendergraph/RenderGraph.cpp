@@ -119,6 +119,9 @@ struct RenderGraph::Impl {
         ExecuteCallback callback;
         std::vector<Declaration> declarations;
         std::vector<rhi::ClearValue> clearValues;
+        rhi::RenderPass* externalPass{};
+        std::optional<rhi::Extent2D> externalExtent;
+        std::unique_ptr<rhi::Framebuffer>* externalFramebufferStorage{};
     };
 
     std::uint32_t generation{1};
@@ -147,8 +150,15 @@ struct RenderGraph::Impl {
         };
         if (usage == Usage::Present) {
             if (!resource.swapchain) fail("Present usage requires an imported swapchain resource");
+            if (pass.type != PassType::Graphics) fail("Present usage requires a graphics pass");
             return;
         }
+        if ((usage == Usage::ColorWrite || usage == Usage::DepthWrite) && pass.type != PassType::Graphics)
+            fail("Attachment writes require a graphics pass");
+        if ((usage == Usage::CopySrc || usage == Usage::CopyDst) && pass.type != PassType::Copy)
+            fail("Copy usage requires a copy pass");
+        if (usage == Usage::SampledRead && pass.type == PassType::Copy)
+            fail("Sampled reads require a graphics or compute pass");
         if (usage == Usage::SampledRead && !hasUsage(desc.usage, rhi::TextureUsage::Sampled))
             fail("SampledRead requires Sampled texture usage");
         if (usage == Usage::ColorWrite && !hasUsage(desc.usage, rhi::TextureUsage::ColorAttachment))
@@ -229,6 +239,18 @@ RenderGraph::PassBuilder& RenderGraph::PassBuilder::clear(rhi::ClearValue value)
     auto& pass = graph_->impl_->passes[index_];
     if (pass.type != PassType::Graphics) throw std::invalid_argument("RenderGraph clear values require a graphics pass");
     pass.clearValues.push_back(value);
+    graph_->impl_->compiled = false;
+    return *this;
+}
+
+RenderGraph::PassBuilder& RenderGraph::PassBuilder::setExternalRenderPass(
+    rhi::RenderPass& pass, rhi::Extent2D extent, std::unique_ptr<rhi::Framebuffer>* framebufferStorage) {
+    if (!graph_ || index_ >= graph_->impl_->passes.size()) throw std::logic_error("Invalid RenderGraph pass builder");
+    auto& source = graph_->impl_->passes[index_];
+    if (source.type != PassType::Graphics) throw std::invalid_argument("External render passes require graphics passes");
+    source.externalPass = &pass;
+    source.externalExtent = extent;
+    source.externalFramebufferStorage = framebufferStorage;
     graph_->impl_->compiled = false;
     return *this;
 }
@@ -539,7 +561,18 @@ void RenderGraph::execute(rhi::CommandList& commands, rhi::Device& device, Trans
                 rhi::Framebuffer* framebuffer = nullptr;
                 rhi::Extent2D extent = attachments.front()->description().extent;
                 std::vector<rhi::ClearValue> clearValues = source.clearValues;
-                if (externalSwapchain) {
+                std::unique_ptr<rhi::Framebuffer> externalFramebuffer;
+                if (source.externalPass) {
+                    renderPass = source.externalPass;
+                    extent = source.externalExtent.value_or(extent);
+                    if (source.externalFramebufferStorage) {
+                        *source.externalFramebufferStorage = device.createFramebuffer({renderPass, attachments, extent});
+                        framebuffer = source.externalFramebufferStorage->get();
+                    } else {
+                        externalFramebuffer = device.createFramebuffer({renderPass, attachments, extent});
+                        framebuffer = externalFramebuffer.get();
+                    }
+                } else if (externalSwapchain) {
                     const bool loadCompatible = contains(compiled.flags, PassFlags::NeverCull);
                     renderPass = loadCompatible ? &externalSwapchain->loadRenderPass()
                                                 : &externalSwapchain->renderPass();

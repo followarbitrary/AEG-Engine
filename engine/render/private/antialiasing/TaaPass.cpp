@@ -14,13 +14,9 @@ bool Renderer::Impl::perspectiveProjection(const aeg::math::Mat4& matrix) {
 
 void Renderer::Impl::drawTemporal(rhi::CommandList& commands) {
     if (!aa.taa) return;
-    if (!viewport->historyInitialized) {
-        // The first temporal pass binds both history images, even when it
-        // ignores their contents. Only a successful submit initializes them.
-        for (std::size_t i = 0; i < 2; ++i)
-            for (const auto& image : {viewport->historyColor[i], viewport->historyDepth[i]})
-                commands.transition(*image, rhi::ResourceState::Undefined, rhi::ResourceState::Sampled);
-    }
+    // TAA history images are imported into the renderer graph at frame start;
+    // its sampled-read declarations own these transitions for both first use
+    // and subsequent ping-pong frames.
     const auto writeIndex = 1u - recordingHistory.readIndex;
     commands.beginRenderPass(*temporalPass, *viewport->temporalFrames[writeIndex], viewport->extent(), {});
     commands.setViewport(viewport->extent());
@@ -33,6 +29,10 @@ void Renderer::Impl::drawTemporal(rhi::CommandList& commands) {
     commands.pushConstants(*temporalLayout, std::as_bytes(std::span(&push, 1)));
     commands.draw(3);
     commands.endRenderPass();
+    // The temporal render pass owns the write image's attachment transition;
+    // publish its resulting sampled state only after frameSubmitted().
+    pendingHistoryColorState[writeIndex] = rhi::ResourceState::Sampled;
+    pendingHistoryDepthState[writeIndex] = rhi::ResourceState::Sampled;
 }
 
 }

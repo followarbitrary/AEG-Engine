@@ -33,10 +33,9 @@ std::unique_ptr<ViewportTargets> Renderer::Impl::createViewport(std::uint32_t wi
     const std::array sceneToneWrites{rhi::BindingWrite{0, nullptr, candidate->color.get(), viewportSampler.get()}};
     candidate->toneDescriptors[0] = device.createBindingSet(*postSetLayout, sceneToneWrites);
     if (settings.fxaa) {
-        candidate->filtered = create(displayFormat, outputUsage);
-        candidate->postFrame = device.createFramebuffer({postPass.get(), {candidate->filtered.get()}, {width, height}});
-        const std::array writes{rhi::BindingWrite{0, nullptr, candidate->toneMapped.get(), viewportSampler.get()}};
-        candidate->postDescriptor = device.createBindingSet(*postSetLayout, writes);
+        // FXAA's output is a graph-owned transient. Its framebuffer and
+        // descriptor are materialized once the graph resolves the pool image
+        // at record time.
     }
     if (settings.taa) {
         for (std::size_t i = 0; i < 2; ++i) {

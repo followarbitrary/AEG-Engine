@@ -8,6 +8,8 @@
 #include "antialiasing/TemporalHistory.hpp"
 #include "shaders/ShaderLibrary.hpp"
 #include "environment/EnvironmentBaker.hpp"
+#include "rendergraph/TransientTexturePool.hpp"
+#include <RenderGraph.hpp>
 #include <Utf8Path.hpp>
 #include <algorithm>
 #include <array>
@@ -37,6 +39,13 @@ struct EnvironmentResources {
 
 struct Renderer::Impl {
     rhi::Device& device;
+    TransientTexturePool graphPool;
+    FrameToken graphFrame{};
+    rhi::Texture* graphIntermediate{};
+    std::shared_ptr<rhi::Texture> graphFiltered;
+    std::unique_ptr<rhi::Framebuffer> graphPostFrame;
+    std::unique_ptr<rhi::BindingSet> graphPostDescriptor;
+    std::string graphDump;
     AntialiasingSettings aa;
     ToneMappingSettings toneMappingSettings;
     rhi::Format sceneFormat{rhi::Format::Undefined};
@@ -71,6 +80,8 @@ struct Renderer::Impl {
     std::shared_ptr<rhi::Texture> submittedOutput, pendingOutput;
     RenderSettings pendingSettings;
     bool pendingFrame{};
+    bool retryingFrame{};
+    std::array<rhi::ResourceState, 2> pendingHistoryColorState{}, pendingHistoryDepthState{};
 
     explicit Impl(rhi::Device& target);
     ~Impl() noexcept;
@@ -106,6 +117,8 @@ struct Renderer::Impl {
     void drawTemporal(rhi::CommandList& commands);
     void drawToneMapping(rhi::CommandList& commands);
     void drawFxaa(rhi::CommandList& commands);
+    void prepareRenderGraph(rhi::CommandList& commands);
+    void recordFxaaGraph(rhi::CommandList& commands);
     void recordFrame(rhi::CommandList& commands, const RenderSettings& settings);
     void frameSubmitted();
     std::shared_ptr<rhi::Texture> outputTexture() const;

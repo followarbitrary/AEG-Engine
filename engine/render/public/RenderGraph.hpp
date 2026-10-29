@@ -115,6 +115,8 @@ public:
         PassBuilder& write(Handle resource, Usage usage);
         PassBuilder& readWrite(Handle resource, Usage usage = Usage::StorageReadWrite);
         PassBuilder& clear(rhi::ClearValue value);
+        PassBuilder& setExternalRenderPass(rhi::RenderPass& pass, rhi::Extent2D extent,
+                                            std::unique_ptr<rhi::Framebuffer>* framebufferStorage = nullptr);
 
     private:
         friend class RenderGraph;

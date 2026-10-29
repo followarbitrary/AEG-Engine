@@ -1,7 +1,7 @@
 #include "RendererImpl.hpp"
 
 namespace aeg::render {
-Renderer::Impl::Impl(rhi::Device& target) : device(target) { initialize(); }
+Renderer::Impl::Impl(rhi::Device& target) : device(target), graphPool(target) { initialize(); }
 
 Renderer::Impl::~Impl() noexcept {
     // Device remains owned by the application. All dependent resources are
@@ -199,6 +199,62 @@ void Renderer::Impl::invalidateOutput() noexcept {
     submittedOutput.reset();
 }
 
+void Renderer::Impl::prepareRenderGraph(rhi::CommandList& commands) {
+    // EditorGraphics waits for the previous swapchain frame before invoking
+    // recordFrame. Reclaiming the preceding token here lets the transient
+    // intermediate follow the same fence-delimited lifetime on the renderer
+    // path while keeping failed CPU recordings immediately reusable.
+    RenderGraph graph;
+    std::vector<RenderGraph::Handle> outputs;
+    if (aa.taa) {
+        auto historyPass = graph.addPass("TAA history sampled", RenderGraph::PassType::Compute,
+                                         RenderGraph::PassFlags::None);
+        const auto readIndex = recordingHistory.readIndex;
+        const auto color = graph.importTexture(*viewport->historyColor[readIndex], pendingHistoryColorState[readIndex],
+                                               "taa-history-color-" + std::to_string(readIndex));
+        const auto depth = graph.importTexture(*viewport->historyDepth[readIndex], pendingHistoryDepthState[readIndex],
+                                               "taa-history-depth-" + std::to_string(readIndex));
+        historyPass.read(color, RenderGraph::Usage::SampledRead);
+        historyPass.read(depth, RenderGraph::Usage::SampledRead);
+        outputs.push_back(color);
+        outputs.push_back(depth);
+    }
+    if (!outputs.empty()) {
+        graph.compile(outputs);
+        graphDump = graph.debugDump();
+        graph.execute(commands, device, graphPool, ++graphFrame);
+    } else {
+        graphDump.clear();
+    }
+}
+
+void Renderer::Impl::recordFxaaGraph(rhi::CommandList& commands) {
+    if (!aa.fxaa) return;
+    RenderGraph graph;
+    const auto intermediate = graph.createTexture(
+        {{viewport->width, viewport->height}, displayFormat, outputUsage}, "fxaa-intermediate", true);
+    auto pass = graph.addPass("FXAA intermediate", RenderGraph::PassType::Graphics, RenderGraph::PassFlags::None,
+                              [this, intermediate, &commands](RenderGraph::PassContext& context) {
+                                  auto& texture = context.texture(intermediate);
+                                  graphIntermediate = &texture;
+                                  graphFiltered = graphPool.lease(texture);
+                                  const std::array writes{
+                                      rhi::BindingWrite{0, nullptr, viewport->toneMapped.get(), viewportSampler.get()}};
+                                  graphPostDescriptor = device.createBindingSet(*postSetLayout, writes);
+                                  commands.bindPipeline(*postPipeline);
+                                  commands.bindSet(*postLayout, 0, *graphPostDescriptor);
+                                  const aeg::math::Vec2 reciprocal{1.0f / static_cast<float>(viewport->width),
+                                                                   1.0f / static_cast<float>(viewport->height)};
+                                  commands.pushConstants(*postLayout, std::as_bytes(std::span(&reciprocal, 1)));
+                                  commands.draw(3);
+                              });
+    pass.write(intermediate, RenderGraph::Usage::ColorWrite)
+        .setExternalRenderPass(*postPass, viewport->extent(), &graphPostFrame);
+    graph.compile({intermediate});
+    graphDump += "\n" + graph.debugDump();
+    graph.execute(commands, device, graphPool, ++graphFrame);
+}
+
 std::shared_ptr<rhi::Texture> Renderer::Impl::outputTexture() const {
     if (pendingFrame) return pendingOutput;
     if (submittedOutput) return submittedOutput;
@@ -206,11 +262,32 @@ std::shared_ptr<rhi::Texture> Renderer::Impl::outputTexture() const {
 }
 
 void Renderer::Impl::recordFrame(rhi::CommandList& commands, const RenderSettings& settings) {
+    retryingFrame = pendingFrame;
+    if (graphIntermediate) {
+        // EditorGraphics has waited for the prior frame fence before recording
+        // a replacement. CPU-only retries retain the pending lease and reuse
+        // that same physical image instead of changing output identity.
+        graphPool.reclaimCompletedFrame(graphFrame + 1);
+        if (!retryingFrame) graphIntermediate = nullptr;
+    }
     pendingFrame = false;
-    pendingOutput.reset();
+    if (!retryingFrame) pendingOutput.reset();
+    graphFiltered.reset();
+    if (!retryingFrame && graphPostFrame) {
+        // The graph-owned external framebuffer is referenced by the submitted
+        // command buffer; keep it alive until the device confirms completion.
+        device.waitIdle();
+        graphPostFrame.reset();
+    }
+    graphPostDescriptor.reset();
     // Recording is speculative. Acquisition/submit failure must leave the
     // previous frame's jitter, history and capture image unchanged.
     recordingHistory = temporalHistory;
+    if (aa.taa) {
+        pendingHistoryColorState = viewport->historyColorState;
+        pendingHistoryDepthState = viewport->historyDepthState;
+    }
+    prepareRenderGraph(commands);
     auto uniform = sceneUniform(settings);
     configureShadowUniform(uniform, settings);
     std::memcpy(uniformBuffer->mapped().data(), &uniform, sizeof(uniform));
@@ -218,8 +295,12 @@ void Renderer::Impl::recordFrame(rhi::CommandList& commands, const RenderSetting
     drawScene(commands, settings, uniform);
     drawTemporal(commands);
     drawToneMapping(commands);
-    drawFxaa(commands);
-    pendingOutput = aa.fxaa ? viewport->filtered : viewport->toneMapped;
+    recordFxaaGraph(commands);
+    if (aa.fxaa && !retryingFrame) {
+        viewport->filtered = std::move(graphFiltered);
+    }
+    if (!retryingFrame) pendingOutput = aa.fxaa ? viewport->filtered : viewport->toneMapped;
+    // std::cerr << "pending=" << pendingOutput.get() << " retry=" << retryingFrame << "\n";
     pendingSettings = settings;
     pendingFrame = true;
 }
@@ -235,6 +316,8 @@ void Renderer::Impl::frameSubmitted() {
         recordingHistory.jitterIndex = (recordingHistory.jitterIndex + 1) % 8;
         temporalHistory = recordingHistory;
         viewport->historyInitialized = true;
+        viewport->historyColorState = pendingHistoryColorState;
+        viewport->historyDepthState = pendingHistoryDepthState;
     }
     pendingFrame = false;
     pendingOutput.reset();
@@ -271,4 +354,5 @@ void Renderer::captureViewport(const std::filesystem::path& output) { impl_->cap
 void Renderer::waitIdle() { impl_->device.waitIdle(); }
 const std::string& Renderer::deviceName() const { return impl_->device.deviceName(); }
 std::uint32_t Renderer::validationErrorCount() const { return impl_->device.validationErrorCount(); }
+const std::string& Renderer::renderGraphDump() const { return impl_->graphDump; }
 }

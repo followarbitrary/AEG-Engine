@@ -34,6 +34,7 @@ int main(int argc, char** argv) {
     try {
         const std::filesystem::path runtime(argv[1]), fixture(argv[2]), output(argv[3]);
         aeg::tests::TestRenderer renderer(window, true);
+        renderer.setAntialiasing({1, true, false});
         auto source = aeg::assets::loadModel(runtime / "assets/models/demo.obj");
         renderer.uploadModel(source);
         aeg::camera::OrbitCamera camera;
@@ -65,6 +66,9 @@ int main(int argc, char** argv) {
             glfwSetWindowSize(window, size[0], size[1]);
             render(size[0], size[1]);
         }
+        const auto& graph = renderer.rendererGraphDump();
+        if (graph.find("fxaa-intermediate imported=false transient=true") == std::string::npos)
+            throw std::runtime_error("renderer graph did not retain the transient FXAA intermediate");
         renderer.captureViewport(output);
         const auto before = readFile(output);
         auto invalid = source;
