@@ -57,6 +57,12 @@ set_tests_properties(aeg_antialiasing PROPERTIES LABELS gpu TIMEOUT 90)
 add_executable(aeg_render_check RenderSmoke.cpp)
 aeg_project_options(aeg_render_check)
 
+add_executable(aeg_render_graph_gpu_test RenderGraphGpu.cpp)
+target_link_libraries(aeg_render_graph_gpu_test PRIVATE aeg::editor aeg::rhi_vulkan aeg::rhi_vulkan_gui glfw)
+aeg_project_options(aeg_render_graph_gpu_test)
+add_test(NAME aeg_render_graph_gpu COMMAND aeg_render_graph_gpu_test "${CMAKE_BINARY_DIR}/render-graph-gpu.ppm")
+set_tests_properties(aeg_render_graph_gpu PROPERTIES LABELS gpu TIMEOUT 120)
+
 # Keep loader-symbol failure injection in the executable. The renderer itself
 # is compiled once into aeg_render and linked by every GPU test.
 add_executable(aeg_backend_failure_test BackendFailure.cpp)

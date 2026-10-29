@@ -4,6 +4,7 @@
 #include <RhiSwapchain.hpp>
 #include <functional>
 #include <memory>
+#include <string>
 struct GLFWwindow;
 namespace aeg::editor {
 struct EditorBackend {
@@ -20,6 +21,7 @@ public:
     EditorGraphics& operator=(const EditorGraphics&) = delete;
     [[nodiscard]] render::Renderer& renderer();
     [[nodiscard]] ImTextureID viewportTexture();
+    [[nodiscard]] const std::string& renderGraphDump() const;
     void drawFrame(render::RenderSettings& settings, const std::function<void()>& buildUi);
 
 private:

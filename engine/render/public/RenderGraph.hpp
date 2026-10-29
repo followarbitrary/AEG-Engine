@@ -114,6 +114,7 @@ public:
         PassBuilder& read(Handle resource, Usage usage);
         PassBuilder& write(Handle resource, Usage usage);
         PassBuilder& readWrite(Handle resource, Usage usage = Usage::StorageReadWrite);
+        PassBuilder& clear(rhi::ClearValue value);
 
     private:
         friend class RenderGraph;

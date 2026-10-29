@@ -22,6 +22,7 @@ VulkanSwapchain::VulkanSwapchain(VulkanDevice& device) : owner(&device), command
 VulkanSwapchain::~VulkanSwapchain() { cleanup(); }
 void VulkanSwapchain::destroyImages() noexcept {
     frames.clear();
+    loadFrames.clear();
     images.clear();
     imageStates.clear();
     for (auto view : views) vkDestroyImageView(owner->handle, view, nullptr);
@@ -37,6 +38,7 @@ void VulkanSwapchain::cleanup() noexcept {
     vkDeviceWaitIdle(owner->handle);
     destroyImages();
     pass.reset();
+    loadPass.reset();
     if (acquired) {
         vkDestroySemaphore(owner->handle, acquired, nullptr);
         acquired = VK_NULL_HANDLE;
@@ -121,10 +123,19 @@ void VulkanSwapchain::create() {
         desc.colors.push_back(0);
         pass = owner->createRenderPass(desc);
     }
+    if (!loadPass) {
+        RenderPassDesc desc;
+        desc.attachments.push_back({genericFormat(format), 1, LoadOp::Load, StoreOp::Store,
+                                    ResourceState::ColorAttachment, ResourceState::ColorAttachment});
+        desc.colors.push_back(0);
+        loadPass = owner->createRenderPass(desc);
+    }
     auto& nativePass = owned<VulkanRenderPass>(*owner, *pass);
+    auto& nativeLoadPass = owned<VulkanRenderPass>(*owner, *loadPass);
     // Reserve before creating native objects so a vector allocation cannot strand a native handle.
     views.reserve(nativeImages.size());
     frames.reserve(nativeImages.size());
+    loadFrames.reserve(nativeImages.size());
     finished.reserve(nativeImages.size());
     images.reserve(nativeImages.size());
     imageStates.reserve(nativeImages.size());
@@ -158,6 +169,19 @@ void VulkanSwapchain::create() {
         check(vkCreateFramebuffer(owner->handle, &framebuffer, nullptr, &frame->handle),
               "vkCreateFramebuffer(swapchain)");
         frames.push_back(std::move(frame));
+        auto loadFrame = std::make_unique<VulkanFramebuffer>(*owner);
+        loadFrame->pass = &nativeLoadPass;
+        loadFrame->size = size;
+        VkFramebufferCreateInfo loadFramebuffer{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+        loadFramebuffer.renderPass = nativeLoadPass.handle;
+        loadFramebuffer.attachmentCount = 1;
+        loadFramebuffer.pAttachments = &nativeView;
+        loadFramebuffer.width = size.width;
+        loadFramebuffer.height = size.height;
+        loadFramebuffer.layers = 1;
+        check(vkCreateFramebuffer(owner->handle, &loadFramebuffer, nullptr, &loadFrame->handle),
+              "vkCreateFramebuffer(swapchain-load)");
+        loadFrames.push_back(std::move(loadFrame));
         VkSemaphoreCreateInfo semaphore{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
         VkSemaphore signal{};
         check(vkCreateSemaphore(owner->handle, &semaphore, nullptr, &signal), "vkCreateSemaphore(present)");
@@ -203,6 +227,10 @@ Framebuffer& VulkanSwapchain::framebuffer() {
     if (!acquiredFrame) throw std::logic_error("No acquired swapchain framebuffer");
     return *frames.at(imageIndex);
 }
+Framebuffer& VulkanSwapchain::loadFramebuffer() {
+    if (!acquiredFrame) throw std::logic_error("No acquired swapchain framebuffer");
+    return *loadFrames.at(imageIndex);
+}
 Texture& VulkanSwapchain::image() {
     if (!acquiredFrame) throw std::logic_error("No acquired swapchain image");
     return *images.at(imageIndex);
@@ -217,7 +245,10 @@ void VulkanSwapchain::submit() {
     check(vkEndCommandBuffer(commands.handle), "vkEndCommandBuffer(frame)");
     // Reset only after successful acquisition and recording. A skipped frame keeps its signaled fence.
     check(vkResetFences(owner->handle, 1, &fence), "vkResetFences(frame)");
-    const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    // The graph emits the acquire-image layout transition before beginning the
+    // first render pass.  Wait at ALL_COMMANDS so the acquire semaphore also
+    // orders that explicit barrier (not just color attachment writes).
+    const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
     VkSubmitInfo info{VK_STRUCTURE_TYPE_SUBMIT_INFO};
     info.waitSemaphoreCount = 1;
     info.pWaitSemaphores = &acquired;
@@ -248,10 +279,10 @@ void VulkanSwapchain::present() {
         imageStates.at(imageIndex) = ResourceState::Present;
     }
 }
-VkRenderPass nativeRenderPass(Device& device, Swapchain& swapchain) {
+VkRenderPass nativeGuiRenderPass(Device& device, Swapchain& swapchain) {
     auto& native = nativeDevice(device);
     auto& swap = owned<VulkanSwapchain>(native, swapchain);
-    return owned<VulkanRenderPass>(native, *swap.pass).handle;
+    return owned<VulkanRenderPass>(native, *swap.loadPass).handle;
 }
 }
 namespace aeg::rhi::vulkan {

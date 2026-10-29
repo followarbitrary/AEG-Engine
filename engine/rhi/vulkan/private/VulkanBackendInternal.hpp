@@ -230,7 +230,9 @@ public:
     std::uint32_t minimum{}, imageIndex{};
     bool rebuild{}, acquiredFrame{}, submitted{};
     std::unique_ptr<RenderPass> pass;
+    std::unique_ptr<RenderPass> loadPass;
     std::vector<std::unique_ptr<VulkanFramebuffer>> frames;
+    std::vector<std::unique_ptr<VulkanFramebuffer>> loadFrames;
     std::vector<std::unique_ptr<VulkanTexture>> images;
     std::vector<ResourceState> imageStates;
     std::vector<VkImageView> views;
@@ -244,6 +246,8 @@ public:
     CommandList& commandList() override;
     RenderPass& renderPass() override { return *pass; }
     Framebuffer& framebuffer() override;
+    RenderPass& loadRenderPass() override { return *loadPass; }
+    Framebuffer& loadFramebuffer() override;
     Extent2D extent() const override { return size; }
     std::uint32_t minimumImageCount() const override { return minimum; }
     std::uint32_t imageCount() const override { return static_cast<std::uint32_t>(frames.size()); }

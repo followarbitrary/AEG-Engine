@@ -41,7 +41,9 @@ public:
         info.QueueFamily = native_.graphicsFamily;
         info.Queue = native_.graphicsQueue;
         info.DescriptorPool = pool_;
-        info.RenderPass = detail::nativeRenderPass(device_, swapchain_);
+        // ImGui is recorded after the graph clear pass and therefore needs the
+        // swapchain's load-compatible render pass/pipeline compatibility key.
+        info.RenderPass = detail::nativeGuiRenderPass(device_, swapchain_);
         info.MinImageCount = minimumImageCount_ = swapchain_.minimumImageCount();
         info.ImageCount = swapchain_.imageCount();
         info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;

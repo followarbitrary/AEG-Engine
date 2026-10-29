@@ -10,7 +10,7 @@ struct NativeContext {
     std::uint32_t graphicsFamily{};
 };
 NativeContext nativeContext(Device& device);
-VkRenderPass nativeRenderPass(Device& device, Swapchain& swapchain);
+VkRenderPass nativeGuiRenderPass(Device& device, Swapchain& swapchain);
 VkCommandBuffer nativeCommandBuffer(Device& device, CommandList& commands);
 VkImageView nativeImageView(Device& device, Texture& texture);
 VkSampler nativeSampler(Device& device, Sampler& sampler);

@@ -22,7 +22,8 @@ add_library(aeg_editor_module STATIC
 add_library(aeg::editor ALIAS aeg_editor_module)
 target_include_directories(aeg_editor_module
     PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/public"
-    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/private")
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/private"
+            "${PROJECT_SOURCE_DIR}/engine/render/private/rendergraph")
 target_link_libraries(aeg_editor_module
     PUBLIC aeg::render aeg::gui
     PRIVATE aeg::foundation aeg::camera aeg::assets aeg_imgui_glfw aeg_imguizmo glfw)

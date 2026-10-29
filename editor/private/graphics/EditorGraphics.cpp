@@ -1,4 +1,6 @@
 #include <EditorBackend.hpp>
+#include <RenderGraph.hpp>
+#include "TransientTexturePool.hpp"
 #include "../platform/NativeWindow.hpp"
 #include <imgui_impl_glfw.h>
 #include <stdexcept>
@@ -9,6 +11,9 @@ struct EditorGraphics::Impl {
     std::unique_ptr<render::Renderer> scene;
     std::unique_ptr<rhi::Sampler> sampler;
     std::shared_ptr<rhi::Texture> registeredOutput;
+    std::unique_ptr<render::TransientTexturePool> graphPool;
+    render::FrameToken graphFrame{};
+    std::string graphDump;
     ImTextureID texture{};
     bool platformInitialized{};
 
@@ -24,6 +29,7 @@ struct EditorGraphics::Impl {
         backend.gui.reset();
         sampler.reset();
         scene.reset();
+        graphPool.reset();
         backend.swapchain.reset();
         backend.device.reset();
         if (platformInitialized) ImGui_ImplGlfw_Shutdown();
@@ -50,6 +56,7 @@ EditorGraphics::EditorGraphics(GLFWwindow* window, const EditorBackendFactory& f
     if (!impl_->backend.device || !impl_->backend.swapchain || !impl_->backend.gui)
         throw std::runtime_error("Editor backend factory returned incomplete graphics services");
     impl_->scene = std::make_unique<render::Renderer>(*impl_->backend.device);
+    impl_->graphPool = std::make_unique<render::TransientTexturePool>(*impl_->backend.device);
     impl_->sampler = impl_->backend.device->createSampler({rhi::Filter::Linear, rhi::AddressMode::ClampToEdge});
 }
 EditorGraphics::~EditorGraphics() = default;
@@ -58,9 +65,12 @@ ImTextureID EditorGraphics::viewportTexture() {
     impl_->updateViewportTexture();
     return impl_->texture;
 }
+const std::string& EditorGraphics::renderGraphDump() const { return impl_->graphDump; }
 void EditorGraphics::drawFrame(render::RenderSettings& settings, const std::function<void()>& buildUi) {
     auto& backend = impl_->backend;
     if (!backend.swapchain->beginFrame()) return;
+    const auto frameToken = ++impl_->graphFrame;
+    impl_->graphPool->reclaimCompletedFrame(frameToken);
     backend.gui->newFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
@@ -69,11 +79,20 @@ void EditorGraphics::drawFrame(render::RenderSettings& settings, const std::func
     auto& commands = backend.swapchain->commandList();
     impl_->scene->recordFrame(commands, settings);
     impl_->updateViewportTexture();
-    const rhi::ClearValue clear{{0.02f, 0.025f, 0.035f, 1}};
-    commands.beginRenderPass(backend.swapchain->renderPass(), backend.swapchain->framebuffer(),
-                             backend.swapchain->extent(), std::span(&clear, 1));
-    backend.gui->renderDrawData(commands, ImGui::GetDrawData());
-    commands.endRenderPass();
+    render::RenderGraph graph;
+    const auto swapchain = graph.importSwapchain(*backend.swapchain, "swapchain");
+    auto clearPass = graph.addPass("Clear swapchain", render::RenderGraph::PassType::Graphics,
+                                   render::RenderGraph::PassFlags::None);
+    clearPass.clear({{0.02f, 0.025f, 0.035f, 1.0f}, 1.0f, 0})
+        .write(swapchain, render::RenderGraph::Usage::ColorWrite);
+    graph.addPass("ImGui", render::RenderGraph::PassType::Graphics,
+                  render::RenderGraph::PassFlags::NeverCull,
+                  [&](render::RenderGraph::PassContext&) { backend.gui->renderDrawData(commands, ImGui::GetDrawData()); })
+        .write(swapchain, render::RenderGraph::Usage::ColorWrite);
+    const auto compiled = graph.compile({swapchain});
+    (void)compiled;
+    impl_->graphDump = graph.debugDump();
+    graph.execute(commands, *backend.device, *impl_->graphPool, frameToken);
     backend.swapchain->submit();
     impl_->scene->frameSubmitted();
     backend.swapchain->present();

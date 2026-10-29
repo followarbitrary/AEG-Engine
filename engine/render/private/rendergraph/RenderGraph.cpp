@@ -118,6 +118,7 @@ struct RenderGraph::Impl {
         PassFlags flags{PassFlags::None};
         ExecuteCallback callback;
         std::vector<Declaration> declarations;
+        std::vector<rhi::ClearValue> clearValues;
     };
 
     std::uint32_t generation{1};
@@ -199,7 +200,7 @@ RenderGraph::Handle RenderGraph::importSwapchain(rhi::Swapchain& swapchain, std:
 
 RenderGraph::PassBuilder RenderGraph::addPass(std::string name, PassType type, PassFlags flags,
                                                ExecuteCallback execute) {
-    impl_->passes.push_back({std::move(name), type, flags, std::move(execute), {}});
+    impl_->passes.push_back({std::move(name), type, flags, std::move(execute), {}, {}});
     impl_->compiled = false;
     return PassBuilder(this, impl_->passes.size() - 1);
 }
@@ -218,6 +219,14 @@ RenderGraph::PassBuilder& RenderGraph::PassBuilder::write(Handle resource, Usage
 RenderGraph::PassBuilder& RenderGraph::PassBuilder::readWrite(Handle resource, Usage usage) {
     if (!graph_ || index_ >= graph_->impl_->passes.size()) throw std::logic_error("Invalid RenderGraph pass builder");
     graph_->impl_->passes[index_].declarations.push_back({resource, usage, true, true});
+    graph_->impl_->compiled = false;
+    return *this;
+}
+RenderGraph::PassBuilder& RenderGraph::PassBuilder::clear(rhi::ClearValue value) {
+    if (!graph_ || index_ >= graph_->impl_->passes.size()) throw std::logic_error("Invalid RenderGraph pass builder");
+    auto& pass = graph_->impl_->passes[index_];
+    if (pass.type != PassType::Graphics) throw std::invalid_argument("RenderGraph clear values require a graphics pass");
+    pass.clearValues.push_back(value);
     graph_->impl_->compiled = false;
     return *this;
 }
@@ -517,12 +526,15 @@ void RenderGraph::execute(rhi::CommandList& commands, rhi::Device& device, Trans
                 rhi::RenderPass* renderPass = nullptr;
                 rhi::Framebuffer* framebuffer = nullptr;
                 rhi::Extent2D extent = attachments.front()->description().extent;
-                std::vector<rhi::ClearValue> clearValues;
+                std::vector<rhi::ClearValue> clearValues = source.clearValues;
                 if (externalSwapchain) {
-                    renderPass = &externalSwapchain->renderPass();
-                    framebuffer = &externalSwapchain->framebuffer();
+                    const bool loadCompatible = contains(compiled.flags, PassFlags::NeverCull);
+                    renderPass = loadCompatible ? &externalSwapchain->loadRenderPass()
+                                                : &externalSwapchain->renderPass();
+                    framebuffer = loadCompatible ? &externalSwapchain->loadFramebuffer()
+                                                 : &externalSwapchain->framebuffer();
                     extent = externalSwapchain->extent();
-                    clearValues.resize(attachments.size());
+                    if (clearValues.empty()) clearValues.resize(attachments.size());
                 } else {
                     rhi::RenderPassDesc description;
                     description.colors = colors;
