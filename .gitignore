@@ -3,9 +3,12 @@
 /cmake-build-*/
 /cmake-build-*/
 /.vs/
+/.idea/
 /.superpowers/
 CMakeUserPresets.json
 imgui.ini
 *.ppm
 *.log
 /docs/
+/assets/models/fy/
+/assets/models/lny/
