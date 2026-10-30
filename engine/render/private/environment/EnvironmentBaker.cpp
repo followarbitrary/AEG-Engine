@@ -1,5 +1,7 @@
 #include "EnvironmentBaker.hpp"
 #include "shaders/ShaderLibrary.hpp"
+#include "../rendergraph/TransientTexturePool.hpp"
+#include <RenderGraph.hpp>
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -125,9 +127,19 @@ struct EnvironmentBaker::Impl {
         lut = makeOutput(device, settings.brdfSize, rhi::TextureDimension::Texture2D);
         auto descriptor = makeSet(device, brdf, *lut);
         device.submitImmediate([&](rhi::CommandList& commands) {
-            commands.transition(*lut, rhi::ResourceState::Undefined, rhi::ResourceState::Storage);
-            dispatch(commands, brdf, *descriptor, {settings.brdfSize, settings.sampleCount, 0, 0}, 1);
-            commands.transition(*lut, rhi::ResourceState::Storage, rhi::ResourceState::Sampled);
+            RenderGraph graph;
+            auto state = rhi::ResourceState::Undefined;
+            const auto output = graph.importTexture(*lut, state, "brdf-lut");
+            graph.addPass("BRDF LUT", RenderGraph::PassType::Compute, RenderGraph::PassFlags::None,
+                          [&](RenderGraph::PassContext&) {
+                              dispatch(commands, brdf, *descriptor,
+                                       {settings.brdfSize, settings.sampleCount, 0, 0}, 1);
+                          })
+                .write(output, RenderGraph::Usage::StorageWrite)
+                .setFinalState(output, rhi::ResourceState::Sampled);
+            TransientTexturePool pool(device);
+            graph.compile({output});
+            graph.execute(commands, device, pool, 1);
         });
     }
 };
@@ -155,8 +167,8 @@ EnvironmentMaps EnvironmentBaker::bake(const assets::HdrImageData& image) {
                                              1},
                                             std::as_bytes(std::span(image.rgba)));
     EnvironmentMaps result;
-    const auto environmentMips = std::bit_width(self.settings.environmentSize);
-    result.prefilterMipCount = std::bit_width(self.settings.prefilterSize);
+    const auto environmentMips = static_cast<std::uint32_t>(std::bit_width(self.settings.environmentSize));
+    result.prefilterMipCount = static_cast<std::uint32_t>(std::bit_width(self.settings.prefilterSize));
     result.environment =
         makeOutput(self.device, self.settings.environmentSize, rhi::TextureDimension::Cube, environmentMips);
     result.irradiance = makeOutput(self.device, self.settings.irradianceSize, rhi::TextureDimension::Cube);
@@ -171,28 +183,62 @@ EnvironmentMaps EnvironmentBaker::bake(const assets::HdrImageData& image) {
     for (std::uint32_t mip = 0; mip < result.prefilterMipCount; ++mip)
         prefilterSets.push_back(makeSet(self.device, self.prefilter, *result.prefiltered, mip, result.environment.get(),
                                         self.cubeSampler.get()));
-    // Every immutable descriptor, sampler and input remains alive through synchronous submission.
+    // Every immutable descriptor, sampler and input remains alive through synchronous graph execution.
     self.device.submitImmediate([&](rhi::CommandList& commands) {
-        commands.transition(*result.environment, rhi::ResourceState::Undefined, rhi::ResourceState::Storage);
-        for (std::uint32_t mip = 0; mip < environmentMips; ++mip)
-            dispatch(commands, self.conversion, *conversionSets[mip],
-                     {self.settings.environmentSize >> mip, mip == 0 ? 1u : 16u, 0, self.settings.environmentSize}, 6);
-        commands.transition(*result.environment, rhi::ResourceState::Storage, rhi::ResourceState::Sampled);
-        commands.transition(*result.irradiance, rhi::ResourceState::Undefined, rhi::ResourceState::Storage);
-        dispatch(commands, self.diffuse, *diffuseSet,
-                 {self.settings.irradianceSize, self.settings.sampleCount, 0, self.settings.environmentSize}, 6);
-        commands.transition(*result.irradiance, rhi::ResourceState::Storage, rhi::ResourceState::Sampled);
-        commands.transition(*result.prefiltered, rhi::ResourceState::Undefined, rhi::ResourceState::Storage);
+        RenderGraph graph;
+        auto sourceState = rhi::ResourceState::Sampled;
+        auto environmentState = rhi::ResourceState::Undefined;
+        auto irradianceState = rhi::ResourceState::Undefined;
+        auto prefilteredState = rhi::ResourceState::Undefined;
+        const auto sourceHandle = graph.importTexture(*source, sourceState, "environment-source");
+        const auto environmentHandle = graph.importTexture(*result.environment, environmentState, "environment-cube");
+        const auto irradianceHandle = graph.importTexture(*result.irradiance, irradianceState, "irradiance-cube");
+        const auto prefilteredHandle = graph.importTexture(*result.prefiltered, prefilteredState, "prefiltered-cube");
+        for (std::uint32_t mip = 0; mip < environmentMips; ++mip) {
+            auto pass = graph.addPass("Environment conversion " + std::to_string(mip), RenderGraph::PassType::Compute,
+                                      RenderGraph::PassFlags::None,
+                                      [&, mip](RenderGraph::PassContext&) {
+                                          dispatch(commands, self.conversion, *conversionSets[mip],
+                                                   {self.settings.environmentSize >> mip,
+                                                    mip == 0 ? 1u : 16u,
+                                                    0,
+                                                    self.settings.environmentSize},
+                                                   6);
+                                      });
+            pass.read(sourceHandle, RenderGraph::Usage::SampledRead)
+                .write(environmentHandle, RenderGraph::Usage::StorageWrite);
+            if (mip + 1 == environmentMips) pass.setFinalState(environmentHandle, rhi::ResourceState::Sampled);
+        }
+        graph.addPass("Irradiance", RenderGraph::PassType::Compute, RenderGraph::PassFlags::None,
+                      [&](RenderGraph::PassContext&) {
+                          dispatch(commands, self.diffuse, *diffuseSet,
+                                   {self.settings.irradianceSize, self.settings.sampleCount, 0,
+                                    self.settings.environmentSize},
+                                   6);
+                      })
+            .read(environmentHandle, RenderGraph::Usage::SampledRead)
+            .write(irradianceHandle, RenderGraph::Usage::StorageWrite)
+            .setFinalState(irradianceHandle, rhi::ResourceState::Sampled);
         for (std::uint32_t mip = 0; mip < result.prefilterMipCount; ++mip) {
             const float roughness = result.prefilterMipCount == 1
                                         ? 0.045f
                                         : 0.045f + 0.955f * float(mip) / float(result.prefilterMipCount - 1);
-            dispatch(commands, self.prefilter, *prefilterSets[mip],
-                     {self.settings.prefilterSize >> mip, self.settings.sampleCount, roughness,
-                      self.settings.environmentSize},
-                     6);
+            auto pass = graph.addPass("Prefilter " + std::to_string(mip), RenderGraph::PassType::Compute,
+                                      RenderGraph::PassFlags::None,
+                                      [&, mip, roughness](RenderGraph::PassContext&) {
+                                          dispatch(commands, self.prefilter, *prefilterSets[mip],
+                                                   {self.settings.prefilterSize >> mip, self.settings.sampleCount,
+                                                    roughness, self.settings.environmentSize},
+                                                   6);
+                                      });
+            pass.read(environmentHandle, RenderGraph::Usage::SampledRead)
+                .write(prefilteredHandle, RenderGraph::Usage::StorageWrite);
+            if (mip + 1 == result.prefilterMipCount)
+                pass.setFinalState(prefilteredHandle, rhi::ResourceState::Sampled);
         }
-        commands.transition(*result.prefiltered, rhi::ResourceState::Storage, rhi::ResourceState::Sampled);
+        TransientTexturePool pool(self.device);
+        graph.compile({environmentHandle, irradianceHandle, prefilteredHandle});
+        graph.execute(commands, self.device, pool, 1);
     });
     return result;
 }
