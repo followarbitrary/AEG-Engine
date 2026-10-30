@@ -592,7 +592,10 @@ void RenderGraph::execute(rhi::CommandList& commands, rhi::Device& device, Trans
                     renderPass = source.externalPass;
                     extent = source.externalExtent.value_or(extent);
                     if (source.externalFramebufferStorage) {
-                        *source.externalFramebufferStorage = device.createFramebuffer({renderPass, attachments, extent});
+                        auto replacement = device.createFramebuffer({renderPass, attachments, extent});
+                        if (*source.externalFramebufferStorage)
+                            pool.retireRenderObjects({}, std::move(*source.externalFramebufferStorage), frameToken);
+                        *source.externalFramebufferStorage = std::move(replacement);
                         framebuffer = source.externalFramebufferStorage->get();
                     } else {
                         externalFramebuffer = device.createFramebuffer({renderPass, attachments, extent});
@@ -655,18 +658,15 @@ void RenderGraph::execute(rhi::CommandList& commands, rhi::Device& device, Trans
                     active = false;
                 } catch (...) {
                     if (active) commands.endRenderPass();
+                    pool.retireRenderObjects(std::move(ownedPass), std::move(ownedFramebuffer), frameToken);
+                    pool.retireRenderObjects({}, std::move(externalFramebuffer), frameToken);
+                    if (source.externalFramebufferStorage)
+                        pool.retireRenderObjects({}, std::move(*source.externalFramebufferStorage), frameToken);
                     throw;
                 }
                 if (ownedPass || ownedFramebuffer || externalFramebuffer) {
-                    // Render-pass and framebuffer handles can still be referenced
-                    // by an in-flight command buffer after recording returns.
-                    // Keep them alive until the backend has reached an idle point.
-                    auto deferredPass = std::shared_ptr<rhi::RenderPass>(std::move(ownedPass));
-                    auto deferredFramebuffer = std::shared_ptr<rhi::Framebuffer>(std::move(ownedFramebuffer));
-                    auto deferredExternalFramebuffer = std::shared_ptr<rhi::Framebuffer>(std::move(externalFramebuffer));
-                    device.deferUntilIdle([deferredPass = std::move(deferredPass),
-                                           deferredFramebuffer = std::move(deferredFramebuffer),
-                                           deferredExternalFramebuffer = std::move(deferredExternalFramebuffer)] {});
+                    pool.retireRenderObjects(std::move(ownedPass), std::move(ownedFramebuffer), frameToken);
+                    pool.retireRenderObjects({}, std::move(externalFramebuffer), frameToken);
                 }
             } else if (source.callback) {
                 source.callback(context);

@@ -5,6 +5,18 @@
 
 namespace aeg::render {
 
+TransientTexturePool::~TransientTexturePool() noexcept {
+    if (retiredRenderObjects_.empty()) return;
+    auto pending = std::make_shared<std::vector<RetiredRenderObjects>>(std::move(retiredRenderObjects_));
+    try {
+        device_.deferUntilIdle([pending = std::move(pending)]() mutable { pending->clear(); });
+    } catch (...) {
+        // A backend that cannot defer destruction is expected to have no
+        // in-flight work when the pool itself is destroyed.
+        pending->clear();
+    }
+}
+
 bool TransientTexturePool::compatible(const RenderGraph::TextureDesc& lhs,
                                       const RenderGraph::TextureDesc& rhs) {
     return lhs.extent == rhs.extent && lhs.format == rhs.format && lhs.usage == rhs.usage &&
@@ -41,6 +53,12 @@ void TransientTexturePool::retire(rhi::Texture& texture, FrameToken token) {
     found->immediatelyAvailable = false;
 }
 
+void TransientTexturePool::retireRenderObjects(std::unique_ptr<rhi::RenderPass> pass,
+                                               std::unique_ptr<rhi::Framebuffer> framebuffer, FrameToken token) {
+    if (!pass && !framebuffer) return;
+    retiredRenderObjects_.push_back({std::move(pass), std::move(framebuffer), token});
+}
+
 void TransientTexturePool::releaseImmediately(rhi::Texture& texture) {
     const auto found = std::ranges::find_if(entries_, [&](const auto& entry) { return entry.texture.get() == &texture; });
     if (found == entries_.end()) throw std::invalid_argument("Transient pool cannot release an unknown texture");
@@ -50,6 +68,7 @@ void TransientTexturePool::releaseImmediately(rhi::Texture& texture) {
 
 void TransientTexturePool::reclaimCompletedFrame(FrameToken token) {
     completedToken_ = std::max(completedToken_, token);
+    std::erase_if(retiredRenderObjects_, [&](const auto& objects) { return objects.token < completedToken_; });
 }
 
 } // namespace aeg::render

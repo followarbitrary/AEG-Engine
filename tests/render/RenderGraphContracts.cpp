@@ -242,11 +242,15 @@ void executionContracts() {
     require(callbackSawRenderPass && callbackTexture != nullptr, "PassContext did not resolve a physical texture");
     require(!commands.transitions.empty(), "Graph execution emitted no pre-barrier");
     require(!commands.inRenderPass(), "Graphics pass remained active after execution");
-    require(device.deferredCallbacks.size() >= 1,
-            ("Graph-owned render pass/framebuffer were destroyed before GPU completion: " +
-             std::to_string(device.deferredCallbacks.size())).c_str());
-    device.waitIdle();
-    require(device.deferredCallbacks.empty(), "Deferred graph object destruction did not drain at idle");
+    require(device.deferredCallbacks.empty(), "Graph execution appended an idle callback for frame-owned objects");
+    require(pool.retiredRenderObjectCount() == 1,
+            "Graph-owned render pass/framebuffer were not retired by frame token");
+    pool.reclaimCompletedFrame(FrameToken{1});
+    require(pool.retiredRenderObjectCount() == 1,
+            "Graph-owned render pass/framebuffer reclaimed at the completing token");
+    pool.reclaimCompletedFrame(FrameToken{2});
+    require(pool.retiredRenderObjectCount() == 0,
+            "Graph-owned render pass/framebuffer were not reclaimed after completion advanced");
     pool.reclaimCompletedFrame(FrameToken{2});
 
     Graph failing;
@@ -267,6 +271,39 @@ void executionContracts() {
     auto& immediatelyReused = pool.acquire(
         {{32, 32}, aeg::rhi::Format::Rgba8Unorm, aeg::rhi::TextureUsage::ColorAttachment});
     require(&immediatelyReused == failedTexture, "Failed pre-submit execution did not release its transient texture");
+}
+
+void externalFramebufferRetirementContract() {
+    aeg::tests::FakeDevice device;
+    Pool pool(device);
+    auto pass = device.createRenderPass({{{aeg::rhi::Format::Rgba8Unorm, 1, aeg::rhi::LoadOp::Discard,
+                                           aeg::rhi::StoreOp::Store, State::ColorAttachment,
+                                           State::ColorAttachment}},
+                                         {0}, std::nullopt, {}});
+    std::unique_ptr<aeg::rhi::Framebuffer> storage;
+    Graph graph;
+    const auto image = graph.createTexture(
+        {{8, 8}, aeg::rhi::Format::Rgba8Unorm, aeg::rhi::TextureUsage::ColorAttachment}, "external", false);
+    graph.addPass("external", Graph::PassType::Graphics, {}, {})
+        .write(image, Graph::Usage::ColorWrite)
+        .setExternalRenderPass(*pass, {8, 8}, &storage);
+    graph.compile({image});
+    aeg::tests::FakeCommands commands(&device.caps);
+    graph.execute(commands, device, pool, FrameToken{7});
+    require(storage != nullptr, "External framebuffer storage was not populated");
+    require(pool.retiredRenderObjectCount() == 0,
+            "Current external framebuffer was retired before its slot was replaced");
+
+    graph.compile({image});
+    graph.execute(commands, device, pool, FrameToken{8});
+    require(pool.retiredRenderObjectCount() == 1,
+            "Replacing external framebuffer storage did not retire the old object");
+    pool.reclaimCompletedFrame(FrameToken{8});
+    require(pool.retiredRenderObjectCount() == 1,
+            "External framebuffer was reclaimed at its completing token");
+    pool.reclaimCompletedFrame(FrameToken{9});
+    require(pool.retiredRenderObjectCount() == 0,
+            "External framebuffer was not reclaimed after completion advanced");
 }
 
 void importedStateCommitContracts() {
@@ -479,6 +516,7 @@ int main() {
         generationContract();
         transientPoolContracts();
         executionContracts();
+        externalFramebufferRetirementContract();
         importedStateCommitContracts();
         externalSwapchainExecutionContract();
         repeatedExecutionContract();

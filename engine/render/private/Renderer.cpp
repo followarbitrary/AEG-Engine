@@ -273,12 +273,6 @@ void Renderer::Impl::recordFrame(rhi::CommandList& commands, const RenderSetting
     pendingFrame = false;
     if (!retryingFrame) pendingOutput.reset();
     graphFiltered.reset();
-    if (!retryingFrame && graphPostFrame) {
-        // The graph-owned external framebuffer is referenced by the submitted
-        // command buffer; keep it alive until the device confirms completion.
-        device.waitIdle();
-        graphPostFrame.reset();
-    }
     graphPostDescriptor.reset();
     // Recording is speculative. Acquisition/submit failure must leave the
     // previous frame's jitter, history and capture image unchanged.
