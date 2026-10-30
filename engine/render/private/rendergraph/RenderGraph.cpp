@@ -131,6 +131,23 @@ struct RenderGraph::Impl {
     std::string dump;
     bool compiled{};
     bool executed{};
+    rhi::Device* lastDevice{};
+
+    void deferOwnedResources() noexcept {
+        if (!lastDevice) return;
+        for (auto& resource : resources) {
+            if (!resource.owned) continue;
+            auto owned = std::shared_ptr<rhi::Texture>(std::move(resource.owned));
+            try {
+                lastDevice->deferUntilIdle([owned = std::move(owned)] {});
+            } catch (...) {
+                // A backend that cannot defer destruction is assumed to have
+                // no in-flight work at graph teardown.
+            }
+        }
+    }
+
+    ~Impl() { deferOwnedResources(); }
 
     Resource& resource(Handle handle) {
         if (!handle || handle.generation != generation || handle.index >= resources.size())
@@ -518,6 +535,7 @@ void RenderGraph::execute(rhi::CommandList& commands, rhi::Device& device, Trans
         throw std::logic_error("RenderGraph must be compiled before execute");
     if (impl.executed)
         throw std::logic_error("RenderGraph was already executed; compile it again before reuse");
+    impl.lastDevice = &device;
 
     std::vector<rhi::Texture*> physical(impl.resources.size());
     std::vector<rhi::Texture*> transient;
@@ -696,6 +714,7 @@ void RenderGraph::execute(rhi::CommandList& commands, rhi::Device& device, Trans
 }
 
 void RenderGraph::reset() {
+    impl_->deferOwnedResources();
     impl_->resources.clear();
     impl_->passes.clear();
     impl_->lastResult = {};

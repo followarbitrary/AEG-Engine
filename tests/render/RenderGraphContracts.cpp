@@ -200,6 +200,25 @@ void generationContract() {
             "Stale handle was accepted after reset");
 }
 
+void ownedTextureResetLifetimeContract() {
+    aeg::tests::FakeDevice device;
+    Pool pool(device);
+    Graph graph;
+    const auto texture = graph.createTexture({{4, 4}, aeg::rhi::Format::Rgba8Unorm,
+                                              aeg::rhi::TextureUsage::CopyDestination},
+                                             "owned", false);
+    graph.addPass("write", Graph::PassType::Copy, {}, {}).write(texture, Graph::Usage::CopyDst);
+    graph.compile({texture});
+    aeg::tests::FakeCommands commands(&device.caps);
+    graph.execute(commands, device, pool, FrameToken{1});
+    require(device.deferredCallbacks.empty(), "Owned texture was deferred before graph reset");
+    graph.reset();
+    require(device.deferredCallbacks.size() == 1,
+            "Reset destroyed an executed graph-owned texture before GPU completion");
+    device.waitIdle();
+    require(device.deferredCallbacks.empty(), "Deferred graph-owned texture was not released at idle");
+}
+
 void transientPoolContracts() {
     aeg::tests::FakeDevice device;
     Pool pool(device);
@@ -514,6 +533,7 @@ int main() {
         orderingCullingAndDump();
         validationContracts();
         generationContract();
+        ownedTextureResetLifetimeContract();
         transientPoolContracts();
         executionContracts();
         externalFramebufferRetirementContract();
