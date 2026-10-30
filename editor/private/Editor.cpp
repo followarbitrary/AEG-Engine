@@ -48,7 +48,7 @@ int runEditor(const EditorOptions& options, const EditorBackendFactory& factory)
     renderer.uploadModel(state.model());
     std::cout << "Model: " << foundation::pathToUtf8(state.model().source) << " (" << state.model().vertexCount()
               << " vertices, " << state.model().triangleCount() << " triangles)\n";
-    state.camera.fit(state.model().bounds);
+    state.camera().fit(state.model().bounds);
     renderer.resetTemporalHistory();
     const auto initialPath = foundation::pathToUtf8(state.model().source);
     std::snprintf(state.importPath.data(), state.importPath.size(), "%s", initialPath.c_str());

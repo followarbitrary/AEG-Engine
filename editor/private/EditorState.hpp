@@ -15,12 +15,15 @@
 #include <imgui.h>
 
 #include <array>
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <filesystem>
 #include <cmath>
 #include <string>
+#include <utility>
+#include <vector>
 
 struct GLFWwindow;
 
@@ -51,16 +54,26 @@ struct Renderable {
     assets::ModelData model;
 };
 
+struct CameraComponent {
+    camera::OrbitCamera orbit;
+};
+
+struct LightComponent {
+    render::Light value;
+};
+
 struct EditorState {
     ecs::World scene;
     entt::entity selectedEntity{entt::null};
+    entt::entity cameraEntity{entt::null};
+    std::vector<entt::entity> renderableEntities;
+    std::vector<entt::entity> lightEntities;
     ecs::Scheduler systems;
     render::AntialiasingSettings antialiasing;
     std::uint32_t supportedMsaa{1};
     bool supportedTaa{false};
     std::string antialiasingNotice;
     std::string toneMappingError;
-    camera::OrbitCamera camera;
     ViewportGizmoState gizmo;
     OrientationGizmoState orientationGizmo;
     render::RenderSettings settings;
@@ -89,10 +102,16 @@ struct EditorState {
     std::uint32_t viewportWidth{1}, viewportHeight{1};
     std::string status{"就绪。将模型拖入窗口即可导入。"};
 
-    EditorState() : selectedEntity(scene.create()) {
+    EditorState() : selectedEntity(scene.create()), cameraEntity(scene.create()) {
         scene.registry().emplace<Transform>(selectedEntity);
         scene.registry().emplace<AutoRotate>(selectedEntity);
         scene.registry().emplace<Renderable>(selectedEntity);
+        renderableEntities.push_back(selectedEntity);
+        scene.registry().emplace<CameraComponent>(cameraEntity);
+        const auto lightEntity = scene.create();
+        scene.registry().emplace<LightComponent>(lightEntity);
+        lightEntities.push_back(lightEntity);
+        syncRenderSettingsFromEcs();
         const auto entity = selectedEntity;
         systems.add([entity](ecs::World& world, const float deltaSeconds) {
             auto& value = world.registry().get<Transform>(entity);
@@ -104,11 +123,41 @@ struct EditorState {
 
     [[nodiscard]] Transform& transform() { return scene.registry().get<Transform>(selectedEntity); }
     [[nodiscard]] const Transform& transform() const { return scene.registry().get<Transform>(selectedEntity); }
+    [[nodiscard]] camera::OrbitCamera& camera() { return scene.registry().get<CameraComponent>(cameraEntity).orbit; }
+    [[nodiscard]] const camera::OrbitCamera& camera() const {
+        return scene.registry().get<CameraComponent>(cameraEntity).orbit;
+    }
     [[nodiscard]] bool& autoRotate() { return scene.registry().get<AutoRotate>(selectedEntity).enabled; }
     [[nodiscard]] const bool& autoRotate() const { return scene.registry().get<AutoRotate>(selectedEntity).enabled; }
     [[nodiscard]] assets::ModelData& model() { return scene.registry().get<Renderable>(selectedEntity).model; }
     [[nodiscard]] const assets::ModelData& model() const {
         return scene.registry().get<Renderable>(selectedEntity).model;
+    }
+    [[nodiscard]] std::size_t lightCount() const noexcept { return lightEntities.size(); }
+    [[nodiscard]] render::Light& light(const std::size_t index) {
+        return scene.registry().get<LightComponent>(lightEntities.at(index)).value;
+    }
+    [[nodiscard]] const render::Light& light(const std::size_t index) const {
+        return scene.registry().get<LightComponent>(lightEntities.at(index)).value;
+    }
+    void syncRenderSettingsFromEcs() {
+        settings.lightCount = static_cast<std::uint32_t>(std::min<std::size_t>(lightEntities.size(), render::kMaxLights));
+        for (std::uint32_t index = 0; index < settings.lightCount; ++index) settings.lights[index] = light(index);
+    }
+    [[nodiscard]] entt::entity createRenderable(std::string name = {}) {
+        const auto entity = scene.create();
+        scene.registry().emplace<Transform>(entity);
+        auto& renderable = scene.registry().emplace<Renderable>(entity);
+        renderable.model.name = std::move(name);
+        renderableEntities.push_back(entity);
+        return entity;
+    }
+    void destroyRenderable(const entt::entity entity) {
+        if (entity == selectedEntity) return;
+        const auto found = std::find(renderableEntities.begin(), renderableEntities.end(), entity);
+        if (found == renderableEntities.end()) return;
+        scene.destroy(entity);
+        renderableEntities.erase(found);
     }
 };
 

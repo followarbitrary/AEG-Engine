@@ -25,7 +25,7 @@ void drawViewportPanel(EditorState& state, render::Renderer& renderer, EditorGra
     auto& viewportWidth = state.viewportWidth;
     auto& viewportHeight = state.viewportHeight;
     auto& viewportDrag = state.viewportDrag;
-    auto& camera = state.camera;
+    auto& camera = state.camera();
     auto& frameRequested = state.frameRequested;
     auto& sceneRendered = state.sceneRendered;
     auto& settings = state.settings;

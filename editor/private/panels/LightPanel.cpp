@@ -26,41 +26,42 @@ void applyShadows(EditorState& state, render::Renderer& renderer, const render::
 }
 
 void addLight(EditorState& state) {
-    auto& settings = state.settings;
-    if (settings.lightCount >= render::kMaxLights) return;
+    if (state.lightCount() >= render::kMaxLights) return;
     auto light = render::Light{};
     light.type = static_cast<render::LightType>(state.newLightType);
     if (light.type != render::LightType::Directional) {
         const float radius =
             std::isfinite(state.model().bounds.radius()) ? std::clamp(state.model().bounds.radius(), 0.01f, 1.0e8f) : 1.0f;
-        light.position = state.camera.target() + math::Vec3{1.5f, 1.5f, 1.5f} * radius;
-        light.direction = math::normalize(state.camera.target() - light.position);
+        light.position = state.camera().target() + math::Vec3{1.5f, 1.5f, 1.5f} * radius;
+        light.direction = math::normalize(state.camera().target() - light.position);
         light.range = std::clamp(radius * 8, 0.01f, 1.0e9f);
         light.intensity = std::clamp(3.0f * radius * radius, 0.01f, 1.0e9f);
     }
-    state.selectedLight = settings.lightCount;
-    settings.lights[settings.lightCount++] = light;
+    const auto entity = state.scene.create();
+    state.scene.registry().emplace<LightComponent>(entity, LightComponent{light});
+    state.lightEntities.push_back(entity);
+    state.selectedLight = static_cast<std::uint32_t>(state.lightCount() - 1);
+    state.syncRenderSettingsFromEcs();
 }
 
 void drawLightList(EditorState& state, render::Renderer& renderer) {
-    auto& settings = state.settings;
-    settings.lightCount = std::min(settings.lightCount, render::kMaxLights);
-    ImGui::Text("光源：%u / %u", settings.lightCount, render::kMaxLights);
+    const auto count = static_cast<std::uint32_t>(std::min<std::size_t>(state.lightCount(), render::kMaxLights));
+    ImGui::Text("光源：%u / %u", count, render::kMaxLights);
     ImGui::SetNextItemWidth(-1);
     ImGui::Combo("##New light type", &state.newLightType, lightNames.data(), static_cast<int>(lightNames.size()));
-    ImGui::BeginDisabled(settings.lightCount >= render::kMaxLights);
+    ImGui::BeginDisabled(count >= render::kMaxLights);
     if (ImGui::Button("添加光源###Add light", {-1, 0})) addLight(state);
     ImGui::EndDisabled();
-    if (!settings.lightCount) {
+    if (!count) {
         ImGui::TextWrapped("没有直接光源，当前仅显示环境漫反射。");
         return;
     }
-    state.selectedLight = std::min(state.selectedLight, settings.lightCount - 1);
-    const auto label = lightLabel(settings.lights[state.selectedLight], state.selectedLight);
+    state.selectedLight = std::min(state.selectedLight, count - 1);
+    const auto label = lightLabel(state.light(state.selectedLight), state.selectedLight);
     ImGui::SetNextItemWidth(-1);
     if (ImGui::BeginCombo("##Selected light", label.c_str())) {
-        for (std::uint32_t index = 0; index < settings.lightCount; ++index) {
-            const auto item = lightLabel(settings.lights[index], index);
+        for (std::uint32_t index = 0; index < count; ++index) {
+            const auto item = lightLabel(state.light(index), index);
             if (ImGui::Selectable(item.c_str(), state.selectedLight == index)) state.selectedLight = index;
         }
         ImGui::EndCombo();
@@ -71,14 +72,15 @@ void drawLightList(EditorState& state, render::Renderer& renderer) {
             shadows.enabled = false;
         else if (shadows.lightIndex > state.selectedLight)
             --shadows.lightIndex;
-        for (auto index = state.selectedLight; index + 1 < settings.lightCount; ++index)
-            settings.lights[index] = settings.lights[index + 1];
-        --settings.lightCount;
-        state.selectedLight = settings.lightCount ? std::min(state.selectedLight, settings.lightCount - 1) : 0;
+        const auto entity = state.lightEntities[state.selectedLight];
+        state.scene.destroy(entity);
+        state.lightEntities.erase(state.lightEntities.begin() + state.selectedLight);
+        state.selectedLight = state.lightCount() ? std::min(state.selectedLight, static_cast<std::uint32_t>(state.lightCount() - 1)) : 0;
+        state.syncRenderSettingsFromEcs();
         applyShadows(state, renderer, shadows);
         return;
     }
-    auto& light = settings.lights[state.selectedLight];
+    auto& light = state.light(state.selectedLight);
     ImGui::Checkbox("启用光源###Light enabled", &light.enabled);
     int type = static_cast<int>(light.type);
     if (ImGui::Combo("类型###Light type", &type, lightNames.data(), static_cast<int>(lightNames.size())))
@@ -178,7 +180,7 @@ void drawShadows(EditorState& state, render::Renderer& renderer) {
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("0 为均匀分割，1 为对数分割；越大越侧重近处精度。");
     bool automaticDistance = candidate.maxDistance == 0;
     if (ImGui::Checkbox("自动阴影距离###Auto shadow distance", &automaticDistance)) {
-        float distance = state.camera.distance() + state.model().bounds.radius() * 2;
+        float distance = state.camera().distance() + state.model().bounds.radius() * 2;
         if (!std::isfinite(distance)) distance = 100;
         candidate.maxDistance = automaticDistance ? 0 : std::clamp(distance, 0.01f, 1.0e9f);
         changed = true;
@@ -233,6 +235,7 @@ void drawLightingSection(EditorState& state, render::Renderer& renderer) {
         ImGui::Text("使用法线贴图的材质数：%zu", static_cast<std::size_t>(normalMaps));
         ImGui::SliderFloat("环境漫反射###Ambient", &settings.ambient, 0, 1, "%.2f");
         drawLightList(state, renderer);
+        state.syncRenderSettingsFromEcs();
         float background[]{settings.background.x, settings.background.y, settings.background.z};
         if (ImGui::ColorEdit3("背景###Background", background))
             settings.background = {background[0], background[1], background[2], settings.background.w};
