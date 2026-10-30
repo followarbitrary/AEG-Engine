@@ -11,6 +11,7 @@ struct ViewportTargets {
     // Imported TAA images retain their state between graph executions. The
     // graph owns the transitions while the viewport retains the textures.
     std::array<rhi::ResourceState, 2> historyColorState{}, historyDepthState{};
+    rhi::ResourceState colorState{}, depthState{}, multisampleState{}, motionState{}, toneMappedState{};
     std::unique_ptr<rhi::BindingSet> postDescriptor;
     std::array<std::unique_ptr<rhi::BindingSet>, 2> temporalDescriptors;
     std::array<std::unique_ptr<rhi::BindingSet>, 3> toneDescriptors;

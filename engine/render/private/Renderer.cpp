@@ -200,59 +200,11 @@ void Renderer::Impl::invalidateOutput() noexcept {
 }
 
 void Renderer::Impl::prepareRenderGraph(rhi::CommandList& commands) {
-    // EditorGraphics waits for the previous swapchain frame before invoking
-    // recordFrame. Reclaiming the preceding token here lets the transient
-    // intermediate follow the same fence-delimited lifetime on the renderer
-    // path while keeping failed CPU recordings immediately reusable.
-    RenderGraph graph;
-    std::vector<RenderGraph::Handle> outputs;
-    if (aa.taa) {
-        auto historyPass = graph.addPass("TAA history sampled", RenderGraph::PassType::Compute,
-                                         RenderGraph::PassFlags::None);
-        const auto readIndex = recordingHistory.readIndex;
-        const auto color = graph.importTexture(*viewport->historyColor[readIndex], pendingHistoryColorState[readIndex],
-                                               "taa-history-color-" + std::to_string(readIndex));
-        const auto depth = graph.importTexture(*viewport->historyDepth[readIndex], pendingHistoryDepthState[readIndex],
-                                               "taa-history-depth-" + std::to_string(readIndex));
-        historyPass.read(color, RenderGraph::Usage::SampledRead);
-        historyPass.read(depth, RenderGraph::Usage::SampledRead);
-        outputs.push_back(color);
-        outputs.push_back(depth);
-    }
-    if (!outputs.empty()) {
-        graph.compile(outputs);
-        graphDump = graph.debugDump();
-        graph.execute(commands, device, graphPool, ++graphFrame);
-    } else {
-        graphDump.clear();
-    }
+    (void)commands;
 }
 
 void Renderer::Impl::recordFxaaGraph(rhi::CommandList& commands) {
-    if (!aa.fxaa) return;
-    RenderGraph graph;
-    const auto intermediate = graph.createTexture(
-        {{viewport->width, viewport->height}, displayFormat, outputUsage}, "fxaa-intermediate", true);
-    auto pass = graph.addPass("FXAA intermediate", RenderGraph::PassType::Graphics, RenderGraph::PassFlags::None,
-                              [this, intermediate, &commands](RenderGraph::PassContext& context) {
-                                  auto& texture = context.texture(intermediate);
-                                  graphIntermediate = &texture;
-                                  graphFiltered = graphPool.lease(texture);
-                                  const std::array writes{
-                                      rhi::BindingWrite{0, nullptr, viewport->toneMapped.get(), viewportSampler.get()}};
-                                  graphPostDescriptor = device.createBindingSet(*postSetLayout, writes);
-                                  commands.bindPipeline(*postPipeline);
-                                  commands.bindSet(*postLayout, 0, *graphPostDescriptor);
-                                  const aeg::math::Vec2 reciprocal{1.0f / static_cast<float>(viewport->width),
-                                                                   1.0f / static_cast<float>(viewport->height)};
-                                  commands.pushConstants(*postLayout, std::as_bytes(std::span(&reciprocal, 1)));
-                                  commands.draw(3);
-                              });
-    pass.write(intermediate, RenderGraph::Usage::ColorWrite)
-        .setExternalRenderPass(*postPass, viewport->extent(), &graphPostFrame);
-    graph.compile({intermediate});
-    graphDump += "\n" + graph.debugDump();
-    graph.execute(commands, device, graphPool, ++graphFrame);
+    (void)commands;
 }
 
 std::shared_ptr<rhi::Texture> Renderer::Impl::outputTexture() const {
@@ -281,15 +233,132 @@ void Renderer::Impl::recordFrame(rhi::CommandList& commands, const RenderSetting
         pendingHistoryColorState = viewport->historyColorState;
         pendingHistoryDepthState = viewport->historyDepthState;
     }
-    prepareRenderGraph(commands);
     auto uniform = sceneUniform(settings);
     configureShadowUniform(uniform, settings);
     std::memcpy(uniformBuffer->mapped().data(), &uniform, sizeof(uniform));
-    drawShadow(commands, uniform);
-    drawScene(commands, settings, uniform);
-    drawTemporal(commands);
-    drawToneMapping(commands);
-    recordFxaaGraph(commands);
+
+    // Create all lazy scene variants before graph execution starts. Graph
+    // callbacks are draw bodies only and therefore run inside an active pass.
+    auto& scene = scenePipeline(aa.msaaSamples, aa.taa, settings.clipSpace.reversed_z);
+    const bool hasTransparent = model && std::ranges::any_of(model->materials, [](const auto& material) {
+        return material.parameters.alphaMode == static_cast<std::uint32_t>(assets::AlphaMode::Blend);
+    });
+    if (hasTransparent) scenePipeline(aa.msaaSamples, aa.taa, settings.clipSpace.reversed_z, true);
+
+    RenderGraph graph;
+    std::vector<RenderGraph::Handle> shadowHandles;
+    if (uniform.shadowInfo.x >= 0.5f && shadow && model) {
+        const auto count = static_cast<std::uint32_t>(uniform.shadowInfo.w);
+        shadowHandles.reserve(count);
+        for (std::uint32_t cascade = 0; cascade < count; ++cascade) {
+            const auto handle = graph.importTexture(*shadow->textures[cascade], shadow->states[cascade],
+                                                    "shadow-" + std::to_string(cascade));
+            shadowHandles.push_back(handle);
+            auto pass = graph.addPass(
+                "Shadow cascade " + std::to_string(cascade), RenderGraph::PassType::Graphics,
+                RenderGraph::PassFlags::None,
+                [this, &uniform, &commands, cascade](RenderGraph::PassContext&) { drawShadow(commands, uniform, cascade); });
+            pass.write(handle, RenderGraph::Usage::DepthWrite)
+                .clear(rhi::ClearValue{})
+                .setFinalState(handle, rhi::ResourceState::Sampled)
+                .setExternalRenderPass(*shadow->pass, *shadow->framebuffers[cascade],
+                                       {shadow->resolution, shadow->resolution});
+        }
+    }
+
+    const auto color = graph.importTexture(*viewport->color, viewport->colorState, "scene-color");
+    const auto depth = graph.importTexture(*viewport->depth, viewport->depthState, "scene-depth");
+    std::optional<RenderGraph::Handle> multisample;
+    if (viewport->multisample)
+        multisample = graph.importTexture(*viewport->multisample, viewport->multisampleState, "scene-msaa");
+    std::optional<RenderGraph::Handle> motion;
+    if (viewport->motion)
+        motion = graph.importTexture(*viewport->motion, viewport->motionState, "scene-motion");
+
+    std::array<rhi::ClearValue, 3> sceneClears{};
+    const auto finiteRadiance = [](float value) {
+        return std::isnan(value) ? 0.0f : std::clamp(value, 0.0f, 65504.0f);
+    };
+    sceneClears[0].color = {finiteRadiance(settings.background.x), finiteRadiance(settings.background.y),
+                            finiteRadiance(settings.background.z), 1};
+    sceneClears[1].depth = settings.clipSpace.reversed_z ? 0.0f : 1.0f;
+    sceneClears[2].color = {0, 0, -1, -1};
+    auto scenePass = graph.addPass("Scene", RenderGraph::PassType::Graphics, RenderGraph::PassFlags::None,
+                                   [this, &settings, &uniform, &commands](RenderGraph::PassContext&) {
+                                       drawScene(commands, settings, uniform);
+                                   });
+    scenePass.write(color, RenderGraph::Usage::ColorWrite).write(depth, RenderGraph::Usage::DepthWrite);
+    if (multisample) scenePass.write(*multisample, RenderGraph::Usage::ColorWrite);
+    if (motion) scenePass.write(*motion, RenderGraph::Usage::ColorWrite);
+    for (const auto handle : shadowHandles) scenePass.read(handle, RenderGraph::Usage::SampledRead);
+    const auto clearCount = aa.taa ? 3u : 2u;
+    for (std::uint32_t index = 0; index < clearCount; ++index) scenePass.clear(sceneClears[index]);
+    scenePass.setExternalRenderPass(*scene.pass, *viewport->sceneFrame, viewport->extent());
+
+    RenderGraph::Handle toneSource = color;
+    const auto readIndex = recordingHistory.readIndex;
+    const auto writeIndex = 1u - readIndex;
+    std::optional<RenderGraph::Handle> historyColorWrite;
+    std::optional<RenderGraph::Handle> historyDepthWrite;
+    if (aa.taa) {
+        const auto historyColorRead = graph.importTexture(*viewport->historyColor[readIndex],
+                                                          pendingHistoryColorState[readIndex], "taa-history-color-read");
+        const auto historyDepthRead = graph.importTexture(*viewport->historyDepth[readIndex],
+                                                          pendingHistoryDepthState[readIndex], "taa-history-depth-read");
+        historyColorWrite = graph.importTexture(*viewport->historyColor[writeIndex],
+                                                 pendingHistoryColorState[writeIndex], "taa-history-color-write");
+        historyDepthWrite = graph.importTexture(*viewport->historyDepth[writeIndex],
+                                                 pendingHistoryDepthState[writeIndex], "taa-history-depth-write");
+        auto taaPass = graph.addPass("TAA", RenderGraph::PassType::Graphics, RenderGraph::PassFlags::None,
+                                     [this, &commands](RenderGraph::PassContext&) { drawTemporal(commands); });
+        taaPass.read(color, RenderGraph::Usage::SampledRead);
+        taaPass.read(*motion, RenderGraph::Usage::SampledRead);
+        taaPass.read(historyColorRead, RenderGraph::Usage::SampledRead);
+        taaPass.read(historyDepthRead, RenderGraph::Usage::SampledRead);
+        taaPass.write(*historyColorWrite, RenderGraph::Usage::ColorWrite)
+            .write(*historyDepthWrite, RenderGraph::Usage::ColorWrite)
+            .setFinalState(*historyColorWrite, rhi::ResourceState::Sampled)
+            .setFinalState(*historyDepthWrite, rhi::ResourceState::Sampled)
+            .setExternalRenderPass(*temporalPass, *viewport->temporalFrames[writeIndex], viewport->extent());
+        toneSource = *historyColorWrite;
+    }
+
+    const auto toneMapped = graph.importTexture(*viewport->toneMapped, viewport->toneMappedState, "tone-mapped");
+    auto toneGraphPass = graph.addPass("Tone Mapping", RenderGraph::PassType::Graphics, RenderGraph::PassFlags::None,
+                                       [this, &commands](RenderGraph::PassContext&) { drawToneMapping(commands); });
+    toneGraphPass.read(toneSource, RenderGraph::Usage::SampledRead)
+        .write(toneMapped, RenderGraph::Usage::ColorWrite)
+        .setFinalState(toneMapped, rhi::ResourceState::Sampled)
+        .setExternalRenderPass(*this->tonePass, *viewport->toneFrame, viewport->extent());
+
+    RenderGraph::Handle output = toneMapped;
+    if (aa.fxaa) {
+        const auto intermediate = graph.createTexture(
+            {{viewport->width, viewport->height}, displayFormat, outputUsage}, "fxaa-intermediate", true);
+        auto fxaaPass = graph.addPass("FXAA", RenderGraph::PassType::Graphics, RenderGraph::PassFlags::None,
+                                      [this, intermediate, &commands](RenderGraph::PassContext& context) {
+                                          auto& texture = context.texture(intermediate);
+                                          graphIntermediate = &texture;
+                                          graphFiltered = graphPool.lease(texture);
+                                          const std::array writes{rhi::BindingWrite{0, nullptr, viewport->toneMapped.get(),
+                                                                                   viewportSampler.get()}};
+                                          graphPostDescriptor = device.createBindingSet(*postSetLayout, writes);
+                                          commands.bindPipeline(*postPipeline);
+                                          commands.bindSet(*postLayout, 0, *graphPostDescriptor);
+                                          const aeg::math::Vec2 reciprocal{1.0f / static_cast<float>(viewport->width),
+                                                                           1.0f / static_cast<float>(viewport->height)};
+                                          commands.pushConstants(*postLayout, std::as_bytes(std::span(&reciprocal, 1)));
+                                          commands.draw(3);
+                                      });
+        fxaaPass.write(intermediate, RenderGraph::Usage::ColorWrite)
+            .setFinalState(intermediate, rhi::ResourceState::Sampled)
+            .setExternalRenderPass(*postPass, viewport->extent(), &graphPostFrame);
+        output = intermediate;
+    }
+
+    graph.compile({output});
+    graphDump = graph.debugDump();
+    graph.execute(commands, device, graphPool, ++graphFrame);
     if (aa.fxaa && !retryingFrame) {
         viewport->filtered = std::move(graphFiltered);
     }

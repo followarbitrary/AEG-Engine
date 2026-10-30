@@ -119,7 +119,9 @@ struct RenderGraph::Impl {
         ExecuteCallback callback;
         std::vector<Declaration> declarations;
         std::vector<rhi::ClearValue> clearValues;
+        std::vector<std::pair<Handle, rhi::ResourceState>> finalStates;
         rhi::RenderPass* externalPass{};
+        rhi::Framebuffer* externalFramebuffer{};
         std::optional<rhi::Extent2D> externalExtent;
         std::unique_ptr<rhi::Framebuffer>* externalFramebufferStorage{};
     };
@@ -229,7 +231,7 @@ RenderGraph::Handle RenderGraph::importSwapchain(rhi::Swapchain& swapchain, std:
 
 RenderGraph::PassBuilder RenderGraph::addPass(std::string name, PassType type, PassFlags flags,
                                                ExecuteCallback execute) {
-    impl_->passes.push_back({std::move(name), type, flags, std::move(execute), {}, {}});
+    impl_->passes.push_back({std::move(name), type, flags, std::move(execute), {}, {}, {}, nullptr, nullptr, {}, nullptr});
     impl_->compiled = false;
     return PassBuilder(this, impl_->passes.size() - 1);
 }
@@ -260,12 +262,35 @@ RenderGraph::PassBuilder& RenderGraph::PassBuilder::clear(rhi::ClearValue value)
     return *this;
 }
 
+RenderGraph::PassBuilder& RenderGraph::PassBuilder::setFinalState(Handle resource, rhi::ResourceState state) {
+    if (!graph_ || index_ >= graph_->impl_->passes.size()) throw std::logic_error("Invalid RenderGraph pass builder");
+    auto& source = graph_->impl_->passes[index_];
+    graph_->impl_->resource(resource);
+    source.finalStates.emplace_back(resource, state);
+    graph_->impl_->compiled = false;
+    return *this;
+}
+
+RenderGraph::PassBuilder& RenderGraph::PassBuilder::setExternalRenderPass(
+    rhi::RenderPass& pass, rhi::Framebuffer& framebuffer, rhi::Extent2D extent) {
+    if (!graph_ || index_ >= graph_->impl_->passes.size()) throw std::logic_error("Invalid RenderGraph pass builder");
+    auto& source = graph_->impl_->passes[index_];
+    if (source.type != PassType::Graphics) throw std::invalid_argument("External render passes require graphics passes");
+    source.externalPass = &pass;
+    source.externalFramebuffer = &framebuffer;
+    source.externalExtent = extent;
+    source.externalFramebufferStorage = nullptr;
+    graph_->impl_->compiled = false;
+    return *this;
+}
+
 RenderGraph::PassBuilder& RenderGraph::PassBuilder::setExternalRenderPass(
     rhi::RenderPass& pass, rhi::Extent2D extent, std::unique_ptr<rhi::Framebuffer>* framebufferStorage) {
     if (!graph_ || index_ >= graph_->impl_->passes.size()) throw std::logic_error("Invalid RenderGraph pass builder");
     auto& source = graph_->impl_->passes[index_];
     if (source.type != PassType::Graphics) throw std::invalid_argument("External render passes require graphics passes");
     source.externalPass = &pass;
+    source.externalFramebuffer = nullptr;
     source.externalExtent = extent;
     source.externalFramebufferStorage = framebufferStorage;
     graph_->impl_->compiled = false;
@@ -478,6 +503,13 @@ RenderGraph::CompileResult RenderGraph::compile(std::span<const Handle> outputs)
                 current[index] = desired;
             }
         }
+        for (const auto& [handle, finalState] : impl.passes[original].finalStates) {
+            const auto index = handle.index;
+            if (current[index] != finalState) {
+                pass.postBarriers.push_back({handle, current[index], finalState, compiled});
+                current[index] = finalState;
+            }
+        }
     }
     for (std::size_t index = 0; index < resourceCount; ++index) {
         const auto& resource = impl.resources[index];
@@ -609,7 +641,9 @@ void RenderGraph::execute(rhi::CommandList& commands, rhi::Device& device, Trans
                 if (source.externalPass) {
                     renderPass = source.externalPass;
                     extent = source.externalExtent.value_or(extent);
-                    if (source.externalFramebufferStorage) {
+                    if (source.externalFramebuffer) {
+                        framebuffer = source.externalFramebuffer;
+                    } else if (source.externalFramebufferStorage) {
                         auto replacement = device.createFramebuffer({renderPass, attachments, extent});
                         if (*source.externalFramebufferStorage)
                             pool.retireRenderObjects({}, std::move(*source.externalFramebufferStorage), frameToken);
@@ -618,6 +652,12 @@ void RenderGraph::execute(rhi::CommandList& commands, rhi::Device& device, Trans
                     } else {
                         externalFramebuffer = device.createFramebuffer({renderPass, attachments, extent});
                         framebuffer = externalFramebuffer.get();
+                    }
+                    if (source.externalFramebuffer) {
+                        // A direct external pair is owned by the caller. The graph
+                        // only brackets the callback with the render pass and never
+                        // retires or replaces the framebuffer.
+                        if (!framebuffer) throw std::logic_error("External framebuffer is null");
                     }
                 } else if (externalSwapchain) {
                     const bool loadCompatible = contains(compiled.flags, PassFlags::NeverCull);

@@ -17,8 +17,8 @@ void Renderer::Impl::createToneMappingPass() {
                                     1,
                                     rhi::LoadOp::Discard,
                                     rhi::StoreOp::Store,
-                                    rhi::ResourceState::Undefined,
-                                    rhi::ResourceState::Sampled};
+                                    rhi::ResourceState::ColorAttachment,
+                                    rhi::ResourceState::ColorAttachment};
     tonePass = device.createRenderPass({{color}, {0}, {}, {}});
     tonePipeline = createPipeline(*tonePass, *toneLayout, 1, false, detail::ShaderId::FullscreenVertex,
                                   detail::ShaderId::ToneMappingFragment);
@@ -36,13 +36,11 @@ void Renderer::Impl::setToneMapping(const ToneMappingSettings& requested) {
 
 void Renderer::Impl::drawToneMapping(rhi::CommandList& commands) {
     const auto sourceIndex = aa.taa ? 1u + (1u - recordingHistory.readIndex) : 0u;
-    commands.beginRenderPass(*tonePass, *viewport->toneFrame, viewport->extent(), {});
     commands.setViewport(viewport->extent());
     commands.bindPipeline(*tonePipeline);
     commands.bindSet(*toneLayout, 0, *viewport->toneDescriptors[sourceIndex]);
     const TonePush push{std::to_underlying(toneMappingSettings.mapper), toneMappingSettings.exposureEV};
     commands.pushConstants(*toneLayout, std::as_bytes(std::span(&push, 1)));
     commands.draw(3);
-    commands.endRenderPass();
 }
 }

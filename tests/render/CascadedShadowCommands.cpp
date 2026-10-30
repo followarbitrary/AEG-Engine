@@ -169,7 +169,7 @@ void checkRecorded(tests::FakeDevice& device, RecordingCommands& recorded, unsig
                 "Cascade map is not single-sample sampled depth");
         const auto& attachment = pass.description.attachments[0];
         require(attachment.load == rhi::LoadOp::Clear && attachment.store == rhi::StoreOp::Store &&
-                    attachment.finalState == rhi::ResourceState::Sampled && pass.clears.size() == 1 &&
+                    attachment.finalState == rhi::ResourceState::DepthAttachment && pass.clears.size() == 1 &&
                     pass.clears[0].depth == 1 && pass.pipeline.depthCompare == rhi::DepthCompare::Less &&
                     pass.pipeline.depthTest && pass.pipeline.depthWrite && pass.pipeline.colorAttachmentCount == 0,
                 "Cascade clear/store/canonical depth policy changed");

@@ -90,7 +90,7 @@ struct Renderer::Impl {
     void initializeShadowSupport();
     void setShadows(const ShadowSettings& settings);
     void configureShadowUniform(SceneUniform& uniform, const RenderSettings& settings);
-    void drawShadow(rhi::CommandList& commands, const SceneUniform& uniform);
+    void drawShadow(rhi::CommandList& commands, const SceneUniform& uniform, std::uint32_t cascade);
     void createScenePass(ScenePipeline& target);
     void createPostPass();
     void createToneMappingPass();

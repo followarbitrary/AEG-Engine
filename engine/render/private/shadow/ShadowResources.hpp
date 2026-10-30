@@ -13,6 +13,7 @@ struct ShadowResources {
     std::unique_ptr<rhi::RenderPass> pass;
     std::array<std::unique_ptr<rhi::Texture>, kMaxShadowCascades> textures;
     std::array<std::unique_ptr<rhi::Framebuffer>, kMaxShadowCascades> framebuffers;
+    std::array<rhi::ResourceState, kMaxShadowCascades> states{};
     std::unique_ptr<rhi::GraphicsPipeline> pipeline;
     // Variant i exposes maps 0..i and initialized fallback textures thereafter.
     std::array<std::unique_ptr<rhi::BindingSet>, kMaxShadowCascades> descriptors;

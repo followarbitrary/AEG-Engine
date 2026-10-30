@@ -115,6 +115,9 @@ public:
         PassBuilder& write(Handle resource, Usage usage);
         PassBuilder& readWrite(Handle resource, Usage usage = Usage::StorageReadWrite);
         PassBuilder& clear(rhi::ClearValue value);
+        PassBuilder& setFinalState(Handle resource, rhi::ResourceState state);
+        PassBuilder& setExternalRenderPass(rhi::RenderPass& pass, rhi::Framebuffer& framebuffer,
+                                            rhi::Extent2D extent);
         PassBuilder& setExternalRenderPass(rhi::RenderPass& pass, rhi::Extent2D extent,
                                             std::unique_ptr<rhi::Framebuffer>* framebufferStorage = nullptr);
 

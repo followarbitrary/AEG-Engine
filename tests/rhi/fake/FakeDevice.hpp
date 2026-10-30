@@ -327,6 +327,7 @@ public:
     std::vector<TransitionSnapshot> transitions;
     std::vector<TextureCopySnapshot> subresourceCopies;
     std::vector<std::string> operations;
+    rhi::Framebuffer* lastFramebuffer{};
     bool inRenderPass() const { return activePass_ != nullptr; }
     void beginRenderPass(rhi::RenderPass& pass, rhi::Framebuffer& framebuffer, rhi::Extent2D,
                          std::span<const rhi::ClearValue> clears) override {
@@ -337,6 +338,7 @@ public:
                                                    : "fxaa");
         recordedPasses.push_back({&pass, desc, dynamic_cast<FakeFramebuffer&>(framebuffer).desc, {}, {}});
         activePass_ = &recordedPasses.back();
+        lastFramebuffer = &framebuffer;
         activePass_->clears.assign(clears.begin(), clears.end());
         for (const auto texture : activePass_->framebuffer.attachments)
             activePass_->attachmentDescriptions.push_back(texture->description());

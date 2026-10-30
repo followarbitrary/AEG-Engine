@@ -42,10 +42,11 @@ void Renderer::Impl::setShadows(const ShadowSettings& requested) {
         replacement->resolution = requested.resolution;
         replacement->capacity = requested.cascadeCount;
         const rhi::Extent2D extent{requested.resolution, requested.resolution};
-        // Every recording clears from Undefined and ends Sampled. No CPU-side
-        // initialization flag can accidentally advance on an abandoned frame.
+        // The graph transitions each cascade into the depth attachment state,
+        // then publishes Sampled after the pass completes.
         replacement->pass = device.createRenderPass({{{shadowFormat, 1, rhi::LoadOp::Clear, rhi::StoreOp::Store,
-                                                       rhi::ResourceState::Undefined, rhi::ResourceState::Sampled}},
+                                                       rhi::ResourceState::DepthAttachment,
+                                                       rhi::ResourceState::DepthAttachment}},
                                                      {},
                                                      0,
                                                      {}});
@@ -102,27 +103,22 @@ void Renderer::Impl::configureShadowUniform(SceneUniform& uniform, const RenderS
     uniform.shadowInfo.w = static_cast<float>(fit.count);
 }
 
-void Renderer::Impl::drawShadow(rhi::CommandList& commands, const SceneUniform& uniform) {
-    if (uniform.shadowInfo.x < 0.5f || !shadow || !model) return;
+void Renderer::Impl::drawShadow(rhi::CommandList& commands, const SceneUniform& uniform, std::uint32_t cascade) {
+    if (uniform.shadowInfo.x < 0.5f || !shadow || !model || cascade >= static_cast<std::uint32_t>(uniform.shadowInfo.w))
+        return;
     const rhi::Extent2D extent{shadow->resolution, shadow->resolution};
-    const std::array<rhi::ClearValue, 1> clears{}; // Canonical non-reversed depth clears to one.
-    const auto count = static_cast<std::uint32_t>(uniform.shadowInfo.w);
-    for (std::uint32_t cascade = 0; cascade < count; ++cascade) {
-        commands.beginRenderPass(*shadow->pass, *shadow->framebuffers[cascade], extent, clears);
-        commands.setViewport(extent);
-        commands.bindPipeline(*shadow->pipeline);
-        commands.bindSet(*shadowPipelineLayout, 0, *sceneDescriptor);
-        for (const auto& mesh : model->meshes) {
-            const auto& material = model->materials[mesh.material];
-            if (material.parameters.alphaMode == static_cast<std::uint32_t>(assets::AlphaMode::Blend)) continue;
-            commands.bindVertexBuffer(*mesh.vertices);
-            commands.bindIndexBuffer(*mesh.indices);
-            commands.bindSet(*shadowPipelineLayout, 1, *material.descriptor);
-            const ShadowPush push{material.parameters, cascade, {}};
-            commands.pushConstants(*shadowPipelineLayout, std::as_bytes(std::span(&push, 1)));
-            commands.drawIndexed(mesh.indexCount);
-        }
-        commands.endRenderPass();
+    commands.setViewport(extent);
+    commands.bindPipeline(*shadow->pipeline);
+    commands.bindSet(*shadowPipelineLayout, 0, *sceneDescriptor);
+    for (const auto& mesh : model->meshes) {
+        const auto& material = model->materials[mesh.material];
+        if (material.parameters.alphaMode == static_cast<std::uint32_t>(assets::AlphaMode::Blend)) continue;
+        commands.bindVertexBuffer(*mesh.vertices);
+        commands.bindIndexBuffer(*mesh.indices);
+        commands.bindSet(*shadowPipelineLayout, 1, *material.descriptor);
+        const ShadowPush push{material.parameters, cascade, {}};
+        commands.pushConstants(*shadowPipelineLayout, std::as_bytes(std::span(&push, 1)));
+        commands.drawIndexed(mesh.indexCount);
     }
 }
 }

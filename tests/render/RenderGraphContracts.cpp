@@ -325,6 +325,39 @@ void externalFramebufferRetirementContract() {
             "External framebuffer was not reclaimed after completion advanced");
 }
 
+void externalFramebufferPairOwnershipContract() {
+    aeg::tests::FakeDevice device;
+    Pool pool(device);
+    auto texture = device.createTexture({{8, 8}, aeg::rhi::Format::Rgba8Unorm,
+                                         aeg::rhi::TextureUsage::ColorAttachment | aeg::rhi::TextureUsage::Sampled});
+    auto pass = device.createRenderPass({{{aeg::rhi::Format::Rgba8Unorm, 1, aeg::rhi::LoadOp::Discard,
+                                           aeg::rhi::StoreOp::Store, State::ColorAttachment,
+                                           State::ColorAttachment}},
+                                         {0}, std::nullopt, {}});
+    auto framebuffer = device.createFramebuffer({pass.get(), {texture.get()}, {8, 8}});
+    State tracked = State::Undefined;
+    Graph graph;
+    const auto image = graph.importTexture(*texture, tracked, "external-pair");
+    bool callbackInsidePass = false;
+    graph.addPass("external pair", Graph::PassType::Graphics, {}, [&](Graph::PassContext&) {
+        callbackInsidePass = true;
+    }).write(image, Graph::Usage::ColorWrite)
+        .setFinalState(image, State::Sampled)
+        .setExternalRenderPass(*pass, *framebuffer, {8, 8});
+    graph.compile({image});
+    aeg::tests::FakeCommands commands(&device.caps);
+    graph.execute(commands, device, pool, FrameToken{11});
+    require(callbackInsidePass && !commands.recordedPasses.empty(),
+            "External pair callback did not execute inside a graph-owned render pass");
+    require(commands.recordedPasses.front().framebuffer.pass == pass.get(),
+            "External pair did not use the supplied render pass");
+    require(commands.lastFramebuffer == framebuffer.get(),
+            "External pair did not use the supplied framebuffer");
+    require(pool.retiredRenderObjectCount() == 0,
+            "Graph retired a caller-owned external framebuffer");
+    require(tracked == State::Sampled, "External pair final state was not committed through graph barriers");
+}
+
 void importedStateCommitContracts() {
     aeg::tests::FakeDevice device;
     Pool pool(device);
@@ -537,6 +570,7 @@ int main() {
         transientPoolContracts();
         executionContracts();
         externalFramebufferRetirementContract();
+        externalFramebufferPairOwnershipContract();
         importedStateCommitContracts();
         externalSwapchainExecutionContract();
         repeatedExecutionContract();

@@ -136,7 +136,7 @@ void resourcesAndPolicy() {
             "Shadow map is not true sampled depth");
     const auto& attachment = depth.description.attachments.at(0);
     require(attachment.load == rhi::LoadOp::Clear && attachment.store == rhi::StoreOp::Store &&
-                attachment.finalState == rhi::ResourceState::Sampled && depth.clears.size() == 1 &&
+                attachment.finalState == rhi::ResourceState::DepthAttachment && depth.clears.size() == 1 &&
                 depth.clears[0].depth == 1,
             "Shadow depth is not cleared/stored for later sampling");
     require(depth.pipeline.colorAttachmentCount == 0 && depth.pipeline.samples == 1 && depth.pipeline.depthTest &&

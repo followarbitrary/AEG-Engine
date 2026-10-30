@@ -6,8 +6,8 @@ void Renderer::Impl::createPostPass() {
                                     1,
                                     rhi::LoadOp::Discard,
                                     rhi::StoreOp::Store,
-                                    rhi::ResourceState::Undefined,
-                                    rhi::ResourceState::Sampled};
+                                    rhi::ResourceState::ColorAttachment,
+                                    rhi::ResourceState::ColorAttachment};
     postPass = device.createRenderPass({{color}, {0}, {}, {}});
     if (temporalSupported) {
         auto history = color, depth = color;

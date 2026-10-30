@@ -61,16 +61,16 @@ void Renderer::Impl::createScenePass(ScenePipeline& target) {
     const bool multisampled = target.samples > 1;
     rhi::RenderPassDesc desc;
     desc.attachments = {{sceneFormat, target.samples, rhi::LoadOp::Clear,
-                         multisampled ? rhi::StoreOp::Discard : rhi::StoreOp::Store, rhi::ResourceState::Undefined,
-                         multisampled ? rhi::ResourceState::ColorAttachment : rhi::ResourceState::Sampled},
+                         multisampled ? rhi::StoreOp::Discard : rhi::StoreOp::Store,
+                         rhi::ResourceState::ColorAttachment, rhi::ResourceState::ColorAttachment},
                         {device.capabilities().depthFormat, target.samples, rhi::LoadOp::Clear, rhi::StoreOp::Discard,
-                         rhi::ResourceState::Undefined, rhi::ResourceState::DepthAttachment}};
+                         rhi::ResourceState::DepthAttachment, rhi::ResourceState::DepthAttachment}};
     desc.colors = {0};
     desc.depth = 1;
     if (multisampled || target.temporal) {
         desc.attachments.push_back({target.temporal ? motionFormat : sceneFormat, 1,
-                                    target.temporal ? rhi::LoadOp::Clear : rhi::LoadOp::Discard, rhi::StoreOp::Store,
-                                    rhi::ResourceState::Undefined, rhi::ResourceState::Sampled});
+            target.temporal ? rhi::LoadOp::Clear : rhi::LoadOp::Discard, rhi::StoreOp::Store,
+                                    rhi::ResourceState::ColorAttachment, rhi::ResourceState::ColorAttachment});
         if (multisampled)
             desc.resolves = {2};
         else
@@ -176,16 +176,6 @@ void Renderer::Impl::drawScene(rhi::CommandList& commands, const RenderSettings&
     }
     // Finish allocations and lazy pipeline creation before beginning a command pass.
     if (!transparent.empty()) scenePipeline(aa.msaaSamples, aa.taa, settings.clipSpace.reversed_z, true);
-    std::array<rhi::ClearValue, 3> clears{};
-    const auto finiteRadiance = [](float value) {
-        return std::isnan(value) ? 0.0f : std::clamp(value, 0.0f, 65504.0f);
-    };
-    clears[0].color = {finiteRadiance(settings.background.x), finiteRadiance(settings.background.y),
-                       finiteRadiance(settings.background.z), 1};
-    clears[1].depth = settings.clipSpace.reversed_z ? 0.0f : 1.0f;
-    clears[2].color = {0, 0, -1, -1};
-    commands.beginRenderPass(*scene.pass, *viewport->sceneFrame, viewport->extent(),
-                             std::span(clears).first(aa.taa ? 3u : 2u));
     commands.setViewport(viewport->extent());
     commands.bindPipeline(*(settings.clipSpace.reversed_z ? scene.greater : scene.less));
     commands.bindSet(*pipelineLayout, 0, *sceneDescriptor);
@@ -214,6 +204,5 @@ void Renderer::Impl::drawScene(rhi::CommandList& commands, const RenderSettings&
             for (const auto& draw : transparent) drawMesh(*draw.mesh);
         }
     }
-    commands.endRenderPass();
 }
 }
