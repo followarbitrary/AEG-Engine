@@ -1,4 +1,8 @@
-add_library(aeg_ecs STATIC private/EcsWorld.cpp public/EcsWorld.hpp)
+add_library(aeg_ecs STATIC
+    private/EcsSystem.cpp
+    private/EcsWorld.cpp
+    public/EcsSystem.hpp
+    public/EcsWorld.hpp)
 add_library(aeg::ecs ALIAS aeg_ecs)
 target_include_directories(aeg_ecs
     PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/public"

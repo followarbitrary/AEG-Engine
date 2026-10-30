@@ -380,7 +380,7 @@ ctest --test-dir build/math-standalone --output-on-failure
 | --- | --- | --- |
 | `engine/math/` | `aeg::math` | `aeg::math`，自研向量、四元数、矩阵、投影与视锥体 |
 | `engine/foundation/` | `aeg::foundation` | `aeg::foundation`，Bounds、UTF-8 路径处理 |
-| `engine/ecs/` | `aeg::ecs` | `aeg::ecs`，基于 EnTT 的实体、组件注册表与生命周期 |
+| `engine/ecs/` | `aeg::ecs` | `aeg::ecs`，基于 EnTT 的实体、组件注册表、生命周期与顺序系统调度 |
 | `engine/camera/` | `aeg::camera` | `aeg::camera`，轨道相机与携带裁剪空间约定的 RenderCamera |
 | `engine/assets/` | `aeg::assets` | `aeg::assets`，CPU 模型数据、Assimp 导入、纹理解码、PMX 校验 |
 | `engine/rhi/` | `aeg::rhi` | `aeg::rhi`，设备、资源、绑定、管线、命令、交换链的通用接口与描述校验 |
@@ -434,6 +434,22 @@ target_link_libraries(my_tool PRIVATE aeg::camera aeg::render)
 
 aeg::camera::OrbitCamera camera;
 auto model = aeg::assets::loadModel(path);
+```
+
+ECS 模块通过 `aeg::ecs::World` 管理实体和组件，通过 `aeg::ecs::Scheduler` 按注册顺序执行系统：
+
+```cpp
+#include <EcsSystem.hpp>
+
+aeg::ecs::World world;
+aeg::ecs::Scheduler scheduler;
+const float deltaSeconds = 1.0f / 60.0f;
+scheduler.add([](aeg::ecs::World& world, float deltaSeconds) {
+    // 使用 world.registry() 查询并更新组件。
+    static_cast<void>(world);
+    static_cast<void>(deltaSeconds);
+});
+scheduler.run(world, deltaSeconds);
 ```
 
 CMake 仅导出各模块的 `public/`；Vulkan GUI 桥接与核心后端属于同一后端模块，内部共用私有互操作声明。RHI 的十个头文件和 Math 头文件接受独立编译检查，公开接口测试不获得模块的 private 搜索路径。字体白盒测试单独获得 `editor/private/fonts/`，该目录不会传递给应用程序。GPU 测试复用产品的 `EditorGraphics`、Renderer 和 Vulkan 后端；测试辅助类只提供调用转发，不重编另一份渲染实现。`aeg_core_tests` 保留为 Math、相机、ECS、模型导入与法线贴图导入测试的构建聚合目标。
