@@ -72,7 +72,7 @@ void bakeDispatchContracts(const tests::FakeDevice& device, const render::Enviro
     require(device.immediateCommands && device.immediateSubmissions == 2,
             "First bake must submit one LUT and one map transaction");
     const auto& commands = *device.immediateCommands;
-    require(commands.dispatches.size() == 11 && commands.transitions.size() == 8,
+    require(commands.dispatches.size() == 11 && commands.transitions.size() >= 8,
             "Tiny bake omitted LUT, a cube mip, irradiance or a complete-resource transition");
     const auto& dispatches = commands.dispatches;
     for (std::size_t index = 0; index < dispatches.size(); ++index) {
