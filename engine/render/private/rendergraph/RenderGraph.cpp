@@ -343,6 +343,39 @@ RenderGraph::CompileResult RenderGraph::compile(std::span<const Handle> outputs)
             seen.push_back(declaration.resource);
             if (declaration.write) writers[declaration.resource.index].push_back(passIndex);
         }
+        for (const auto& [handle, finalState] : pass.finalStates) {
+            const auto& resource = impl.resource(handle);
+            const auto declared = std::ranges::find_if(
+                pass.declarations, [&](const auto& declaration) { return declaration.resource == handle; });
+            if (declared == pass.declarations.end())
+                throw std::invalid_argument("RenderGraph pass '" + pass.name + "' sets a final state for an undeclared resource '" +
+                                            resource.name + "'");
+            const auto compatible = [&] {
+                switch (finalState) {
+                case rhi::ResourceState::Undefined: return false;
+                case rhi::ResourceState::Sampled: return hasUsage(resource.description.usage, rhi::TextureUsage::Sampled);
+                case rhi::ResourceState::ColorAttachment:
+                    return hasUsage(resource.description.usage, rhi::TextureUsage::ColorAttachment);
+                case rhi::ResourceState::DepthAttachment:
+                    return hasUsage(resource.description.usage, rhi::TextureUsage::DepthAttachment);
+                case rhi::ResourceState::CopySource:
+                    return hasUsage(resource.description.usage, rhi::TextureUsage::CopySource);
+                case rhi::ResourceState::CopyDestination:
+                    return hasUsage(resource.description.usage, rhi::TextureUsage::CopyDestination);
+                case rhi::ResourceState::Present: return resource.swapchain;
+                case rhi::ResourceState::Storage: return hasUsage(resource.description.usage, rhi::TextureUsage::Storage);
+                }
+                return false;
+            }();
+            if (!compatible)
+                throw std::invalid_argument("RenderGraph pass '" + pass.name + "' has an incompatible final state for resource '" +
+                                            resource.name + "'");
+        }
+        const auto presentDeclaration =
+            std::ranges::find_if(pass.declarations, [](const auto& declaration) { return declaration.usage == Usage::Present; });
+        if (presentDeclaration != pass.declarations.end() &&
+            (pass.declarations.size() != 1 || pass.callback || !pass.clearValues.empty() || pass.externalPass))
+            throw std::invalid_argument("RenderGraph Present usage must be the only declaration of a callback-free graphics pass");
     }
     // Build RAW, WAR and WAW edges in declaration order.  The WAR edge is
     // essential when a reader is declared before a later writer: without it
@@ -613,7 +646,11 @@ void RenderGraph::execute(rhi::CommandList& commands, rhi::Device& device, Trans
 
             PassContext context;
             context.resolver_ = resolve;
-            if (compiled.type == PassType::Graphics) {
+            const bool stateOnlyPresent = compiled.type == PassType::Graphics && compiled.usages.size() == 1 &&
+                                          compiled.usages.front().usage == Usage::Present;
+            if (stateOnlyPresent) {
+                if (source.callback) throw std::invalid_argument("RenderGraph Present pass cannot have a callback");
+            } else if (compiled.type == PassType::Graphics) {
                 std::vector<rhi::Texture*> attachments;
                 std::vector<Handle> attachmentResources;
                 std::vector<std::uint32_t> colors;
@@ -686,13 +723,18 @@ void RenderGraph::execute(rhi::CommandList& commands, rhi::Device& device, Trans
                                         return true;
                             return false;
                         }();
+                        const auto hasDefinedContents = impl.resource(attachmentResources[attachmentIndex]).initialState !=
+                                                        rhi::ResourceState::Undefined;
                         // A clear value always wins. Otherwise preserve the
-                        // contents written by an earlier retained pass; a
-                        // first use without a clear may discard Undefined.
+                        // contents written by an earlier retained pass or
+                        // supplied by an imported/persistent resource. A
+                        // first use may discard only when the contents are
+                        // known to be Undefined.
                         const auto attachmentLoad = clearValues.size() > attachmentIndex
                                                         ? rhi::LoadOp::Clear
-                                                        : (hasPreviousAttachment ? rhi::LoadOp::Load
-                                                                                  : rhi::LoadOp::Discard);
+                                                        : (hasPreviousAttachment || hasDefinedContents
+                                                               ? rhi::LoadOp::Load
+                                                               : rhi::LoadOp::Discard);
                         description.attachments.push_back({attachment->description().format,
                                                            attachment->description().samples,
                                                            attachmentLoad,

@@ -42,6 +42,9 @@ public:
         StorageReadWrite,
         CopySrc,
         CopyDst,
+        // Present is a callback-free graphics state transition. It must be
+        // the only declaration in its pass; the imported swapchain's final
+        // state is also set to Present automatically.
         Present,
     };
 

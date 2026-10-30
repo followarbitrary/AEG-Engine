@@ -122,6 +122,23 @@ void clearAndTransientStateContracts() {
             "Transient recompile reused a stale physical resource state");
 }
 
+void persistentAttachmentLoadContract() {
+    aeg::tests::FakeDevice device;
+    Pool pool(device);
+    auto texture = device.createTexture({{8, 8}, aeg::rhi::Format::Rgba8Unorm,
+                                         aeg::rhi::TextureUsage::ColorAttachment | aeg::rhi::TextureUsage::Sampled});
+    State tracked = State::Sampled;
+    Graph graph;
+    const auto image = graph.importTexture(*texture, tracked, "persistent-load");
+    graph.addPass("blend", Graph::PassType::Graphics, {}, {}).write(image, Graph::Usage::ColorWrite);
+    graph.compile({image});
+    aeg::tests::FakeCommands commands(&device.caps);
+    graph.execute(commands, device, pool, FrameToken{1});
+    require(commands.recordedPasses.size() == 1 &&
+                commands.recordedPasses.front().description.attachments.front().load == aeg::rhi::LoadOp::Load,
+            "A defined first-use color attachment was discarded instead of loaded");
+}
+
 void orderingCullingAndDump() {
     Graph graph;
     const auto output = graph.createTexture({{16, 16}, aeg::rhi::Format::Rgba8Unorm,
@@ -184,6 +201,56 @@ void validationContracts() {
     present.addPass("present", Graph::PassType::Graphics, {}, {}).write(regular, Graph::Usage::Present);
     rejects([&] { present.compile(std::span<const Graph::Handle>(&regular, 1)); },
             "Present usage was accepted for a non-swapchain resource");
+}
+
+void presentAndFinalStateContracts() {
+    ContractSwapchain swapchain;
+    aeg::tests::FakeDevice device;
+    Pool pool(device);
+    Graph graph;
+    const auto image = graph.importSwapchain(swapchain, "present");
+    graph.addPass("clear", Graph::PassType::Graphics, {}, {}).write(image, Graph::Usage::ColorWrite);
+    graph.addPass("present", Graph::PassType::Graphics, {}, {}).write(image, Graph::Usage::Present);
+    graph.compile({image});
+    aeg::tests::FakeCommands commands(&device.caps);
+    graph.execute(commands, device, pool, FrameToken{1});
+    require(commands.recordedPasses.size() == 1 && commands.transitions.size() == 2 &&
+                commands.transitions.back().after == State::Present,
+            "Present usage did not execute as a state-only final pass");
+
+    rejects([&] {
+        Graph invalid;
+        const auto resource = invalid.createTexture({{4, 4}, aeg::rhi::Format::Rgba8Unorm,
+                                                     aeg::rhi::TextureUsage::ColorAttachment},
+                                                    "invalid-final", false);
+        invalid.addPass("write", Graph::PassType::Graphics, {}, {})
+            .write(resource, Graph::Usage::ColorWrite)
+            .setFinalState(resource, State::Undefined);
+        invalid.compile({resource});
+    }, "Undefined final state was accepted");
+
+    rejects([&] {
+        Graph invalid;
+        const auto resource = invalid.createTexture({{4, 4}, aeg::rhi::Format::Rgba8Unorm,
+                                                     aeg::rhi::TextureUsage::ColorAttachment},
+                                                    "incompatible-final", false);
+        invalid.addPass("write", Graph::PassType::Graphics, {}, {})
+            .write(resource, Graph::Usage::ColorWrite)
+            .setFinalState(resource, State::Storage);
+        invalid.compile({resource});
+    }, "Incompatible final state was accepted");
+
+    rejects([&] {
+        Graph invalid;
+        const auto resource = invalid.createTexture({{4, 4}, aeg::rhi::Format::Rgba8Unorm,
+                                                     aeg::rhi::TextureUsage::ColorAttachment |
+                                                         aeg::rhi::TextureUsage::Sampled},
+                                                    "undeclared-final", true);
+        invalid.addPass("producer", Graph::PassType::Graphics, {}, {}).write(resource, Graph::Usage::ColorWrite);
+        invalid.addPass("final", Graph::PassType::Compute, Graph::PassFlags::NeverCull, {})
+            .setFinalState(resource, State::Sampled);
+        invalid.compile({});
+    }, "Final state on an undeclared resource was accepted");
 }
 
 void generationContract() {
@@ -356,6 +423,30 @@ void externalFramebufferPairOwnershipContract() {
     require(pool.retiredRenderObjectCount() == 0,
             "Graph retired a caller-owned external framebuffer");
     require(tracked == State::Sampled, "External pair final state was not committed through graph barriers");
+}
+
+void externalFramebufferFailurePreservesStorageContract() {
+    aeg::tests::FakeDevice device;
+    Pool pool(device);
+    auto texture = device.createTexture({{8, 8}, aeg::rhi::Format::Rgba8Unorm,
+                                         aeg::rhi::TextureUsage::ColorAttachment | aeg::rhi::TextureUsage::Sampled});
+    auto pass = device.createRenderPass({{{aeg::rhi::Format::Rgba8Unorm, 1, aeg::rhi::LoadOp::Discard,
+                                           aeg::rhi::StoreOp::Store, State::ColorAttachment,
+                                           State::ColorAttachment}},
+                                         {0}, std::nullopt, {}});
+    auto storage = device.createFramebuffer({pass.get(), {texture.get()}, {8, 8}});
+    State tracked = State::Undefined;
+    Graph graph;
+    const auto image = graph.importTexture(*texture, tracked, "external-failure");
+    graph.addPass("external", Graph::PassType::Graphics, {}, {})
+        .write(image, Graph::Usage::ColorWrite)
+        .setExternalRenderPass(*pass, {8, 8}, &storage);
+    graph.compile({image});
+    device.failFramebuffer = true;
+    aeg::tests::FakeCommands commands(&device.caps);
+    rejectsAny([&] { graph.execute(commands, device, pool, FrameToken{1}); },
+               "Injected external framebuffer allocation failure was not propagated");
+    require(storage != nullptr, "External framebuffer storage was consumed after replacement creation failed");
 }
 
 void importedStateCommitContracts() {
@@ -563,14 +654,17 @@ int main() {
         usageAndBarriers();
         warDependencyContract();
         clearAndTransientStateContracts();
+        persistentAttachmentLoadContract();
         orderingCullingAndDump();
         validationContracts();
+        presentAndFinalStateContracts();
         generationContract();
         ownedTextureResetLifetimeContract();
         transientPoolContracts();
         executionContracts();
         externalFramebufferRetirementContract();
         externalFramebufferPairOwnershipContract();
+        externalFramebufferFailurePreservesStorageContract();
         importedStateCommitContracts();
         externalSwapchainExecutionContract();
         repeatedExecutionContract();

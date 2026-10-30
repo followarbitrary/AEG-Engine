@@ -143,6 +143,7 @@ public:
     rhi::DeviceCapabilities caps{4096, 4096, 8, rhi::Format::D32Float, true};
     std::uint32_t samples{15};
     bool failTexture{};
+    bool failFramebuffer{};
     // Zero disables the countdown; otherwise fail exactly that texture allocation.
     std::uint32_t failNthTexture{};
     bool failPipeline{};
@@ -269,6 +270,7 @@ public:
         return std::make_unique<FakePass>(desc);
     }
     std::unique_ptr<rhi::Framebuffer> createFramebuffer(const rhi::FramebufferDesc& desc) override {
+        if (std::exchange(failFramebuffer, false)) throw std::runtime_error("Injected framebuffer allocation failure");
         return std::make_unique<FakeFramebuffer>(desc);
     }
     std::unique_ptr<rhi::GraphicsPipeline> createGraphicsPipeline(const rhi::GraphicsPipelineDesc& desc) override {
