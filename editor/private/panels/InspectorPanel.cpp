@@ -6,8 +6,8 @@
 
 namespace aeg::editor {
 void drawInspectorPanel(EditorState& state, render::Renderer& renderer) {
-    auto& transform = state.transform;
-    auto& autoRotate = state.autoRotate;
+    auto& transform = state.transform();
+    auto& autoRotate = state.autoRotate();
     auto& settings = state.settings;
     auto& frameRequested = state.frameRequested;
     auto& supportedTaa = state.supportedTaa;

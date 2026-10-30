@@ -29,7 +29,7 @@ void drawViewportPanel(EditorState& state, render::Renderer& renderer, EditorGra
     auto& frameRequested = state.frameRequested;
     auto& sceneRendered = state.sceneRendered;
     auto& settings = state.settings;
-    auto& transform = state.transform;
+    auto& transform = state.transform();
     auto& model = state.model;
     const auto& io = ImGui::GetIO();
     bool visible = false;

@@ -26,5 +26,5 @@ target_include_directories(aeg_editor_module
             "${PROJECT_SOURCE_DIR}/engine/render/private/rendergraph")
 target_link_libraries(aeg_editor_module
     PUBLIC aeg::render aeg::gui
-    PRIVATE aeg::foundation aeg::camera aeg::assets aeg_imgui_glfw aeg_imguizmo glfw)
+    PRIVATE aeg::foundation aeg::camera aeg::assets aeg::ecs aeg_imgui_glfw aeg_imguizmo glfw)
 aeg_project_options(aeg_editor_module)

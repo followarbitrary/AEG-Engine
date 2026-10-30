@@ -6,6 +6,13 @@ aeg_project_options(aeg_editor_font_tests)
 add_test(NAME aeg_editor_font_tests COMMAND aeg_editor_font_tests)
 set_tests_properties(aeg_editor_font_tests PROPERTIES LABELS cpu TIMEOUT 60)
 
+add_executable(aeg_editor_ecs_state_tests EditorEcsStateTests.cpp)
+target_include_directories(aeg_editor_ecs_state_tests PRIVATE "${PROJECT_SOURCE_DIR}/editor/private")
+target_link_libraries(aeg_editor_ecs_state_tests PRIVATE aeg::editor aeg::ecs)
+aeg_project_options(aeg_editor_ecs_state_tests)
+add_test(NAME aeg_editor_ecs_state_tests COMMAND aeg_editor_ecs_state_tests)
+set_tests_properties(aeg_editor_ecs_state_tests PROPERTIES LABELS cpu TIMEOUT 60)
+
 add_executable(aeg_transform_gizmo_tests TransformGizmoTests.cpp
     "${PROJECT_SOURCE_DIR}/editor/private/gizmo/Transform.cpp")
 target_include_directories(aeg_transform_gizmo_tests PRIVATE "${PROJECT_SOURCE_DIR}/editor/private/gizmo")

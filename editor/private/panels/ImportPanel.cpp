@@ -49,7 +49,7 @@ void processImports(EditorState& state, render::Renderer& renderer) {
     auto& imports = state.imports;
     auto& importPath = state.importPath;
     auto& status = state.status;
-    auto& transform = state.transform;
+    auto& transform = state.transform();
     auto& camera = state.camera;
     while (!imports.paths.empty()) {
         const auto path = std::move(imports.paths.front());

@@ -5,6 +5,7 @@
 #include <Editor.hpp>
 #include <AntialiasingSettings.hpp>
 #include <Bounds.hpp>
+#include <EcsSystem.hpp>
 #include <ModelData.hpp>
 #include <OrbitCamera.hpp>
 #include <RenderSettings.hpp>
@@ -18,6 +19,7 @@
 #include <cstdint>
 #include <deque>
 #include <filesystem>
+#include <cmath>
 #include <string>
 
 struct GLFWwindow;
@@ -40,7 +42,15 @@ struct ImportQueue {
     std::string error;
 };
 
+struct AutoRotate {
+    bool enabled{false};
+    float degreesPerSecond{22.0f};
+};
+
 struct EditorState {
+    ecs::World scene;
+    entt::entity selectedEntity{entt::null};
+    ecs::Scheduler systems;
     render::AntialiasingSettings antialiasing;
     std::uint32_t supportedMsaa{1};
     bool supportedTaa{false};
@@ -48,7 +58,6 @@ struct EditorState {
     std::string toneMappingError;
     assets::ModelData model;
     camera::OrbitCamera camera;
-    Transform transform;
     ViewportGizmoState gizmo;
     OrientationGizmoState orientationGizmo;
     render::RenderSettings settings;
@@ -70,13 +79,29 @@ struct EditorState {
     std::array<char, 4096> environmentPath{};
     std::string environmentNotice;
     std::string environmentError;
-    bool autoRotate{false};
     bool frameRequested{false};
     bool sceneRendered{false};
     std::array<bool, 3> viewportDrag{};
     std::uint32_t frames{0};
     std::uint32_t viewportWidth{1}, viewportHeight{1};
     std::string status{"就绪。将模型拖入窗口即可导入。"};
+
+    EditorState() : selectedEntity(scene.create()) {
+        scene.registry().emplace<Transform>(selectedEntity);
+        scene.registry().emplace<AutoRotate>(selectedEntity);
+        const auto entity = selectedEntity;
+        systems.add([entity](ecs::World& world, const float deltaSeconds) {
+            auto& value = world.registry().get<Transform>(entity);
+            const auto& rotate = world.registry().get<AutoRotate>(entity);
+            if (!rotate.enabled) return;
+            value.rotation.y = std::fmod(value.rotation.y + deltaSeconds * rotate.degreesPerSecond, 360.0f);
+        });
+    }
+
+    [[nodiscard]] Transform& transform() { return scene.registry().get<Transform>(selectedEntity); }
+    [[nodiscard]] const Transform& transform() const { return scene.registry().get<Transform>(selectedEntity); }
+    [[nodiscard]] bool& autoRotate() { return scene.registry().get<AutoRotate>(selectedEntity).enabled; }
+    [[nodiscard]] const bool& autoRotate() const { return scene.registry().get<AutoRotate>(selectedEntity).enabled; }
 };
 
 void initializeEditorWindow(WindowLifetime& lifetime, const EditorOptions& options);
