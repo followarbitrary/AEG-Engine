@@ -30,7 +30,7 @@ void drawViewportPanel(EditorState& state, render::Renderer& renderer, EditorGra
     auto& sceneRendered = state.sceneRendered;
     auto& settings = state.settings;
     auto& transform = state.transform();
-    auto& model = state.model;
+    auto& model = state.model();
     const auto& io = ImGui::GetIO();
     bool visible = false;
     for (int button = 0; button < 3; ++button)

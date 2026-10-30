@@ -2,7 +2,7 @@
 
 namespace aeg::editor {
 void drawScenePanel(EditorState& state) {
-    auto& model = state.model;
+    auto& model = state.model();
     auto& frameRequested = state.frameRequested;
     if (ImGui::Begin(sceneWindow)) {
         ImGui::TextDisabled("当前模型");

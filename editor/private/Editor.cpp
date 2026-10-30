@@ -42,15 +42,15 @@ int runEditor(const EditorOptions& options, const EditorBackendFactory& factory)
               << (state.antialiasing.fxaa ? "on" : "off") << " | TAA " << (state.antialiasing.taa ? "on" : "off")
               << '\n';
     std::cout << "GPU: " << renderer.deviceName() << '\n';
-    state.model =
+    state.model() =
         assets::loadModel(options.initialModel.empty() ? options.resourceDirectory / "assets" / "models" / "demo.obj"
                                                        : options.initialModel);
-    renderer.uploadModel(state.model);
-    std::cout << "Model: " << foundation::pathToUtf8(state.model.source) << " (" << state.model.vertexCount()
-              << " vertices, " << state.model.triangleCount() << " triangles)\n";
-    state.camera.fit(state.model.bounds);
+    renderer.uploadModel(state.model());
+    std::cout << "Model: " << foundation::pathToUtf8(state.model().source) << " (" << state.model().vertexCount()
+              << " vertices, " << state.model().triangleCount() << " triangles)\n";
+    state.camera.fit(state.model().bounds);
     renderer.resetTemporalHistory();
-    const auto initialPath = foundation::pathToUtf8(state.model.source);
+    const auto initialPath = foundation::pathToUtf8(state.model().source);
     std::snprintf(state.importPath.data(), state.importPath.size(), "%s", initialPath.c_str());
     bindImportQueue(lifetime.window, state.imports);
     double previousTime = glfwGetTime();

@@ -32,7 +32,7 @@ void addLight(EditorState& state) {
     light.type = static_cast<render::LightType>(state.newLightType);
     if (light.type != render::LightType::Directional) {
         const float radius =
-            std::isfinite(state.model.bounds.radius()) ? std::clamp(state.model.bounds.radius(), 0.01f, 1.0e8f) : 1.0f;
+            std::isfinite(state.model().bounds.radius()) ? std::clamp(state.model().bounds.radius(), 0.01f, 1.0e8f) : 1.0f;
         light.position = state.camera.target() + math::Vec3{1.5f, 1.5f, 1.5f} * radius;
         light.direction = math::normalize(state.camera.target() - light.position);
         light.range = std::clamp(radius * 8, 0.01f, 1.0e9f);
@@ -178,7 +178,7 @@ void drawShadows(EditorState& state, render::Renderer& renderer) {
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("0 为均匀分割，1 为对数分割；越大越侧重近处精度。");
     bool automaticDistance = candidate.maxDistance == 0;
     if (ImGui::Checkbox("自动阴影距离###Auto shadow distance", &automaticDistance)) {
-        float distance = state.camera.distance() + state.model.bounds.radius() * 2;
+        float distance = state.camera.distance() + state.model().bounds.radius() * 2;
         if (!std::isfinite(distance)) distance = 100;
         candidate.maxDistance = automaticDistance ? 0 : std::clamp(distance, 0.01f, 1.0e9f);
         changed = true;
@@ -228,7 +228,7 @@ void drawLightingSection(EditorState& state, render::Renderer& renderer) {
         ImGui::SliderFloat("法线强度###Normal strength", &settings.normalStrength, 0, 4, "%.2f");
         ImGui::EndDisabled();
         ImGui::EndDisabled();
-        const auto normalMaps = std::count_if(state.model.materials.begin(), state.model.materials.end(),
+        const auto normalMaps = std::count_if(state.model().materials.begin(), state.model().materials.end(),
                                               [](const auto& material) { return material.hasNormalMap; });
         ImGui::Text("使用法线贴图的材质数：%zu", static_cast<std::size_t>(normalMaps));
         ImGui::SliderFloat("环境漫反射###Ambient", &settings.ambient, 0, 1, "%.2f");

@@ -9,7 +9,7 @@
 
 namespace aeg::editor {
 void drawImportPanel(EditorState& state) {
-    auto& model = state.model;
+    auto& model = state.model();
     auto& imports = state.imports;
     auto& importPath = state.importPath;
     auto& status = state.status;
@@ -45,7 +45,7 @@ void drawImportPanel(EditorState& state) {
 }
 
 void processImports(EditorState& state, render::Renderer& renderer) {
-    auto& model = state.model;
+    auto& model = state.model();
     auto& imports = state.imports;
     auto& importPath = state.importPath;
     auto& status = state.status;

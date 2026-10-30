@@ -47,6 +47,10 @@ struct AutoRotate {
     float degreesPerSecond{22.0f};
 };
 
+struct Renderable {
+    assets::ModelData model;
+};
+
 struct EditorState {
     ecs::World scene;
     entt::entity selectedEntity{entt::null};
@@ -56,7 +60,6 @@ struct EditorState {
     bool supportedTaa{false};
     std::string antialiasingNotice;
     std::string toneMappingError;
-    assets::ModelData model;
     camera::OrbitCamera camera;
     ViewportGizmoState gizmo;
     OrientationGizmoState orientationGizmo;
@@ -89,6 +92,7 @@ struct EditorState {
     EditorState() : selectedEntity(scene.create()) {
         scene.registry().emplace<Transform>(selectedEntity);
         scene.registry().emplace<AutoRotate>(selectedEntity);
+        scene.registry().emplace<Renderable>(selectedEntity);
         const auto entity = selectedEntity;
         systems.add([entity](ecs::World& world, const float deltaSeconds) {
             auto& value = world.registry().get<Transform>(entity);
@@ -102,6 +106,10 @@ struct EditorState {
     [[nodiscard]] const Transform& transform() const { return scene.registry().get<Transform>(selectedEntity); }
     [[nodiscard]] bool& autoRotate() { return scene.registry().get<AutoRotate>(selectedEntity).enabled; }
     [[nodiscard]] const bool& autoRotate() const { return scene.registry().get<AutoRotate>(selectedEntity).enabled; }
+    [[nodiscard]] assets::ModelData& model() { return scene.registry().get<Renderable>(selectedEntity).model; }
+    [[nodiscard]] const assets::ModelData& model() const {
+        return scene.registry().get<Renderable>(selectedEntity).model;
+    }
 };
 
 void initializeEditorWindow(WindowLifetime& lifetime, const EditorOptions& options);

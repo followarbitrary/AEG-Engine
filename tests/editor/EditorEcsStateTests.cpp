@@ -12,6 +12,11 @@ void require(bool condition, const char* message) {
 void editorStateUsesEcsWorld() {
     aeg::editor::EditorState state;
     require(state.scene.registry().valid(state.selectedEntity), "editor state did not create its selected entity");
+    require(state.scene.registry().all_of<aeg::editor::Renderable>(state.selectedEntity),
+            "editor state did not attach a renderable model component");
+    state.model().name = "ecs-model";
+    require(state.scene.registry().get<aeg::editor::Renderable>(state.selectedEntity).model.name == "ecs-model",
+            "model accessor is not backed by the ECS renderable component");
     auto& transform = state.transform();
     transform.rotation.y = 10;
     state.autoRotate() = true;

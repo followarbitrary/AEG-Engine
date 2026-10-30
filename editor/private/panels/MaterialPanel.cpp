@@ -16,7 +16,7 @@ std::string materialLabel(const assets::MaterialData& material, std::size_t inde
 void selectMaterial(EditorState& state, std::size_t index) {
     state.selectedMaterial = index;
     state.normalMapPath.fill('\0');
-    const auto& material = state.model.materials[index];
+    const auto& material = state.model().materials[index];
     state.materialAlphaMode = material.alphaMode;
     state.materialOpacity = material.baseColor.w;
     state.materialAlphaCutoff = material.alphaCutoff;
@@ -30,7 +30,7 @@ void selectMaterial(EditorState& state, std::size_t index) {
 void updateNormalMap(EditorState& state, render::Renderer& renderer, bool clear) {
     try {
         if (!clear && !state.normalMapPath[0]) throw std::runtime_error("请输入 RGB 法线贴图路径。");
-        auto candidate = state.model;
+        auto candidate = state.model();
         if (clear)
             assets::clearMaterialNormalMap(candidate, state.selectedMaterial);
         else
@@ -40,7 +40,7 @@ void updateNormalMap(EditorState& state, render::Renderer& renderer, bool clear)
         // The renderer preserves its current model if replacement fails.
         std::string notice = clear ? "已清除所选材质的法线贴图。" : "已应用所选材质的法线贴图。";
         renderer.uploadModel(candidate);
-        state.model = std::move(candidate);
+        state.model() = std::move(candidate);
         state.materialError.clear();
         state.materialNotice = std::move(notice);
         if (clear) state.normalMapPath.fill('\0');
@@ -53,12 +53,12 @@ void updateNormalMap(EditorState& state, render::Renderer& renderer, bool clear)
 
 void updateAlpha(EditorState& state, render::Renderer& renderer) {
     try {
-        auto candidate = state.model;
+        auto candidate = state.model();
         assets::setMaterialAlpha(candidate, state.selectedMaterial, state.materialAlphaMode, state.materialOpacity,
                                  state.materialAlphaCutoff);
         std::string notice = "已应用所选材质的透明设置。";
         renderer.uploadModel(candidate);
-        state.model = std::move(candidate);
+        state.model() = std::move(candidate);
         state.materialNotice = std::move(notice);
         state.materialError.clear();
     } catch (const std::exception& error) {
@@ -70,11 +70,11 @@ void updateAlpha(EditorState& state, render::Renderer& renderer) {
 
 void updatePbr(EditorState& state, render::Renderer& renderer) {
     try {
-        auto candidate = state.model;
+        auto candidate = state.model();
         assets::setMaterialPbr(candidate, state.selectedMaterial, state.materialMetallic, state.materialRoughness);
         std::string notice = "已应用所选材质的 PBR 参数。";
         renderer.uploadModel(candidate);
-        state.model = std::move(candidate);
+        state.model() = std::move(candidate);
         state.materialNotice = std::move(notice);
         state.materialError.clear();
     } catch (const std::exception& error) {
@@ -100,17 +100,17 @@ void resetMaterialEditor(EditorState& state) {
 
 void drawMaterialSection(EditorState& state, render::Renderer& renderer) {
     if (!ImGui::CollapsingHeader("材质###Materials", ImGuiTreeNodeFlags_DefaultOpen)) return;
-    if (state.model.materials.empty()) {
+    if (state.model().materials.empty()) {
         ImGui::TextUnformatted("当前模型没有可编辑材质。");
         return;
     }
-    if (!state.materialEditorInitialized || state.selectedMaterial >= state.model.materials.size())
+    if (!state.materialEditorInitialized || state.selectedMaterial >= state.model().materials.size())
         selectMaterial(state, 0);
-    const auto preview = materialLabel(state.model.materials[state.selectedMaterial], state.selectedMaterial);
+    const auto preview = materialLabel(state.model().materials[state.selectedMaterial], state.selectedMaterial);
     ImGui::SetNextItemWidth(-1);
     if (ImGui::BeginCombo("##Material selection", preview.c_str())) {
-        for (std::size_t index = 0; index < state.model.materials.size(); ++index) {
-            const auto label = materialLabel(state.model.materials[index], index);
+        for (std::size_t index = 0; index < state.model().materials.size(); ++index) {
+            const auto label = materialLabel(state.model().materials[index], index);
             const bool active = state.selectedMaterial == index;
             ImGui::PushID(static_cast<int>(index));
             if (ImGui::Selectable(label.c_str(), active) && !active) selectMaterial(state, index);
@@ -138,7 +138,7 @@ void drawMaterialSection(EditorState& state, render::Renderer& renderer) {
     if (state.materialAlphaMode == assets::AlphaMode::Opaque) ImGui::TextDisabled("不透明模式忽略图片和颜色的 Alpha。");
     if (ImGui::Button("应用透明设置###Apply transparency", {-1, 0})) updateAlpha(state, renderer);
     ImGui::Separator();
-    const auto& material = state.model.materials[state.selectedMaterial];
+    const auto& material = state.model().materials[state.selectedMaterial];
     if (material.hasNormalMap) {
         ImGui::Text("法线贴图：%u × %u", material.normalTexture.width, material.normalTexture.height);
         ImGui::TextWrapped("来源：%s",
