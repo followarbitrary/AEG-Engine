@@ -76,6 +76,52 @@ void usageAndBarriers() {
             "Sampled reader did not receive the writer-to-reader barrier");
 }
 
+void warDependencyContract() {
+    aeg::tests::FakeDevice device;
+    Graph graph;
+    auto texture = device.createTexture({{8, 8}, aeg::rhi::Format::Rgba8Unorm,
+                                         aeg::rhi::TextureUsage::ColorAttachment | aeg::rhi::TextureUsage::Sampled});
+    State tracked = State::Sampled;
+    const auto image = graph.importTexture(*texture, tracked, "war");
+    graph.addPass("reader", Graph::PassType::Graphics, Graph::PassFlags::NeverCull, {})
+        .read(image, Graph::Usage::SampledRead);
+    graph.addPass("writer", Graph::PassType::Graphics, {}, {}).write(image, Graph::Usage::ColorWrite);
+    const auto result = graph.compile({image});
+    require(result.passes.size() == 2 && result.passes[0].name == "reader" && result.passes[1].name == "writer",
+            "Missing WAR dependency allowed a writer to execute before its reader");
+}
+
+void clearAndTransientStateContracts() {
+    aeg::tests::FakeDevice device;
+    Pool pool(device);
+    Graph clear;
+    const auto image = clear.createTexture({{8, 8}, aeg::rhi::Format::Rgba8Unorm,
+                                            aeg::rhi::TextureUsage::ColorAttachment},
+                                           "clear", true);
+    const aeg::rhi::ClearValue value{{0.25f, 0.5f, 0.75f, 1.f}};
+    clear.addPass("clear", Graph::PassType::Graphics, {}, {}).write(image, Graph::Usage::ColorWrite).clear(value);
+    aeg::tests::FakeCommands commands(&device.caps);
+    clear.compile({image});
+    clear.execute(commands, device, pool, FrameToken{1});
+    require(commands.recordedPasses.size() == 1 &&
+                commands.recordedPasses[0].description.attachments[0].load == aeg::rhi::LoadOp::Clear &&
+                commands.recordedPasses[0].clears.size() == 1 && commands.recordedPasses[0].clears[0].color == value.color,
+            "Graphics clear value was discarded by the generated render pass");
+
+    Graph transient;
+    const auto transientImage = transient.createTexture(
+        {{8, 8}, aeg::rhi::Format::Rgba8Unorm, aeg::rhi::TextureUsage::ColorAttachment}, "transient-state", true);
+    transient.addPass("write", Graph::PassType::Graphics, {}, {}).write(transientImage, Graph::Usage::ColorWrite);
+    transient.compile({transientImage});
+    aeg::tests::FakeCommands first(&device.caps);
+    transient.execute(first, device, pool, FrameToken{2});
+    pool.reclaimCompletedFrame(FrameToken{3});
+    const auto recompiled = transient.compile({transientImage});
+    require(!recompiled.passes.empty() && recompiled.passes[0].preBarriers.size() == 1 &&
+                recompiled.passes[0].preBarriers[0].before == State::Undefined,
+            "Transient recompile reused a stale physical resource state");
+}
+
 void orderingCullingAndDump() {
     Graph graph;
     const auto output = graph.createTexture({{16, 16}, aeg::rhi::Format::Rgba8Unorm,
@@ -196,6 +242,11 @@ void executionContracts() {
     require(callbackSawRenderPass && callbackTexture != nullptr, "PassContext did not resolve a physical texture");
     require(!commands.transitions.empty(), "Graph execution emitted no pre-barrier");
     require(!commands.inRenderPass(), "Graphics pass remained active after execution");
+    require(device.deferredCallbacks.size() >= 1,
+            ("Graph-owned render pass/framebuffer were destroyed before GPU completion: " +
+             std::to_string(device.deferredCallbacks.size())).c_str());
+    device.waitIdle();
+    require(device.deferredCallbacks.empty(), "Deferred graph object destruction did not drain at idle");
     pool.reclaimCompletedFrame(FrameToken{2});
 
     Graph failing;
@@ -421,6 +472,8 @@ void debugOrderingAndFrameReclamationContracts() {
 int main() {
     try {
         usageAndBarriers();
+        warDependencyContract();
+        clearAndTransientStateContracts();
         orderingCullingAndDump();
         validationContracts();
         generationContract();

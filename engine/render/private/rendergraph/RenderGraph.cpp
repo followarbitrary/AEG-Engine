@@ -260,7 +260,9 @@ RenderGraph::CompileResult RenderGraph::compile(std::span<const Handle> outputs)
     impl.compiled = false;
     impl.executed = false;
     for (auto& resource : impl.resources) {
-        if (resource.trackedState)
+        if (resource.transient)
+            resource.initialState = rhi::ResourceState::Undefined;
+        else if (resource.trackedState)
             resource.initialState = *resource.trackedState;
         else if (resource.swapchainOwner)
             resource.initialState = resource.swapchainOwner->imageState();
@@ -298,23 +300,40 @@ RenderGraph::CompileResult RenderGraph::compile(std::span<const Handle> outputs)
             if (declaration.write) writers[declaration.resource.index].push_back(passIndex);
         }
     }
-    for (const auto& resourceWriters : writers)
-        for (std::size_t i = 1; i < resourceWriters.size(); ++i) addEdge(resourceWriters[i - 1], resourceWriters[i]);
-
-    for (std::size_t passIndex = 0; passIndex < passCount; ++passIndex) {
-        for (const auto& declaration : impl.passes[passIndex].declarations) {
-            if (!declaration.read || declaration.write) continue;
-            const auto& resource = impl.resource(declaration.resource);
-            const auto& resourceWriters = writers[declaration.resource.index];
-            auto previous = std::find_if(resourceWriters.rbegin(), resourceWriters.rend(),
-                                         [&](std::size_t writer) { return writer < passIndex; });
-            if (previous != resourceWriters.rend())
-                addEdge(*previous, passIndex);
-            else if (!resource.imported && resourceWriters.empty())
-                throw std::invalid_argument("RenderGraph pass '" + impl.passes[passIndex].name +
-                                            "' reads undefined resource '" + resource.name + "'");
-            else if (!resource.imported && previous == resourceWriters.rend())
-                addEdge(resourceWriters.front(), passIndex);
+    // Build RAW, WAR and WAW edges in declaration order.  The WAR edge is
+    // essential when a reader is declared before a later writer: without it
+    // the stable topological sort may move the writer ahead of the reader.
+    for (std::size_t resourceIndex = 0; resourceIndex < resourceCount; ++resourceIndex) {
+        std::optional<std::size_t> lastWriter;
+        std::vector<std::size_t> readersSinceWriter;
+        const auto& resource = impl.resources[resourceIndex];
+        for (std::size_t passIndex = 0; passIndex < passCount; ++passIndex) {
+            for (const auto& declaration : impl.passes[passIndex].declarations) {
+                if (declaration.resource.index != resourceIndex) continue;
+                if (declaration.read) {
+                    if (lastWriter)
+                        addEdge(*lastWriter, passIndex);
+                    else if (!resource.imported) {
+                        if (writers[resourceIndex].empty())
+                            throw std::invalid_argument("RenderGraph pass '" + impl.passes[passIndex].name +
+                                                        "' reads undefined resource '" + resource.name + "'");
+                        // Provisional edge: it lets the cycle diagnostic win
+                        // for a genuine read-before-future-writer cycle.  The
+                        // declaration-order validation below still rejects a
+                        // non-cyclic future writer read.
+                        addEdge(writers[resourceIndex].front(), passIndex);
+                    }
+                    readersSinceWriter.push_back(passIndex);
+                }
+                if (declaration.write) {
+                    if (lastWriter)
+                        addEdge(*lastWriter, passIndex); // WAW
+                    for (const auto reader : readersSinceWriter)
+                        addEdge(reader, passIndex); // WAR
+                    readersSinceWriter.clear();
+                    lastWriter = passIndex;
+                }
+            }
         }
     }
 
@@ -511,6 +530,11 @@ void RenderGraph::execute(rhi::CommandList& commands, rhi::Device& device, Trans
                 if (index < impl.lastResult.resources.size() &&
                     impl.lastResult.resources[index].firstUse != invalidIndex) {
                     physical[index] = &pool.acquire(resource.description);
+                    // Transient contents and layout are never part of the
+                    // graph's persistent state contract.  A pool acquire may
+                    // return a different physical image, so discard its old
+                    // state and make the first barrier an Undefined reset.
+                    resource.initialState = rhi::ResourceState::Undefined;
                     transient.push_back(physical[index]);
                 }
             } else {
@@ -539,6 +563,7 @@ void RenderGraph::execute(rhi::CommandList& commands, rhi::Device& device, Trans
             context.resolver_ = resolve;
             if (compiled.type == PassType::Graphics) {
                 std::vector<rhi::Texture*> attachments;
+                std::vector<Handle> attachmentResources;
                 std::vector<std::uint32_t> colors;
                 std::optional<std::uint32_t> depth;
                 rhi::Swapchain* externalSwapchain = nullptr;
@@ -548,6 +573,7 @@ void RenderGraph::execute(rhi::CommandList& commands, rhi::Device& device, Trans
                     if (resource.swapchain) externalSwapchain = resource.swapchainOwner;
                     const auto attachmentIndex = static_cast<std::uint32_t>(attachments.size());
                     attachments.push_back(resolve(usage.resource));
+                    attachmentResources.push_back(usage.resource);
                     if (usage.usage == Usage::DepthWrite)
                         depth = attachmentIndex;
                     else
@@ -585,11 +611,28 @@ void RenderGraph::execute(rhi::CommandList& commands, rhi::Device& device, Trans
                     description.colors = colors;
                     description.depth = depth;
                     description.attachments.reserve(attachments.size());
-                    for (const auto* attachment : attachments) {
+                    for (std::size_t attachmentIndex = 0; attachmentIndex < attachments.size(); ++attachmentIndex) {
+                        const auto* attachment = attachments[attachmentIndex];
                         const auto isDepth = rhi::isDepthFormat(attachment->description().format);
+                        const auto hasPreviousAttachment = [&] {
+                            for (std::size_t previous = 0; previous < passIndex; ++previous)
+                                for (const auto& previousUsage : impl.lastResult.passes[previous].usages)
+                                    if (previousUsage.resource == attachmentResources[attachmentIndex] &&
+                                        (previousUsage.usage == Usage::ColorWrite ||
+                                         previousUsage.usage == Usage::DepthWrite))
+                                        return true;
+                            return false;
+                        }();
+                        // A clear value always wins. Otherwise preserve the
+                        // contents written by an earlier retained pass; a
+                        // first use without a clear may discard Undefined.
+                        const auto attachmentLoad = clearValues.size() > attachmentIndex
+                                                        ? rhi::LoadOp::Clear
+                                                        : (hasPreviousAttachment ? rhi::LoadOp::Load
+                                                                                  : rhi::LoadOp::Discard);
                         description.attachments.push_back({attachment->description().format,
                                                            attachment->description().samples,
-                                                           rhi::LoadOp::Discard,
+                                                           attachmentLoad,
                                                            rhi::StoreOp::Store,
                                                            isDepth ? rhi::ResourceState::DepthAttachment
                                                                    : rhi::ResourceState::ColorAttachment,
@@ -613,6 +656,17 @@ void RenderGraph::execute(rhi::CommandList& commands, rhi::Device& device, Trans
                 } catch (...) {
                     if (active) commands.endRenderPass();
                     throw;
+                }
+                if (ownedPass || ownedFramebuffer || externalFramebuffer) {
+                    // Render-pass and framebuffer handles can still be referenced
+                    // by an in-flight command buffer after recording returns.
+                    // Keep them alive until the backend has reached an idle point.
+                    auto deferredPass = std::shared_ptr<rhi::RenderPass>(std::move(ownedPass));
+                    auto deferredFramebuffer = std::shared_ptr<rhi::Framebuffer>(std::move(ownedFramebuffer));
+                    auto deferredExternalFramebuffer = std::shared_ptr<rhi::Framebuffer>(std::move(externalFramebuffer));
+                    device.deferUntilIdle([deferredPass = std::move(deferredPass),
+                                           deferredFramebuffer = std::move(deferredFramebuffer),
+                                           deferredExternalFramebuffer = std::move(deferredExternalFramebuffer)] {});
                 }
             } else if (source.callback) {
                 source.callback(context);
