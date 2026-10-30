@@ -64,10 +64,10 @@ struct LightComponent {
 
 struct EditorState {
     ecs::World scene;
-    entt::entity selectedEntity{entt::null};
-    entt::entity cameraEntity{entt::null};
-    std::vector<entt::entity> renderableEntities;
-    std::vector<entt::entity> lightEntities;
+    ecs::Entity selectedEntity{};
+    ecs::Entity cameraEntity{};
+    std::vector<ecs::Entity> renderableEntities;
+    std::vector<ecs::Entity> lightEntities;
     ecs::Scheduler systems;
     render::AntialiasingSettings antialiasing;
     std::uint32_t supportedMsaa{1};
@@ -144,7 +144,7 @@ struct EditorState {
         settings.lightCount = static_cast<std::uint32_t>(std::min<std::size_t>(lightEntities.size(), render::kMaxLights));
         for (std::uint32_t index = 0; index < settings.lightCount; ++index) settings.lights[index] = light(index);
     }
-    [[nodiscard]] entt::entity createRenderable(std::string name = {}) {
+    [[nodiscard]] ecs::Entity createRenderable(std::string name = {}) {
         const auto entity = scene.create();
         scene.registry().emplace<Transform>(entity);
         auto& renderable = scene.registry().emplace<Renderable>(entity);
@@ -152,11 +152,11 @@ struct EditorState {
         renderableEntities.push_back(entity);
         return entity;
     }
-    void destroyRenderable(const entt::entity entity) {
+    void destroyRenderable(const ecs::Entity entity) {
         if (entity == selectedEntity) return;
         const auto found = std::find(renderableEntities.begin(), renderableEntities.end(), entity);
         if (found == renderableEntities.end()) return;
-        scene.destroy(entity);
+        static_cast<void>(scene.destroy(entity));
         renderableEntities.erase(found);
     }
 };
@@ -166,6 +166,7 @@ void bindImportQueue(GLFWwindow* window, ImportQueue& imports);
 void configureStyle();
 void drawWorkspace(render::Renderer& renderer);
 void processImports(EditorState& state, render::Renderer& renderer);
+[[nodiscard]] bool addLight(EditorState& state);
 void drawScenePanel(EditorState& state);
 void drawImportPanel(EditorState& state);
 void resetMaterialEditor(EditorState& state);

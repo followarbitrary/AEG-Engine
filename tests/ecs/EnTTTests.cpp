@@ -50,7 +50,7 @@ void worldLifecycle() {
         require(entity == moving, "view returned the wrong entity");
     }
 
-    world.destroy(stationary);
+    require(world.destroy(stationary), "destroyed entity was not accepted by its world");
     require(!registry.valid(stationary), "destroyed entity remained valid");
     require(registry.valid(moving), "destroying one entity invalidated another");
 
@@ -63,12 +63,12 @@ void worldLifecycle() {
 void worldBoundaryContracts() {
     aeg::ecs::World world;
     const auto original = world.create();
-    world.destroy(original);
-    world.destroy(original);
+    require(world.destroy(original), "initial entity destroy failed");
+    require(!world.destroy(original), "double destroy unexpectedly succeeded");
     const auto recycled = world.create();
     require(recycled != original, "recycled entity did not receive a new generation");
-    world.destroy(original);
-    require(world.registry().valid(recycled), "stale entity destroyed a recycled entity");
+    require(!world.destroy(original), "stale entity destroyed a recycled entity");
+    require(world.registry().valid(recycled), "stale entity invalidated a recycled entity");
 
     aeg::ecs::World moved = std::move(world);
     const aeg::ecs::World& constWorld = moved;
@@ -78,6 +78,23 @@ void worldBoundaryContracts() {
     assigned = std::move(moved);
     const aeg::ecs::World& constAssigned = assigned;
     require(constAssigned.registry().valid(recycled), "move assignment lost the registry contents");
+    require(assigned.destroy(recycled), "move assignment lost entity ownership");
+}
+
+void worldRejectsForeignEntities() {
+    aeg::ecs::World first;
+    aeg::ecs::World second;
+    const auto firstEntity = first.create();
+    const auto secondEntity = second.create();
+    require(firstEntity != secondEntity, "entities from different worlds compared equal");
+    first.registry().emplace<Position>(firstEntity, 7, 8);
+    second.registry().emplace<Position>(secondEntity, 9, 10);
+
+    require(!first.destroy(secondEntity), "destroy accepted an entity owned by another world");
+    require(first.registry().valid(firstEntity), "foreign destroy invalidated the local entity");
+    require(second.registry().valid(secondEntity), "foreign destroy changed the source world");
+    require(first.destroy(firstEntity), "destroy rejected an entity owned by the world");
+    require(!first.destroy(firstEntity), "destroy reported success for a stale entity");
 }
 
 void systemSchedulerContracts() {
@@ -116,13 +133,49 @@ void systemSchedulerContracts() {
     scheduler.clear();
     require(scheduler.size() == 0, "system clear did not remove registered systems");
 }
+
+void schedulerDefersMutationUntilNextRun() {
+    aeg::ecs::World world;
+    aeg::ecs::Scheduler scheduler;
+    std::vector<int> order;
+    scheduler.add([&](aeg::ecs::World&, const float) {
+        order.push_back(1);
+        scheduler.add([&](aeg::ecs::World&, const float) { order.push_back(3); });
+    });
+    scheduler.add([&](aeg::ecs::World&, const float) { order.push_back(2); });
+
+    scheduler.run(world, 0);
+    require(order == std::vector<int>{1, 2}, "systems added during a run executed in the same frame");
+    require(scheduler.size() == 3, "system added during a run was not retained");
+    scheduler.run(world, 0);
+    require(order == std::vector<int>{1, 2, 1, 2, 3},
+            "systems added during a run did not execute on the following frame");
+}
+
+void schedulerCanClearDuringRun() {
+    aeg::ecs::World world;
+    aeg::ecs::Scheduler scheduler;
+    std::vector<int> order;
+    scheduler.add([&](aeg::ecs::World&, const float) {
+        order.push_back(1);
+        scheduler.clear();
+    });
+    scheduler.add([&](aeg::ecs::World&, const float) { order.push_back(2); });
+
+    scheduler.run(world, 0);
+    require(order == std::vector<int>{1, 2}, "clearing during a run changed the current execution set");
+    require(scheduler.size() == 0, "clear during a run did not take effect after the current snapshot");
+}
 }
 
 int main() {
     try {
         worldLifecycle();
         worldBoundaryContracts();
+        worldRejectsForeignEntities();
         systemSchedulerContracts();
+        schedulerDefersMutationUntilNextRun();
+        schedulerCanClearDuringRun();
         std::cout << "PASS EnTT ECS world lifecycle\n";
         return 0;
     } catch (const std::exception& error) {

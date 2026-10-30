@@ -46,11 +46,20 @@ void editorStateUsesEcsWorld() {
     state.systems.run(state.scene, 0.5f);
     require(std::abs(transform.rotation.y - 21.0f) < 0.001f, "disabled auto-rotation system changed the transform");
 }
+
+void addingLightSelectsTheNewEntity() {
+    aeg::editor::EditorState state;
+    const auto previousCount = state.lightCount();
+    require(aeg::editor::addLight(state), "adding a light should succeed below the maximum");
+    require(state.lightCount() == previousCount + 1, "adding a light did not create an ECS entity");
+    require(state.selectedLight == previousCount, "adding a light did not select the new light");
+}
 }
 
 int main() {
     try {
         editorStateUsesEcsWorld();
+        addingLightSelectsTheNewEntity();
         std::cout << "PASS editor ECS state\n";
         return 0;
     } catch (const std::exception& error) {

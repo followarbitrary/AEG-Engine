@@ -8,6 +8,26 @@
 #include <string>
 
 namespace aeg::editor {
+bool addLight(EditorState& state) {
+    if (state.lightCount() >= render::kMaxLights) return false;
+    auto light = render::Light{};
+    light.type = static_cast<render::LightType>(state.newLightType);
+    if (light.type != render::LightType::Directional) {
+        const float radius =
+            std::isfinite(state.model().bounds.radius()) ? std::clamp(state.model().bounds.radius(), 0.01f, 1.0e8f) : 1.0f;
+        light.position = state.camera().target() + math::Vec3{1.5f, 1.5f, 1.5f} * radius;
+        light.direction = math::normalize(state.camera().target() - light.position);
+        light.range = std::clamp(radius * 8, 0.01f, 1.0e9f);
+        light.intensity = std::clamp(3.0f * radius * radius, 0.01f, 1.0e9f);
+    }
+    const auto entity = state.scene.create();
+    state.scene.registry().emplace<LightComponent>(entity, LightComponent{light});
+    state.lightEntities.push_back(entity);
+    state.selectedLight = static_cast<std::uint32_t>(state.lightCount() - 1);
+    state.syncRenderSettingsFromEcs();
+    return true;
+}
+
 namespace {
 constexpr std::array<const char*, 3> lightNames{"方向光", "点光源", "聚光灯"};
 
@@ -25,33 +45,15 @@ void applyShadows(EditorState& state, render::Renderer& renderer, const render::
     }
 }
 
-void addLight(EditorState& state) {
-    if (state.lightCount() >= render::kMaxLights) return;
-    auto light = render::Light{};
-    light.type = static_cast<render::LightType>(state.newLightType);
-    if (light.type != render::LightType::Directional) {
-        const float radius =
-            std::isfinite(state.model().bounds.radius()) ? std::clamp(state.model().bounds.radius(), 0.01f, 1.0e8f) : 1.0f;
-        light.position = state.camera().target() + math::Vec3{1.5f, 1.5f, 1.5f} * radius;
-        light.direction = math::normalize(state.camera().target() - light.position);
-        light.range = std::clamp(radius * 8, 0.01f, 1.0e9f);
-        light.intensity = std::clamp(3.0f * radius * radius, 0.01f, 1.0e9f);
-    }
-    const auto entity = state.scene.create();
-    state.scene.registry().emplace<LightComponent>(entity, LightComponent{light});
-    state.lightEntities.push_back(entity);
-    state.selectedLight = static_cast<std::uint32_t>(state.lightCount() - 1);
-    state.syncRenderSettingsFromEcs();
-}
-
 void drawLightList(EditorState& state, render::Renderer& renderer) {
     const auto count = static_cast<std::uint32_t>(std::min<std::size_t>(state.lightCount(), render::kMaxLights));
     ImGui::Text("光源：%u / %u", count, render::kMaxLights);
     ImGui::SetNextItemWidth(-1);
     ImGui::Combo("##New light type", &state.newLightType, lightNames.data(), static_cast<int>(lightNames.size()));
     ImGui::BeginDisabled(count >= render::kMaxLights);
-    if (ImGui::Button("添加光源###Add light", {-1, 0})) addLight(state);
+    const bool addRequested = ImGui::Button("添加光源###Add light", {-1, 0});
     ImGui::EndDisabled();
+    if (addRequested && addLight(state)) return;
     if (!count) {
         ImGui::TextWrapped("没有直接光源，当前仅显示环境漫反射。");
         return;
@@ -73,7 +75,7 @@ void drawLightList(EditorState& state, render::Renderer& renderer) {
         else if (shadows.lightIndex > state.selectedLight)
             --shadows.lightIndex;
         const auto entity = state.lightEntities[state.selectedLight];
-        state.scene.destroy(entity);
+        static_cast<void>(state.scene.destroy(entity));
         state.lightEntities.erase(state.lightEntities.begin() + state.selectedLight);
         state.selectedLight = state.lightCount() ? std::min(state.selectedLight, static_cast<std::uint32_t>(state.lightCount() - 1)) : 0;
         state.syncRenderSettingsFromEcs();

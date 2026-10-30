@@ -452,7 +452,9 @@ scheduler.add([](aeg::ecs::World& world, float deltaSeconds) {
 scheduler.run(world, deltaSeconds);
 ```
 
-CMake 仅导出各模块的 `public/`；Vulkan GUI 桥接与核心后端属于同一后端模块，内部共用私有互操作声明。RHI 的十个头文件和 Math 头文件接受独立编译检查，公开接口测试不获得模块的 private 搜索路径。字体白盒测试单独获得 `editor/private/fonts/`，该目录不会传递给应用程序。GPU 测试复用产品的 `EditorGraphics`、Renderer 和 Vulkan 后端；测试辅助类只提供调用转发，不重编另一份渲染实现。`aeg_core_tests` 保留为 Math、相机、ECS、模型导入与法线贴图导入测试的构建聚合目标。
+`World::create()` 返回带 World 所属标识的 `aeg::ecs::Entity`；`destroy()` 返回是否成功，并拒绝其他 World 或已失效的句柄。调度器在一次 `run()` 开始时固定本次执行的系统集合，运行期间新增或清空的系统从下一次 `run()` 生效。
+
+CMake 仅导出各模块的 `public/`；Vulkan GUI 桥接与核心后端属于同一后端模块，内部共用私有互操作声明。RHI 的十个头文件和 Math 头文件接受独立编译检查，公开接口测试不获得模块的 private 搜索路径。字体白盒测试单独获得 `editor/private/fonts/`，该目录不会传递给应用程序。GPU 测试复用产品的 `EditorGraphics`、Renderer 和 Vulkan 后端；测试辅助类只提供调用转发，不重编另一份渲染实现。`aeg_core_tests` 保留为 Math、相机、ECS、编辑器 ECS、模型导入与法线贴图导入测试的构建聚合目标。
 
 可单独验证不需要图形 SDK 的 RHI 接口（需要可用 C++23 编译器与 Ninja）：
 

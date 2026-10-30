@@ -13,7 +13,8 @@ void Scheduler::add(System system) {
 void Scheduler::clear() noexcept { systems_.clear(); }
 
 void Scheduler::run(World& world, const float deltaSeconds) const {
-    for (const auto& system : systems_) system(world, deltaSeconds);
+    const auto systems = systems_;
+    for (const auto& system : systems) system(world, deltaSeconds);
 }
 
 } // namespace aeg::ecs

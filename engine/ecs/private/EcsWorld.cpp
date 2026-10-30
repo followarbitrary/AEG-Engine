@@ -2,10 +2,15 @@
 
 namespace aeg::ecs {
 
-entt::entity World::create() { return registry_.create(); }
+Entity World::create() {
+    if (!identity_) identity_ = std::make_shared<detail::WorldIdentity>();
+    return Entity{registry_.create(), identity_};
+}
 
-void World::destroy(const entt::entity entity) {
-    if (registry_.valid(entity)) registry_.destroy(entity);
+bool World::destroy(const Entity entity) noexcept {
+    if (!identity_ || entity.identity_ != identity_ || !registry_.valid(entity.value_)) return false;
+    registry_.destroy(entity.value_);
+    return true;
 }
 
 void World::clear() { registry_.clear(); }
