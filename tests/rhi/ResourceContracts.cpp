@@ -1,6 +1,6 @@
 #include <RhiDevice.hpp>
-#include <RhiSwapchain.hpp>
 #include "fake/FakeDevice.hpp"
+#include <RhiSwapchain.hpp>
 #include <iostream>
 #include <limits>
 #include <stdexcept>
@@ -152,6 +152,17 @@ void depthOnlyContracts() {
     shadowPipeline.colorBlends = {BlendMode::Alpha};
     rejects([&] { validate(shadowPipeline, true); });
 }
+void deferredDestructionContracts() {
+    aeg::tests::FakeDevice device;
+    int completed = 0;
+    device.deferUntilIdle([&] { ++completed; });
+    if (completed != 0) throw std::runtime_error("Deferred callback ran before device idle");
+    device.waitIdle();
+    if (completed != 1) throw std::runtime_error("Deferred callback did not run after device idle");
+    device.deferUntilIdle([&] { ++completed; });
+    device.waitIdle();
+    if (completed != 2) throw std::runtime_error("Deferred callback queue did not drain");
+}
 }
 int main() {
     using namespace aeg::rhi;
@@ -166,6 +177,7 @@ int main() {
         rejects([] { validate(TextureDesc{{64, 32}, Format::D32Float, TextureUsage::ColorAttachment}); });
         rejects([] { validate(TextureDesc{{64, 32}, Format::Rgba8Unorm, TextureUsage::DepthAttachment}); });
         depthOnlyContracts();
+        deferredDestructionContracts();
         swapchainImageContracts();
         RenderPassDesc pass;
         pass.attachments = {

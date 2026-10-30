@@ -1,6 +1,7 @@
 #pragma once
 #include <RhiCommandList.hpp>
 #include <memory>
+#include <stdexcept>
 #include <string>
 namespace aeg::rhi {
 class Device {
@@ -30,6 +31,12 @@ public:
     // Records outside a render pass, submits on the graphics/compute queue, and waits for completion.
     // The callback and every referenced resource must remain alive until this call returns.
     virtual void submitImmediate(const std::function<void(CommandList&)>& record) = 0;
+    // Keeps a destruction callback alive until the device has waited for all submitted work.
+    // Backends without deferred destruction can execute it immediately.
+    virtual void deferUntilIdle(std::function<void()> callback) {
+        if (!callback) throw std::invalid_argument("Missing deferred destruction callback");
+        callback();
+    }
     virtual TextureReadback readback(Texture& texture, ResourceState currentState = ResourceState::Sampled,
                                      TextureSubresource subresource = {}) = 0;
     virtual void waitIdle() = 0;

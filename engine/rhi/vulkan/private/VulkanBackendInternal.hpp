@@ -185,6 +185,7 @@ public:
     DeviceCapabilities caps;
     std::string name;
     std::atomic_uint32_t errors{};
+    std::vector<std::function<void()>> deferredCallbacks;
     bool validation{}, syncValidation{};
     explicit VulkanDevice(const DeviceDesc&);
     ~VulkanDevice() override;
@@ -205,12 +206,14 @@ public:
     std::unique_ptr<GraphicsPipeline> createGraphicsPipeline(const GraphicsPipelineDesc&) override;
     std::unique_ptr<ComputePipeline> createComputePipeline(const ComputePipelineDesc&) override;
     void submitImmediate(const std::function<void(CommandList&)>&) override;
+    void deferUntilIdle(std::function<void()> callback) override;
     TextureReadback readback(Texture&, ResourceState = ResourceState::Sampled, TextureSubresource = {}) override;
-    void waitIdle() override { check(vkDeviceWaitIdle(handle), "vkDeviceWaitIdle"); }
+    void waitIdle() override;
     const std::string& deviceName() const override { return name; }
     std::uint32_t validationErrorCount() const override { return errors.load(); }
     std::uint32_t memoryType(std::uint32_t, VkMemoryPropertyFlags) const;
     void immediate(const std::function<void(VulkanCommands&)>&);
+    void drainDeferred() noexcept;
 
 private:
     void createInstance();

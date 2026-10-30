@@ -153,6 +153,7 @@ public:
     std::uint32_t failNthComputePipeline{}, failNthBindingSet{};
     bool storageSupport{true}, cubeSupport{true}, storageLinearFiltering{true};
     std::uint32_t immediateSubmissions{};
+    std::vector<std::function<void()>> deferredCallbacks;
     std::unique_ptr<FakeCommands> immediateCommands;
     void enableCompute() { caps.compute = true; }
     bool colorBlending{true};
@@ -288,6 +289,10 @@ public:
         return std::make_unique<FakeComputePipeline>(desc);
     }
     void submitImmediate(const std::function<void(rhi::CommandList&)>& record) override;
+    void deferUntilIdle(std::function<void()> callback) override {
+        if (!callback) throw std::invalid_argument("Missing fake deferred callback");
+        deferredCallbacks.push_back(std::move(callback));
+    }
     rhi::TextureReadback readback(rhi::Texture& texture, rhi::ResourceState = rhi::ResourceState::Sampled,
                                   rhi::TextureSubresource subresource = {}) override {
         lastReadback = &texture;
@@ -302,6 +307,8 @@ public:
     }
     void waitIdle() override {
         if (std::exchange(failWaitIdle, false)) throw std::runtime_error("Injected device wait failure");
+        auto callbacks = std::exchange(deferredCallbacks, {});
+        for (auto& callback : callbacks) callback();
     }
     const std::string& deviceName() const override {
         static const std::string name{"Fake RHI"};

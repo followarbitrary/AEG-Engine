@@ -38,9 +38,27 @@ VulkanDevice::VulkanDevice(const DeviceDesc& description) : creationDesc(descrip
     }
 }
 VulkanDevice::~VulkanDevice() { cleanup(); }
+void VulkanDevice::deferUntilIdle(std::function<void()> callback) {
+    if (!callback) throw std::invalid_argument("Missing deferred destruction callback");
+    deferredCallbacks.push_back(std::move(callback));
+}
+void VulkanDevice::drainDeferred() noexcept {
+    auto callbacks = std::exchange(deferredCallbacks, {});
+    for (auto& callback : callbacks) {
+        try {
+            callback();
+        } catch (...) {
+        }
+    }
+}
+void VulkanDevice::waitIdle() {
+    check(vkDeviceWaitIdle(handle), "vkDeviceWaitIdle");
+    drainDeferred();
+}
 void VulkanDevice::cleanup() noexcept {
     if (handle) {
         vkDeviceWaitIdle(handle);
+        drainDeferred();
         if (pool) vkDestroyCommandPool(handle, pool, nullptr);
         vkDestroyDevice(handle, nullptr);
         handle = VK_NULL_HANDLE;
