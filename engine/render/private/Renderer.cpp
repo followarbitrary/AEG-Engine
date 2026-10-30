@@ -345,12 +345,14 @@ void Renderer::Impl::recordFrame(rhi::CommandList& commands, const RenderSetting
                                           graphPostDescriptor = device.createBindingSet(*postSetLayout, writes);
                                           commands.bindPipeline(*postPipeline);
                                           commands.bindSet(*postLayout, 0, *graphPostDescriptor);
+                                          commands.setViewport(viewport->extent());
                                           const aeg::math::Vec2 reciprocal{1.0f / static_cast<float>(viewport->width),
                                                                            1.0f / static_cast<float>(viewport->height)};
                                           commands.pushConstants(*postLayout, std::as_bytes(std::span(&reciprocal, 1)));
                                           commands.draw(3);
                                       });
-        fxaaPass.write(intermediate, RenderGraph::Usage::ColorWrite)
+        fxaaPass.read(toneMapped, RenderGraph::Usage::SampledRead)
+            .write(intermediate, RenderGraph::Usage::ColorWrite)
             .setFinalState(intermediate, rhi::ResourceState::Sampled)
             .setExternalRenderPass(*postPass, viewport->extent(), &graphPostFrame);
         output = intermediate;

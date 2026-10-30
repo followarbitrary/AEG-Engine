@@ -181,15 +181,15 @@ void transientOutputLeaseContract() {
         renderer.setAntialiasing({1, true, true});
         tests::FakeCommands first;
         renderer.recordFrame(first, {});
-        require(renderer.renderGraphDump().find("pre taa-history-color-1 Undefined -> Sampled") != std::string::npos,
+        require(renderer.renderGraphDump().find("pre taa-history-color-read Undefined -> Sampled") != std::string::npos,
                 "Initial TAA read history did not receive its graph transition");
         renderer.frameSubmitted();
         held = renderer.outputTexture();
         expected = held->description();
         tests::FakeCommands second;
         renderer.recordFrame(second, {});
-        require(renderer.renderGraphDump().find("resource=taa-history-color-1") == std::string::npos,
-                "TAA graph planned a transition for the temporal write image");
+        require(renderer.renderGraphDump().find("pre taa-history-color-write") != std::string::npos,
+                "TAA graph did not manage the temporal write image transition");
         require(renderer.outputTexture().get() == held.get(),
                 "Fence-completed transient output changed identity while an external lease was held");
         renderer.frameSubmitted();
@@ -537,21 +537,21 @@ int main(int argc, char** argv) {
             const auto end = graphDump.find('\n', begin);
             return graphDump.substr(begin, end == std::string::npos ? std::string::npos : end - begin);
         };
-        require(resourceLine("  taa-history-color-1 imported").find("imported=true transient=false") !=
+        require(resourceLine("  taa-history-color-read imported").find("imported=true transient=false") !=
                         std::string::npos &&
-                    resourceLine("  taa-history-color-1 imported").find("first=0 last=0") != std::string::npos,
-                "TAA history color was not imported with a single-use graph lifetime");
-        require(resourceLine("  taa-history-depth-1 imported").find("imported=true transient=false") !=
+                    resourceLine("  taa-history-color-read imported").find("first=1 last=1") != std::string::npos,
+                "TAA history color read was not imported with its graph lifetime");
+        require(resourceLine("  taa-history-depth-read imported").find("imported=true transient=false") !=
                         std::string::npos &&
-                    resourceLine("  taa-history-depth-1 imported").find("first=0 last=0") != std::string::npos,
-                "TAA history depth was not imported with a single-use graph lifetime");
-        require(graphDump.find("resource=taa-history-color-0") == std::string::npos &&
-                    graphDump.find("resource=taa-history-depth-0") == std::string::npos,
-                "TAA graph claimed ownership of the temporal write images");
+                    resourceLine("  taa-history-depth-read imported").find("first=1 last=1") != std::string::npos,
+                "TAA history depth read was not imported with its graph lifetime");
+        require(resourceLine("  taa-history-color-write imported").find("first=1 last=2") != std::string::npos &&
+                    resourceLine("  taa-history-depth-write imported").find("first=1 last=1") != std::string::npos,
+                "TAA graph did not manage temporal write images");
         require(resourceLine("  fxaa-intermediate imported").find("imported=false transient=true") !=
                         std::string::npos &&
                     resourceLine("  fxaa-intermediate imported").find("desc=17x13") != std::string::npos &&
-                    resourceLine("  fxaa-intermediate imported").find("first=0 last=0") != std::string::npos,
+                    resourceLine("  fxaa-intermediate imported").find("first=3 last=3") != std::string::npos,
                 "FXAA intermediate was not graph-owned with the expected lifetime");
         require(first.indexedDraws == 1, "Model draw bypassed command interface");
         const auto initial = temporalAttachments(first, device, renderer.outputTexture().get());

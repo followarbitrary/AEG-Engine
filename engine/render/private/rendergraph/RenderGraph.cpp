@@ -311,14 +311,16 @@ RenderGraph::CompileResult RenderGraph::compile(std::span<const Handle> outputs)
     }
     const auto passCount = impl.passes.size();
     const auto resourceCount = impl.resources.size();
-    std::vector<std::vector<std::size_t>> outgoing(passCount), incoming(passCount);
+    std::vector<std::vector<std::size_t>> outgoing(passCount), incoming(passCount), dataIncoming(passCount);
     std::vector<std::vector<std::size_t>> writers(resourceCount);
-    const auto addEdge = [&](std::size_t from, std::size_t to) {
+    const auto addEdge = [&](std::size_t from, std::size_t to, bool dataDependency = true) {
         if (from == to) return;
         if (std::ranges::find(outgoing[from], to) == outgoing[from].end()) {
             outgoing[from].push_back(to);
             incoming[to].push_back(from);
         }
+        if (dataDependency && std::ranges::find(dataIncoming[to], from) == dataIncoming[to].end())
+            dataIncoming[to].push_back(from);
     };
     for (std::size_t passIndex = 0; passIndex < passCount; ++passIndex) {
         auto& pass = impl.passes[passIndex];
@@ -363,7 +365,7 @@ RenderGraph::CompileResult RenderGraph::compile(std::span<const Handle> outputs)
                         // for a genuine read-before-future-writer cycle.  The
                         // declaration-order validation below still rejects a
                         // non-cyclic future writer read.
-                        addEdge(writers[resourceIndex].front(), passIndex);
+                        addEdge(writers[resourceIndex].front(), passIndex, false);
                     }
                     readersSinceWriter.push_back(passIndex);
                 }
@@ -371,7 +373,7 @@ RenderGraph::CompileResult RenderGraph::compile(std::span<const Handle> outputs)
                     if (lastWriter)
                         addEdge(*lastWriter, passIndex); // WAW
                     for (const auto reader : readersSinceWriter)
-                        addEdge(reader, passIndex); // WAR
+                        addEdge(reader, passIndex, false); // WAR: ordering only, not data flow
                     readersSinceWriter.clear();
                     lastWriter = passIndex;
                 }
@@ -408,7 +410,7 @@ RenderGraph::CompileResult RenderGraph::compile(std::span<const Handle> outputs)
         roots.pop();
         if (retained[pass]) continue;
         retained[pass] = true;
-        for (const auto dependency : incoming[pass]) roots.push(dependency);
+        for (const auto dependency : dataIncoming[pass]) roots.push(dependency);
     }
 
     std::vector<std::size_t> indegree(passCount);
