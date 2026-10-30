@@ -65,10 +65,29 @@ FetchContent_Declare(imguizmo
     # Only consume the core sources; upstream examples fetch their own ImGui.
     SOURCE_SUBDIR aeg-source-only)
 
-FetchContent_MakeAvailable(glfw assimp imgui stb imguizmo)
+FetchContent_Declare(entt
+    SUBBUILD_DIR "${CMAKE_BINARY_DIR}/_deps/entt-subbuild"
+    DOWNLOAD_DIR "${PROJECT_SOURCE_DIR}/build/downloads"
+    DOWNLOAD_NAME entt.tar.gz
+    BINARY_DIR "${CMAKE_BINARY_DIR}/_deps/entt-build"
+    URL https://codeload.github.com/skypjack/entt/tar.gz/refs/tags/v4.0.0
+    URL_HASH SHA256=32a2ff2c72cb047dfd57306006ef238820b70da7c6ce4e7e8a507ac63365212e
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    # EnTT is consumed as headers through aeg_entt below; avoid configuring
+    # the upstream project (which has a newer CMake floor than AEG Engine).
+    SOURCE_SUBDIR aeg-source-only)
+
+FetchContent_MakeAvailable(glfw assimp imgui stb imguizmo entt)
 include("${CMAKE_CURRENT_LIST_DIR}/ApplyAssimpMmdPatch.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/ApplyImGuiVulkanPatch.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/ApplyImGuizmoPatch.cmake")
+
+if(NOT TARGET aeg_entt)
+    add_library(aeg_entt INTERFACE)
+    add_library(aeg::entt ALIAS aeg_entt)
+    target_include_directories(aeg_entt SYSTEM INTERFACE "${entt_SOURCE_DIR}/src")
+    target_compile_features(aeg_entt INTERFACE cxx_std_20)
+endif()
 
 if(MINGW)
     # Assimp 5.4.3 exports a blanket -Bstatic plus manual stdc++/winpthread

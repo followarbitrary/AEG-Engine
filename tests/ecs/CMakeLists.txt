@@ -1,0 +1,5 @@
+add_executable(aeg_ecs_tests EnTTTests.cpp)
+target_link_libraries(aeg_ecs_tests PRIVATE aeg::ecs)
+aeg_project_options(aeg_ecs_tests)
+add_test(NAME aeg_ecs_tests COMMAND aeg_ecs_tests)
+set_tests_properties(aeg_ecs_tests PROPERTIES LABELS cpu)

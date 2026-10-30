@@ -17,6 +17,7 @@ option(AEG_ENABLE_GPU_TESTS "Run GPU smoke tests (requires a display and Vulkan 
 
 add_subdirectory(engine/math)
 add_subdirectory(engine/foundation)
+add_subdirectory(engine/ecs)
 add_subdirectory(engine/camera)
 add_subdirectory(engine/assets)
 add_subdirectory(engine/rhi)

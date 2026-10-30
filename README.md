@@ -380,6 +380,7 @@ ctest --test-dir build/math-standalone --output-on-failure
 | --- | --- | --- |
 | `engine/math/` | `aeg::math` | `aeg::math`，自研向量、四元数、矩阵、投影与视锥体 |
 | `engine/foundation/` | `aeg::foundation` | `aeg::foundation`，Bounds、UTF-8 路径处理 |
+| `engine/ecs/` | `aeg::ecs` | `aeg::ecs`，基于 EnTT 的实体、组件注册表与生命周期 |
 | `engine/camera/` | `aeg::camera` | `aeg::camera`，轨道相机与携带裁剪空间约定的 RenderCamera |
 | `engine/assets/` | `aeg::assets` | `aeg::assets`，CPU 模型数据、Assimp 导入、纹理解码、PMX 校验 |
 | `engine/rhi/` | `aeg::rhi` | `aeg::rhi`，设备、资源、绑定、管线、命令、交换链的通用接口与描述校验 |
@@ -389,7 +390,7 @@ ctest --test-dir build/math-standalone --output-on-failure
 | `engine/render/` | `aeg::render` | `aeg::render`，通过 RHI 实现场景、材质、IBL、视口、抗锯齿、色调映射、截图 |
 | `editor/` | `aeg::editor` | `aeg::editor`，窗口、帧协调、GUI 纹理生命周期、停靠、面板与字体 |
 | `apps/editor/private/` | `aeg_editor` | 全局 main、`aeg::app` 命令行入口与 Vulkan 工厂装配 |
-| `tests/{math,foundation,camera,assets,rhi,render,editor}/` | 对应测试目标 | 与功能目录对应的 CPU/GPU 回归；数据保留在 `tests/fixtures/` |
+| `tests/{math,foundation,camera,ecs,assets,rhi,render,editor}/` | 对应测试目标 | 与功能目录对应的 CPU/GPU 回归；数据保留在 `tests/fixtures/` |
 | `assets/` | 运行时复制 | 离线演示模型与纹理 |
 
 功能性 CMake 模块统一放在根目录 `cmake/`：`ProjectOptions.cmake` 管理编译器检测及目标编译／链接选项，`MathLibrary.cmake` 定义普通／标量数学库目标，`VulkanShaders.cmake` 定义着色器构建规则，`EmbedSpirv.cmake` 提取 SPIR-V 头文件；依赖修补和测试驱动脚本也集中在该目录。根入口加载这些模块，各功能目录的 `CMakeLists.txt` 声明目标、依赖和测试。
@@ -435,7 +436,7 @@ aeg::camera::OrbitCamera camera;
 auto model = aeg::assets::loadModel(path);
 ```
 
-CMake 仅导出各模块的 `public/`；Vulkan GUI 桥接与核心后端属于同一后端模块，内部共用私有互操作声明。RHI 的十个头文件和 Math 头文件接受独立编译检查，公开接口测试不获得模块的 private 搜索路径。字体白盒测试单独获得 `editor/private/fonts/`，该目录不会传递给应用程序。GPU 测试复用产品的 `EditorGraphics`、Renderer 和 Vulkan 后端；测试辅助类只提供调用转发，不重编另一份渲染实现。`aeg_core_tests` 保留为 Math、相机、模型导入与法线贴图导入测试的构建聚合目标。
+CMake 仅导出各模块的 `public/`；Vulkan GUI 桥接与核心后端属于同一后端模块，内部共用私有互操作声明。RHI 的十个头文件和 Math 头文件接受独立编译检查，公开接口测试不获得模块的 private 搜索路径。字体白盒测试单独获得 `editor/private/fonts/`，该目录不会传递给应用程序。GPU 测试复用产品的 `EditorGraphics`、Renderer 和 Vulkan 后端；测试辅助类只提供调用转发，不重编另一份渲染实现。`aeg_core_tests` 保留为 Math、相机、ECS、模型导入与法线贴图导入测试的构建聚合目标。
 
 可单独验证不需要图形 SDK 的 RHI 接口（需要可用 C++23 编译器与 Ninja）：
 
@@ -456,6 +457,7 @@ ctest --test-dir build/rhi-standalone --output-on-failure
 | Dear ImGui | v1.91.9b-docking，GLFW / Vulkan 后端 | [ocornut/imgui](https://github.com/ocornut/imgui/releases/tag/v1.91.9b-docking) |
 | ImGuizmo | 1.10，commit `b796ac3b861afc6e91ca74e4611effd9c9527367`，仅变换手柄核心 | [CedricGuillemet/ImGuizmo](https://github.com/CedricGuillemet/ImGuizmo/releases/tag/1.10) |
 | stb_image | commit `003501f6d7a8668ce8b6d875e34dd97ad0d5d5b5` | [nothings/stb](https://github.com/nothings/stb/commit/003501f6d7a8668ce8b6d875e34dd97ad0d5d5b5) |
+| EnTT | v4.0.0，header-only ECS | [skypjack/entt](https://github.com/skypjack/entt/releases/tag/v4.0.0) |
 
 依赖源码缓存于 `build/_deps/*-src`，Debug 与 Release 使用独立编译目录。第三方许可证保留在各依赖源码目录中；发布二进制时需同时提供相应许可证。
 
