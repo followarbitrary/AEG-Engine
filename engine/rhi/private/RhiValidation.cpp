@@ -22,7 +22,8 @@ void validate(const SamplerDesc& desc) {
         return value == AddressMode::Repeat || value == AddressMode::ClampToEdge;
     };
     if ((desc.filter != Filter::Linear && desc.filter != Filter::Nearest) || !validAddress(desc.address) ||
-        (desc.addressV && !validAddress(*desc.addressV)) || !std::isfinite(desc.maxLod) || desc.maxLod < 0)
+        (desc.addressV && !validAddress(*desc.addressV)) || !std::isfinite(desc.maxLod) || desc.maxLod < 0 ||
+        !std::isfinite(desc.maxAnisotropy) || desc.maxAnisotropy < 1.0f)
         throw std::invalid_argument("Invalid sampler filtering, addressing or mip range");
 }
 void validate(const ComputePipelineDesc& desc) {

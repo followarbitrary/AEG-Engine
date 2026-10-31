@@ -106,6 +106,8 @@ struct DeviceCapabilities {
     bool indirectDraw{true};
     bool shaderDrawParameters{};
     std::uint32_t maximumBindlessSampledDescriptors{};
+    bool samplerAnisotropy{false};
+    float maximumSamplerAnisotropy{1.0f};
 };
 struct GpuPassTiming {
     std::string name;

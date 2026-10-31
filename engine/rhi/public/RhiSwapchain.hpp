@@ -21,6 +21,8 @@ public:
     [[nodiscard]] virtual Texture& image() = 0;
     [[nodiscard]] virtual ResourceState imageState() const = 0;
     [[nodiscard]] virtual std::span<const GpuPassTiming> gpuPassTimings() const { return {}; }
+    [[nodiscard]] virtual std::uint32_t framesInFlight() const { return 1; }
+    [[nodiscard]] virtual std::uint32_t currentFrameSlot() const { return 0; }
     // A successful submit advances temporal state even if present requires recreation.
     virtual void submit() = 0;
     virtual void present() = 0;

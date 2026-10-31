@@ -7,6 +7,7 @@ struct SamplerDesc {
     AddressMode address{AddressMode::Repeat};
     std::optional<AddressMode> addressV{};
     float maxLod{0};
+    float maxAnisotropy{1.0f};
 };
 void validate(const SamplerDesc& desc);
 class Sampler {

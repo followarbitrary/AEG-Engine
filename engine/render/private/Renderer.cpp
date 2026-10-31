@@ -1,7 +1,12 @@
 #include "RendererImpl.hpp"
 
 namespace aeg::render {
-Renderer::Impl::Impl(rhi::Device& target) : device(target), graphPool(target) { initialize(); }
+Renderer::Impl::Impl(rhi::Device& target, std::uint32_t configuredFramesInFlight)
+    : device(target), framesInFlight(configuredFramesInFlight), graphPool(target) {
+    if (framesInFlight != 2 && framesInFlight != 3)
+        throw std::invalid_argument("Renderer frame count must be 2 or 3");
+    initialize();
+}
 
 Renderer::Impl::~Impl() noexcept {
     // Device remains owned by the application. All dependent resources are
@@ -446,7 +451,8 @@ void Renderer::Impl::frameSubmitted() {
     pendingOutput.reset();
 }
 
-Renderer::Renderer(rhi::Device& device) : impl_(std::make_unique<Impl>(device)) {}
+Renderer::Renderer(rhi::Device& device, std::uint32_t framesInFlight)
+    : impl_(std::make_unique<Impl>(device, framesInFlight)) {}
 Renderer::~Renderer() = default;
 void Renderer::uploadModel(const ModelData& model) { impl_->uploadModel(model); }
 void Renderer::uploadEnvironment(const assets::HdrImageData& image) { impl_->uploadEnvironment(image); }

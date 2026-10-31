@@ -1,5 +1,6 @@
 #pragma once
 #include <RhiCommandList.hpp>
+#include <RhiUpload.hpp>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -16,6 +17,9 @@ public:
                    TextureDimension dimension = TextureDimension::Texture2D) const = 0;
     virtual std::unique_ptr<Buffer> createBuffer(const BufferDesc& desc) = 0;
     virtual std::unique_ptr<Buffer> uploadBuffer(std::span<const std::byte> bytes, BufferUsage usage) = 0;
+    // Begins a batch of uploads. The default implementation delegates each
+    // upload immediately, preserving compatibility for existing devices.
+    [[nodiscard]] virtual std::unique_ptr<UploadBatch> beginUploadBatch();
     virtual std::unique_ptr<Texture> createTexture(const TextureDesc& desc) = 0;
     virtual std::unique_ptr<Texture> uploadTexture(const TextureDesc& desc, std::span<const std::byte> pixels) = 0;
     virtual std::unique_ptr<Sampler> createSampler(const SamplerDesc& desc) = 0;

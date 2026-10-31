@@ -40,6 +40,7 @@ struct EnvironmentResources {
 
 struct Renderer::Impl {
     rhi::Device& device;
+    std::uint32_t framesInFlight;
     TransientTexturePool graphPool;
     FrameToken graphFrame{};
     rhi::Texture* graphIntermediate{};
@@ -92,7 +93,7 @@ struct Renderer::Impl {
     bool bindlessSupported{};
     std::array<rhi::ResourceState, 2> pendingHistoryColorState{}, pendingHistoryDepthState{};
 
-    explicit Impl(rhi::Device& target);
+    explicit Impl(rhi::Device& target, std::uint32_t configuredFramesInFlight);
     ~Impl() noexcept;
     void initialize();
     void createDescriptors();

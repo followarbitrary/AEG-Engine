@@ -13,7 +13,7 @@
 namespace aeg::render {
 class Renderer {
 public:
-    explicit Renderer(rhi::Device& device);
+    explicit Renderer(rhi::Device& device, std::uint32_t framesInFlight = 2);
     ~Renderer();
     Renderer(const Renderer&) = delete;
     Renderer& operator=(const Renderer&) = delete;

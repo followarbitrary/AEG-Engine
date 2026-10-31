@@ -44,6 +44,28 @@ template <class F> void rejects(F action) {
     }
     throw std::runtime_error("Invalid RHI description accepted");
 }
+void uploadBatchContracts() {
+    using namespace aeg::rhi;
+    aeg::tests::FakeDevice device;
+    auto batch = device.beginUploadBatch();
+    const std::array<std::byte, 4> bytes{};
+    auto buffer = batch->uploadBuffer(bytes, BufferUsage::Vertex);
+    if (!buffer || buffer->description().size != bytes.size())
+        throw std::runtime_error("Immediate upload batch did not delegate buffer upload");
+    batch->end();
+    try {
+        batch->uploadBuffer(bytes, BufferUsage::Vertex);
+        throw std::runtime_error("Terminal upload batch accepted an upload");
+    } catch (const std::logic_error&) {
+    }
+    try {
+        batch->end();
+        throw std::runtime_error("Terminal upload batch accepted end");
+    } catch (const std::logic_error&) {
+    }
+    batch->cancel();
+}
+
 void computeImageContracts() {
     using namespace aeg::rhi;
     // A wrong mip footprint or treating a cube as one layer makes real selected-mip
@@ -91,6 +113,13 @@ void computeImageContracts() {
     rejects([&] { validate(sampler); });
     sampler.maxLod = 0;
     sampler.addressV = static_cast<AddressMode>(99);
+    rejects([&] { validate(sampler); });
+    sampler.addressV = AddressMode::ClampToEdge;
+    sampler.maxAnisotropy = 2.0f;
+    validate(sampler);
+    sampler.maxAnisotropy = 0.5f;
+    rejects([&] { validate(sampler); });
+    sampler.maxAnisotropy = std::numeric_limits<float>::quiet_NaN();
     rejects([&] { validate(sampler); });
     struct Layout : PipelineLayout {
     } layout;
@@ -288,6 +317,7 @@ int main() {
         depthOnlyContracts();
         deferredDestructionContracts();
         swapchainImageContracts();
+        uploadBatchContracts();
         RenderPassDesc pass;
         pass.attachments = {
             {Format::Rgba8Unorm, 4, LoadOp::Clear, StoreOp::Discard, ResourceState::Undefined,
