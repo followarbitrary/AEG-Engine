@@ -67,6 +67,15 @@ static_assert(offsetof(MaterialPush, alphaCutoff) == 16 && offsetof(MaterialPush
 static_assert(offsetof(MaterialPush, normalScale) == 24 && offsetof(MaterialPush, hasNormalMap) == 28);
 static_assert(offsetof(MaterialPush, pbrFactors) == 32);
 
+struct BindlessMaterialPush {
+    MaterialPush material;
+    std::uint32_t baseTextureIndex{};
+    std::uint32_t normalTextureIndex{};
+    std::array<std::uint32_t, 2> padding{};
+};
+static_assert(std::is_standard_layout_v<BindlessMaterialPush> && std::is_trivially_copyable_v<BindlessMaterialPush>);
+static_assert(sizeof(BindlessMaterialPush) == 64 && offsetof(BindlessMaterialPush, baseTextureIndex) == 48);
+
 struct ShadowPush {
     MaterialPush material;
     std::uint32_t cascadeIndex{};

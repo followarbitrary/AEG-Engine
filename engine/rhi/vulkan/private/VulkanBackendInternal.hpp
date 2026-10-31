@@ -165,6 +165,7 @@ public:
     void drawIndexedIndirect(Buffer&, std::size_t, std::uint32_t, std::uint32_t) override;
     void dispatch(std::uint32_t, std::uint32_t, std::uint32_t) override;
     void transition(Texture&, ResourceState, ResourceState) override;
+    void transition(Buffer&, ResourceState, ResourceState) override;
     void copyBuffer(Buffer&, Buffer&, std::size_t) override;
     void copyTextureToBuffer(Texture&, Buffer&, TextureSubresource = {}) override;
 };

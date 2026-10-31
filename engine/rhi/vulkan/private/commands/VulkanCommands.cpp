@@ -43,6 +43,8 @@ StateScope stateScope(ResourceState state) {
         return {0, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT};
     case ResourceState::Storage:
         return {VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT};
+    case ResourceState::Indirect:
+        return {VK_ACCESS_INDIRECT_COMMAND_READ_BIT, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT};
     }
     throw std::invalid_argument("Unknown RHI resource state");
 }
@@ -258,6 +260,30 @@ void VulkanCommands::transition(Texture& generic, ResourceState before, Resource
     barrier.subresourceRange = {imageAspect(texture.desc.format), 0, texture.desc.mipLevels, 0,
                                 textureLayerCount(texture.desc)};
     vkCmdPipelineBarrier(handle, source.stages, destination.stages, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+}
+void VulkanCommands::transition(Buffer& generic, ResourceState before, ResourceState after) {
+    if (inPass || after == ResourceState::Undefined)
+        throw std::invalid_argument("Invalid buffer transition");
+    const auto valid = [](ResourceState state) {
+        return state == ResourceState::Undefined || state == ResourceState::Storage ||
+               state == ResourceState::Indirect || state == ResourceState::CopySource;
+    };
+    if (!valid(before) || !valid(after)) throw std::invalid_argument("Buffer transition requires a buffer state");
+    auto& buffer = owned<VulkanBuffer>(*owner, generic);
+    if ((before == ResourceState::Storage || after == ResourceState::Storage) &&
+        !contains(buffer.desc.usage, BufferUsage::Storage))
+        throw std::invalid_argument("Storage transition requires a storage buffer");
+    if (after == ResourceState::Indirect && !contains(buffer.desc.usage, BufferUsage::Indirect))
+        throw std::invalid_argument("Indirect transition requires indirect usage");
+    const auto source = stateScope(before), destination = stateScope(after);
+    VkBufferMemoryBarrier barrier{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
+    barrier.srcAccessMask = source.access;
+    barrier.dstAccessMask = destination.access;
+    barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.buffer = buffer.handle;
+    barrier.offset = 0;
+    barrier.size = VK_WHOLE_SIZE;
+    vkCmdPipelineBarrier(handle, source.stages, destination.stages, 0, 0, nullptr, 1, &barrier, 0, nullptr);
 }
 void VulkanCommands::copyBuffer(Buffer& genericSource, Buffer& genericDestination, std::size_t bytes) {
     if (inPass) throw std::logic_error("Copy inside render pass");

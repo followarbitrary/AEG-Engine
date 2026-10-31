@@ -10,12 +10,15 @@ function(aeg_compile_vulkan_shaders target_name source_root output_variable)
         "${source_root}/scene/punctual_lighting.glsl"
         "${source_root}/scene/scene_uniform.glsl"
         "${source_root}/scene/shadow_sampling.glsl")
-    foreach(shader model.vert model.frag shadow.vert shadow.frag fullscreen.vert fxaa.frag taa.frag tonemap.frag
+    foreach(shader model.vert model.frag model_bindless.vert model_bindless.frag cull.comp shadow.vert shadow.frag fullscreen.vert fxaa.frag taa.frag tonemap.frag
                    environment.comp irradiance.comp prefilter.comp brdf.comp)
-        if(shader MATCHES "\\.comp$")
+        if(shader STREQUAL "cull.comp")
+            set(source "${source_root}/scene/${shader}")
+            set(includes ${scene_includes})
+        elseif(shader MATCHES "\\.comp$")
             set(source "${source_root}/ibl/${shader}")
             set(includes "${source_root}/ibl/shared.glsl")
-        elseif(shader MATCHES "^(model|shadow)\\.")
+        elseif(shader MATCHES "^(model|model_bindless|shadow)\\.")
             set(source "${source_root}/scene/${shader}")
             set(includes ${scene_includes})
         else()

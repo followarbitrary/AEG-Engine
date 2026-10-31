@@ -122,6 +122,11 @@ struct TransitionSnapshot {
     rhi::ResourceState before{}, after{};
     rhi::TextureDesc description;
 };
+struct BufferTransitionSnapshot {
+    rhi::Buffer* buffer{};
+    rhi::ResourceState before{}, after{};
+    rhi::BufferDesc description;
+};
 struct TextureCopySnapshot {
     rhi::Texture* source{};
     rhi::Buffer* destination{};
@@ -334,6 +339,7 @@ public:
     std::uint32_t indexedDraws{};
     std::vector<DispatchSnapshot> dispatches;
     std::vector<TransitionSnapshot> transitions;
+    std::vector<BufferTransitionSnapshot> bufferTransitions;
     std::vector<TextureCopySnapshot> subresourceCopies;
     std::vector<std::string> operations;
     rhi::Framebuffer* lastFramebuffer{};
@@ -460,6 +466,22 @@ public:
         transitions.push_back({&texture, before, after, texture.description()});
         operations.push_back("transition");
     }
+    void transition(rhi::Buffer& buffer, rhi::ResourceState before, rhi::ResourceState after) override {
+        if (activePass_ || after == rhi::ResourceState::Undefined ||
+            (before != rhi::ResourceState::Storage && before != rhi::ResourceState::Indirect &&
+             before != rhi::ResourceState::CopySource && before != rhi::ResourceState::Undefined) ||
+            (after != rhi::ResourceState::Storage && after != rhi::ResourceState::Indirect &&
+             after != rhi::ResourceState::CopySource))
+            throw std::invalid_argument("Invalid fake buffer transition");
+        if ((before == rhi::ResourceState::Storage || after == rhi::ResourceState::Storage) &&
+            !rhi::contains(buffer.description().usage, rhi::BufferUsage::Storage))
+            throw std::invalid_argument("Storage transition requires storage buffer usage");
+        if (after == rhi::ResourceState::Indirect &&
+            !rhi::contains(buffer.description().usage, rhi::BufferUsage::Indirect))
+            throw std::invalid_argument("Indirect transition requires indirect buffer usage");
+        bufferTransitions.push_back({&buffer, before, after, buffer.description()});
+        operations.push_back("buffer-transition");
+    }
     void copyBuffer(rhi::Buffer&, rhi::Buffer&, std::size_t) override {}
     void copyTextureToBuffer(rhi::Texture& texture, rhi::Buffer& buffer,
                              rhi::TextureSubresource subresource = {}) override {
@@ -498,6 +520,9 @@ inline void FakeDevice::submitImmediate(const std::function<void(rhi::CommandLis
                                              commands->dispatches.end());
         immediateCommands->transitions.insert(immediateCommands->transitions.end(), commands->transitions.begin(),
                                               commands->transitions.end());
+        immediateCommands->bufferTransitions.insert(immediateCommands->bufferTransitions.end(),
+                                                    commands->bufferTransitions.begin(),
+                                                    commands->bufferTransitions.end());
         immediateCommands->subresourceCopies.insert(immediateCommands->subresourceCopies.end(),
                                                     commands->subresourceCopies.begin(),
                                                     commands->subresourceCopies.end());

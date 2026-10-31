@@ -230,6 +230,45 @@ void indirectDrawContracts() {
     commands.endRenderPass();
     rejects([&] { commands.drawIndexedIndirect(indirect, 0, 1, 20); });
 }
+void bufferBarrierContracts() {
+    using namespace aeg::rhi;
+    using namespace aeg::tests;
+    FakeDevice device;
+    FakeBuffer buffer({64, BufferUsage::Storage | BufferUsage::Indirect, MemoryUsage::Device});
+    FakeCommands commands(&device.caps);
+    commands.transition(buffer, ResourceState::Storage, ResourceState::Indirect);
+    if (commands.bufferTransitions.size() != 1 || commands.bufferTransitions[0].buffer != &buffer ||
+        commands.bufferTransitions[0].before != ResourceState::Storage ||
+        commands.bufferTransitions[0].after != ResourceState::Indirect)
+        throw std::runtime_error("Buffer transition was not recorded");
+    rejects([&] { commands.transition(buffer, ResourceState::Sampled, ResourceState::Indirect); });
+    rejects([&] { commands.transition(buffer, ResourceState::Storage, ResourceState::Sampled); });
+    FakeTexture color{{{4, 4}, Format::Rgba8Unorm, TextureUsage::ColorAttachment}};
+    FakePass pass({{{Format::Rgba8Unorm, 1, LoadOp::Clear, StoreOp::Store, ResourceState::Undefined,
+                     ResourceState::ColorAttachment}},
+                   {0}, {}, {}});
+    FakeFramebuffer framebuffer({&pass, {&color}, {4, 4}});
+    commands.beginRenderPass(pass, framebuffer, {4, 4}, std::array{ClearValue{}});
+    rejects([&] { commands.transition(buffer, ResourceState::Storage, ResourceState::Indirect); });
+    commands.endRenderPass();
+    if (device.caps.shaderDrawParameters || device.caps.maximumBindlessSampledDescriptors != 0)
+        throw std::runtime_error("Fake capability defaults unexpectedly enable GPU culling");
+    device.caps.shaderDrawParameters = true;
+    device.caps.maximumBindlessSampledDescriptors = 256;
+    if (!device.caps.shaderDrawParameters || device.caps.maximumBindlessSampledDescriptors != 256)
+        throw std::runtime_error("GPU culling capability fields are not writable");
+    device.caps.indirectDraw = false;
+    FakeTexture secondColor{{{4, 4}, Format::Rgba8Unorm, TextureUsage::ColorAttachment}};
+    FakePass secondPass({{{Format::Rgba8Unorm, 1, LoadOp::Clear, StoreOp::Store, ResourceState::Undefined,
+                           ResourceState::ColorAttachment}},
+                         {0}, {}, {}});
+    FakeFramebuffer secondFramebuffer({&secondPass, {&secondColor}, {4, 4}});
+    FakeBuffer indices({4, BufferUsage::Index, MemoryUsage::Device});
+    commands.beginRenderPass(secondPass, secondFramebuffer, {4, 4}, std::array{ClearValue{}});
+    commands.bindIndexBuffer(indices);
+    rejects([&] { commands.drawIndexedIndirect(buffer, 0, 1, 20); });
+    commands.endRenderPass();
+}
 }
 int main() {
     using namespace aeg::rhi;
@@ -237,6 +276,7 @@ int main() {
         computeImageContracts();
         descriptorArrayContracts();
         indirectDrawContracts();
+        bufferBarrierContracts();
         validate(BufferDesc{32, BufferUsage::Uniform, MemoryUsage::Upload});
         rejects([] { validate(BufferDesc{}); });
         rejects([] { validate(BufferDesc{32, BufferUsage::None}); });

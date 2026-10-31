@@ -1,6 +1,7 @@
 #pragma once
 #include <RhiPipeline.hpp>
 #include <span>
+#include <stdexcept>
 namespace aeg::rhi {
 class CommandList {
 public:
@@ -22,6 +23,9 @@ public:
                                      std::uint32_t stride) = 0;
     virtual void dispatch(std::uint32_t x, std::uint32_t y, std::uint32_t z) = 0;
     virtual void transition(Texture& texture, ResourceState before, ResourceState after) = 0;
+    virtual void transition(Buffer&, ResourceState, ResourceState) {
+        throw std::logic_error("Buffer transitions are unsupported by this command list");
+    }
     virtual void copyBuffer(Buffer& source, Buffer& destination, std::size_t bytes) = 0;
     virtual void copyTextureToBuffer(Texture& source, Buffer& destination, TextureSubresource subresource = {}) = 0;
 };

@@ -49,6 +49,20 @@ void Renderer::Impl::uploadModel(const ModelData& source) {
         gpu.descriptor = device.createBindingSet(*materialLayout, writes);
         replacement->materials.push_back(std::move(gpu));
     }
+    const bool bindlessMaterialCapacity = bindlessSupported && materialCount <= kBindlessTextureCapacity;
+    if (bindlessMaterialCapacity) {
+        std::vector<rhi::BindingWrite> writes;
+        writes.reserve(2 * kBindlessTextureCapacity);
+        for (std::uint32_t i = 0; i < kBindlessTextureCapacity; ++i) {
+            const auto base = i < replacement->materials.size() ? replacement->materials[i].image.get()
+                                                                  : bindlessFallbackBase.get();
+            const auto normal = i < replacement->materials.size() ? replacement->materials[i].normalImage.get()
+                                                                    : bindlessFallbackNormal.get();
+            writes.push_back({0, nullptr, base, sampler.get(), 0, i});
+            writes.push_back({1, nullptr, normal, sampler.get(), 0, i});
+        }
+        replacement->bindlessDescriptor = device.createBindingSet(*bindlessMaterialLayout, writes);
+    }
     replacement->meshes.reserve(source.meshes.size());
     for (const auto& mesh : source.meshes) {
         if (mesh.vertices.empty() || mesh.indices.empty() ||
@@ -76,6 +90,29 @@ void Renderer::Impl::uploadModel(const ModelData& source) {
         gpu.indexCount = static_cast<std::uint32_t>(mesh.indices.size());
         gpu.material = mesh.materialIndex;
         replacement->meshes.push_back(std::move(gpu));
+    }
+    const auto meshCount = replacement->meshes.size();
+    const auto cullGroups = (meshCount + 63) / 64;
+    const bool gpuCullCapacity = bindlessMaterialCapacity && meshCount &&
+                                 cullGroups <= device.capabilities().maximumComputeGroupCount[0] &&
+                                 meshCount <= std::numeric_limits<std::uint32_t>::max() / 5;
+    if (gpuCullCapacity) {
+        std::vector<GpuCullBounds> bounds(meshCount);
+        for (std::size_t i = 0; i < meshCount; ++i) {
+            const auto& mesh = replacement->meshes[i];
+            bounds[i].localMinimum = {mesh.minimum, 0};
+            bounds[i].localMaximum = {mesh.maximum, 0};
+            bounds[i].draw = {mesh.indexCount, 0, 0, mesh.material};
+        }
+        replacement->boundsBuffer = device.uploadBuffer(std::as_bytes(std::span(bounds)), rhi::BufferUsage::Storage);
+        const auto commandBytes = meshCount * sizeof(std::uint32_t) * 5;
+        replacement->indirectBuffer = device.createBuffer(
+            {commandBytes, rhi::BufferUsage::Storage | rhi::BufferUsage::Indirect | rhi::BufferUsage::CopySource,
+             rhi::MemoryUsage::Device});
+        const std::array writes{rhi::BindingWrite{0, replacement->boundsBuffer.get(), nullptr, nullptr},
+                                rhi::BindingWrite{1, replacement->indirectBuffer.get(), nullptr, nullptr}};
+        replacement->cullDescriptor = device.createBindingSet(*cullLayout, writes);
+        replacement->gpuDriven = true;
     }
     if (std::ranges::any_of(replacement->materials, [](const auto& material) {
             return material.parameters.alphaMode == static_cast<std::uint32_t>(assets::AlphaMode::Blend);

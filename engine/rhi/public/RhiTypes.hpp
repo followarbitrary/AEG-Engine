@@ -75,7 +75,8 @@ enum class ResourceState {
     CopySource,
     CopyDestination,
     Present,
-    Storage
+    Storage,
+    Indirect
 };
 enum class LoadOp { Clear, Load, Discard };
 enum class StoreOp { Store, Discard };
@@ -102,6 +103,8 @@ struct DeviceCapabilities {
     // partially-bound bindless descriptors still require a future feature gate.
     bool descriptorIndexing{};
     bool indirectDraw{true};
+    bool shaderDrawParameters{};
+    std::uint32_t maximumBindlessSampledDescriptors{};
 };
 struct ClearValue {
     std::array<float, 4> color{};

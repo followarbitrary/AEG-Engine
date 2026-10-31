@@ -7,6 +7,7 @@ struct ScenePipeline {
     bool temporal{};
     std::unique_ptr<rhi::RenderPass> pass;
     std::unique_ptr<rhi::GraphicsPipeline> less, greater;
+    std::unique_ptr<rhi::GraphicsPipeline> bindlessLess, bindlessGreater;
     std::unique_ptr<rhi::GraphicsPipeline> blendLess, blendGreater;
 };
 }

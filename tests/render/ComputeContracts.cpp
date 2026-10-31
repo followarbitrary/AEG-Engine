@@ -1,5 +1,6 @@
 #include <VulkanBackend.hpp>
 #include "shaders/ShaderLibrary.hpp"
+#include "scene/GpuModel.hpp"
 #ifndef GLFW_INCLUDE_NONE
 #define GLFW_INCLUDE_NONE
 #endif
@@ -240,6 +241,78 @@ void computeCommands(rhi::Device& device) {
         },
         "Subresource copy accepted an undersized destination buffer");
 }
+void cullingCommands(rhi::Device& device) {
+    const auto& caps = device.capabilities();
+    if (!caps.compute || !caps.indirectDraw || !caps.descriptorIndexing || !caps.maximumBindlessSampledDescriptors ||
+        !caps.shaderDrawParameters) {
+        std::cout << "SKIP GPU culling: compute=" << caps.compute << " indirect=" << caps.indirectDraw
+                  << " descriptorIndexing=" << caps.descriptorIndexing
+                  << " shaderDrawParameters=" << caps.shaderDrawParameters
+                  << " maxSampled=" << caps.maximumBindlessSampledDescriptors << '\n';
+        return;
+    }
+    using namespace aeg::render;
+    using enum rhi::BindingType;
+    using enum rhi::ShaderStage;
+    SceneUniform scene{};
+    scene.viewProjection = math::identity();
+    scene.model = math::identity();
+    scene.currentViewProjection = math::identity();
+    auto uniform = device.createBuffer({sizeof(SceneUniform), rhi::BufferUsage::Uniform, rhi::MemoryUsage::Upload});
+    std::memcpy(uniform->mapped().data(), &scene, sizeof(scene));
+    auto set0Layout = device.createBindingLayout({{{0, UniformBuffer, Vertex | Fragment | Compute}}});
+    auto cullLayout = device.createBindingLayout({{{0, StorageBuffer, Compute}, {1, StorageBuffer, Compute}}});
+    auto pipelineLayout = device.createPipelineLayout({{set0Layout.get(), cullLayout.get()}, sizeof(GpuCullPush), Compute});
+    auto shader = device.createShader({rhi::ShaderStage::Compute, rhi::ShaderFormat::Spirv,
+                                       detail::embeddedShader(detail::ShaderId::CullCompute)});
+    auto pipeline = device.createComputePipeline({pipelineLayout.get(), shader.get()});
+    std::array<GpuCullBounds, 2> bounds{};
+    bounds[0].localMinimum = {-0.25f, -0.25f, 0.25f, 0};
+    bounds[0].localMaximum = {0.25f, 0.25f, 0.75f, 0};
+    bounds[0].draw = {3, 0, 0, 4};
+    bounds[1].localMinimum = {2, 2, 2, 0};
+    bounds[1].localMaximum = {3, 3, 3, 0};
+    bounds[1].draw = {6, 0, 0, 7};
+    auto boundsBuffer = device.uploadBuffer(std::as_bytes(std::span(bounds)), rhi::BufferUsage::Storage);
+    auto indirect = device.createBuffer({2 * sizeof(std::uint32_t) * 5,
+                                         rhi::BufferUsage::Storage | rhi::BufferUsage::Indirect |
+                                             rhi::BufferUsage::CopySource,
+                                         rhi::MemoryUsage::Device});
+    auto readback = device.createBuffer({2 * sizeof(std::uint32_t) * 5, rhi::BufferUsage::CopyDestination,
+                                         rhi::MemoryUsage::Readback});
+    const std::array set0Writes{rhi::BindingWrite{0, uniform.get(), nullptr, nullptr}};
+    const std::array cullWrites{rhi::BindingWrite{0, boundsBuffer.get(), nullptr, nullptr},
+                                rhi::BindingWrite{1, indirect.get(), nullptr, nullptr}};
+    auto set0 = device.createBindingSet(*set0Layout, set0Writes);
+    auto cullSet = device.createBindingSet(*cullLayout, cullWrites);
+    device.submitImmediate([&](rhi::CommandList& commands) {
+        commands.transition(*boundsBuffer, rhi::ResourceState::Storage, rhi::ResourceState::Storage);
+        commands.transition(*indirect, rhi::ResourceState::Indirect, rhi::ResourceState::Storage);
+        commands.bindComputePipeline(*pipeline);
+        commands.bindSet(*pipelineLayout, 0, *set0, rhi::PipelineBindPoint::Compute);
+        commands.bindSet(*pipelineLayout, 1, *cullSet, rhi::PipelineBindPoint::Compute);
+        math::Frustum frustum;
+        require(math::try_extract_frustum(math::identity(), frustum, {true, false}),
+                "GPU culling test could not build an identity frustum");
+        GpuCullPush push{};
+        for (std::size_t i = 0; i < push.planes.size(); ++i)
+            push.planes[i] = {frustum.planes[i].normal, frustum.planes[i].offset};
+        push.meshCount = 2;
+        commands.pushConstants(*pipelineLayout, std::as_bytes(std::span(&push, 1)));
+        commands.dispatch(1, 1, 1);
+        commands.transition(*indirect, rhi::ResourceState::Storage, rhi::ResourceState::Indirect);
+        commands.transition(*indirect, rhi::ResourceState::Indirect, rhi::ResourceState::CopySource);
+        commands.copyBuffer(*indirect, *readback, 2 * sizeof(std::uint32_t) * 5);
+    });
+    std::array<std::uint32_t, 10> commands{};
+    std::memcpy(commands.data(), readback->mapped().data(), sizeof(commands));
+    std::cout << "GPU cull commands: " << commands[0] << ',' << commands[1] << ',' << commands[4] << " | "
+              << commands[5] << ',' << commands[6] << ',' << commands[9] << '\n';
+    require(commands[0] == 3 && commands[1] == 1 && commands[4] == 4 && commands[5] == 0 && commands[6] == 0,
+            "GPU culling changed the visible indirect command");
+    require(commands[7] == 0 && commands[8] == 0 && commands[9] == 0,
+            "GPU culling failed to zero the culled indirect command");
+}
 }
 
 int main() {
@@ -263,13 +336,15 @@ int main() {
         require(device->capabilities().compute, "Test GPU has no graphics-family compute support");
         cubeUpload(*device);
         computeCommands(*device);
+        cullingCommands(*device);
         device->waitIdle();
         require(device->validationErrorCount() == 0, "RHI compute contracts produced Vulkan validation errors");
         device.reset();
         require(diagnostics.str().find("[Vulkan error]") == std::string::npos,
                 "RHI compute contracts produced a validation error during teardown");
         std::cout << "PASS RHI compute: packed byte/HDR cubes, face/mip copies, dispatch/stage/descriptor bounds, "
-                     "abandoned recording, repeated storage barrier and completed LUT writes; Vulkan errors: 0\n";
+                     "AABB culling indirect commands, abandoned recording, repeated storage barrier and completed LUT "
+                     "writes; Vulkan errors: 0\n";
     } catch (const std::exception& error) {
         std::cout << "FAIL RHI compute contracts: " << error.what() << '\n';
         result = 1;

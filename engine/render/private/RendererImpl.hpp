@@ -31,6 +31,7 @@ inline constexpr auto historyFormat = rhi::Format::Rgba16Float;
 inline constexpr auto historyDepthFormat = rhi::Format::R32Float;
 inline constexpr auto outputUsage =
     rhi::TextureUsage::ColorAttachment | rhi::TextureUsage::Sampled | rhi::TextureUsage::CopySource;
+inline constexpr std::uint32_t kBindlessTextureCapacity = 256;
 
 struct EnvironmentResources {
     EnvironmentMaps maps;
@@ -59,17 +60,20 @@ struct Renderer::Impl {
     rhi::Format shadowFormat{rhi::Format::Undefined};
     TemporalHistory temporalHistory, recordingHistory;
     std::unique_ptr<rhi::BindingLayout> sceneLayout, materialLayout, shadowSetLayout, postSetLayout, temporalSetLayout,
-        environmentSetLayout;
+        environmentSetLayout, bindlessMaterialLayout, cullLayout;
     std::unique_ptr<rhi::Sampler> sampler, viewportSampler, pointSampler, environmentSampler;
     std::unique_ptr<rhi::Buffer> uniformBuffer;
     std::unique_ptr<rhi::Texture> fallbackShadowTexture;
+    std::unique_ptr<rhi::Texture> bindlessFallbackBase, bindlessFallbackNormal;
     std::unique_ptr<rhi::BindingSet> fallbackShadowDescriptor;
     std::unique_ptr<rhi::BindingSet> sceneDescriptor;
     std::unique_ptr<rhi::Texture> fallbackEnvironmentCube, fallbackEnvironmentLut;
     std::unique_ptr<rhi::BindingSet> fallbackEnvironmentDescriptor;
-    std::unique_ptr<rhi::PipelineLayout> pipelineLayout, shadowPipelineLayout, postLayout, temporalLayout, toneLayout;
+    std::unique_ptr<rhi::PipelineLayout> pipelineLayout, shadowPipelineLayout, postLayout, temporalLayout, toneLayout,
+        bindlessPipelineLayout, cullPipelineLayout;
     std::unique_ptr<rhi::RenderPass> postPass, temporalPass, tonePass;
     std::unique_ptr<rhi::GraphicsPipeline> postPipeline, temporalPipeline, tonePipeline;
+    std::unique_ptr<rhi::ComputePipeline> cullPipeline;
     std::array<std::unique_ptr<ScenePipeline>, 4> scenePipelines;
     std::unique_ptr<ScenePipeline> temporalScene;
     std::unique_ptr<GpuModel> model;
@@ -81,6 +85,7 @@ struct Renderer::Impl {
     RenderSettings pendingSettings;
     bool pendingFrame{};
     bool retryingFrame{};
+    bool bindlessSupported{};
     std::array<rhi::ResourceState, 2> pendingHistoryColorState{}, pendingHistoryDepthState{};
 
     explicit Impl(rhi::Device& target);
@@ -114,6 +119,7 @@ struct Renderer::Impl {
     static bool perspectiveProjection(const aeg::math::Mat4& matrix);
     SceneUniform sceneUniform(const RenderSettings& settings);
     void drawScene(rhi::CommandList& commands, const RenderSettings& settings, const SceneUniform& uniform);
+    void prepareGpuCulling(rhi::CommandList& commands, const RenderSettings& settings, const SceneUniform& uniform);
     void drawTemporal(rhi::CommandList& commands);
     void drawToneMapping(rhi::CommandList& commands);
     void drawFxaa(rhi::CommandList& commands);

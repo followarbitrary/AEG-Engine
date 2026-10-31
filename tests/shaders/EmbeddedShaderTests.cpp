@@ -77,6 +77,7 @@ int main(int argc, char** argv) {
         std::pair{ShaderId::TaaFragment, "taa.frag.spv"},
         std::pair{ShaderId::ModelTaaVertex, "model_taa.vert.spv"},
         std::pair{ShaderId::ModelTaaFragment, "model_taa.frag.spv"},
+        std::pair{ShaderId::BindlessModelVertex, "model_bindless.vert.spv"},
         std::pair{ShaderId::ShadowVertex, "shadow.vert.spv"},
         std::pair{ShaderId::ShadowFragment, "shadow.frag.spv"},
         std::pair{ShaderId::EnvironmentCompute, "environment.comp.spv"},
@@ -84,6 +85,8 @@ int main(int argc, char** argv) {
         std::pair{ShaderId::PrefilterCompute, "prefilter.comp.spv"},
         std::pair{ShaderId::BrdfCompute, "brdf.comp.spv"},
         std::pair{ShaderId::ToneMappingFragment, "tonemap.frag.spv"},
+        std::pair{ShaderId::CullCompute, "cull.comp.spv"},
+        std::pair{ShaderId::BindlessModelFragment, "model_bindless.frag.spv"},
     };
     int failures = 0;
     for (const auto& [id, filename] : shaders) {

@@ -208,13 +208,18 @@ void VulkanDevice::selectDevice() {
     std::copy_n(properties.limits.maxComputeWorkGroupSize, 3, caps.maximumComputeGroupSize.begin());
     caps.maximumComputeInvocations = properties.limits.maxComputeWorkGroupInvocations;
     caps.indirectDraw = properties.limits.maxDrawIndirectCount != 0;
+    caps.maximumBindlessSampledDescriptors = std::min<std::uint32_t>(
+        256, std::min(properties.limits.maxDescriptorSetSampledImages, properties.limits.maxDescriptorSetSamplers));
     caps.maximumFramebufferDimension =
         std::min(properties.limits.maxFramebufferWidth, properties.limits.maxFramebufferHeight);
     caps.maximumColorAttachments = properties.limits.maxColorAttachments;
-    VkPhysicalDeviceFeatures features{};
-    vkGetPhysicalDeviceFeatures(physical, &features);
-    caps.independentBlend = features.independentBlend == VK_TRUE;
-    caps.descriptorIndexing = features.shaderSampledImageArrayDynamicIndexing == VK_TRUE;
+    VkPhysicalDeviceFeatures2 features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+    VkPhysicalDeviceVulkan11Features features11{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
+    features.pNext = &features11;
+    vkGetPhysicalDeviceFeatures2(physical, &features);
+    caps.independentBlend = features.features.independentBlend == VK_TRUE;
+    caps.descriptorIndexing = features.features.shaderSampledImageArrayDynamicIndexing == VK_TRUE;
+    caps.shaderDrawParameters = features11.shaderDrawParameters == VK_TRUE;
     for (auto format : {Format::D32Float, Format::D24UnormS8, Format::D16Unorm})
         if (textureSupport(format, TextureUsage::DepthAttachment).supported) {
             caps.depthFormat = format;
@@ -241,10 +246,14 @@ void VulkanDevice::createLogicalDevice() {
     info.pQueueCreateInfos = queues.data();
     info.enabledExtensionCount = 1;
     info.ppEnabledExtensionNames = &extension;
-    VkPhysicalDeviceFeatures features{};
-    features.independentBlend = caps.independentBlend ? VK_TRUE : VK_FALSE;
-    features.shaderSampledImageArrayDynamicIndexing = caps.descriptorIndexing ? VK_TRUE : VK_FALSE;
-    info.pEnabledFeatures = &features;
+    VkPhysicalDeviceFeatures2 features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+    features.features.independentBlend = caps.independentBlend ? VK_TRUE : VK_FALSE;
+    features.features.shaderSampledImageArrayDynamicIndexing = caps.descriptorIndexing ? VK_TRUE : VK_FALSE;
+    VkPhysicalDeviceVulkan11Features features11{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
+    features11.shaderDrawParameters = caps.shaderDrawParameters ? VK_TRUE : VK_FALSE;
+    features.pNext = &features11;
+    info.pNext = &features;
+    info.pEnabledFeatures = nullptr;
     check(vkCreateDevice(physical, &info, nullptr, &handle), "vkCreateDevice");
     VmaAllocatorCreateInfo allocatorInfo{};
     allocatorInfo.instance = instance;

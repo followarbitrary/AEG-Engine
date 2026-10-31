@@ -6,6 +6,7 @@
 #include <embedded_shaders/taa.frag.spv.hpp>
 #include <embedded_shaders/model_taa.vert.spv.hpp>
 #include <embedded_shaders/model_taa.frag.spv.hpp>
+#include <embedded_shaders/model_bindless.vert.spv.hpp>
 #include <embedded_shaders/shadow.vert.spv.hpp>
 #include <embedded_shaders/shadow.frag.spv.hpp>
 #include <embedded_shaders/environment.comp.spv.hpp>
@@ -13,6 +14,8 @@
 #include <embedded_shaders/prefilter.comp.spv.hpp>
 #include <embedded_shaders/brdf.comp.spv.hpp>
 #include <embedded_shaders/tonemap.frag.spv.hpp>
+#include <embedded_shaders/cull.comp.spv.hpp>
+#include <embedded_shaders/model_bindless.frag.spv.hpp>
 #include <stdexcept>
 
 namespace aeg::render::detail {
@@ -32,6 +35,8 @@ std::span<const std::byte> embeddedShader(ShaderId shader) {
         return std::as_bytes(std::span{embedded_shaders::model_taa_vert});
     case ShaderId::ModelTaaFragment:
         return std::as_bytes(std::span{embedded_shaders::model_taa_frag});
+    case ShaderId::BindlessModelVertex:
+        return std::as_bytes(std::span{embedded_shaders::model_bindless_vert});
     case ShaderId::ShadowVertex:
         return std::as_bytes(std::span{embedded_shaders::shadow_vert});
     case ShaderId::ShadowFragment:
@@ -46,6 +51,10 @@ std::span<const std::byte> embeddedShader(ShaderId shader) {
         return std::as_bytes(std::span{embedded_shaders::brdf_comp});
     case ShaderId::ToneMappingFragment:
         return std::as_bytes(std::span{embedded_shaders::tonemap_frag});
+    case ShaderId::CullCompute:
+        return std::as_bytes(std::span{embedded_shaders::cull_comp});
+    case ShaderId::BindlessModelFragment:
+        return std::as_bytes(std::span{embedded_shaders::model_bindless_frag});
     }
     throw std::invalid_argument("Unknown embedded shader ID");
 }

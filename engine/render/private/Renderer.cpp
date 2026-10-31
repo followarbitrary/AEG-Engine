@@ -76,7 +76,7 @@ void Renderer::Impl::initialize() {
 void Renderer::Impl::createDescriptors() {
     using enum rhi::BindingType;
     using enum rhi::ShaderStage;
-    sceneLayout = device.createBindingLayout({{{0, UniformBuffer, Vertex | Fragment}}});
+    sceneLayout = device.createBindingLayout({{{0, UniformBuffer, Vertex | Fragment | Compute}}});
     materialLayout =
         device.createBindingLayout({{{0, CombinedTextureSampler, Fragment}, {1, CombinedTextureSampler, Fragment}}});
     shadowSetLayout = device.createBindingLayout({{{0, CombinedTextureSampler, Fragment},
@@ -87,10 +87,30 @@ void Renderer::Impl::createDescriptors() {
     environmentSetLayout = device.createBindingLayout({{{0, CombinedTextureSampler, Fragment},
                                                         {1, CombinedTextureSampler, Fragment},
                                                         {2, CombinedTextureSampler, Fragment}}});
+    const auto& caps = device.capabilities();
+    bindlessSupported = caps.compute && caps.indirectDraw && caps.descriptorIndexing && caps.shaderDrawParameters &&
+                        caps.maximumBindlessSampledDescriptors >= kBindlessTextureCapacity;
+    if (bindlessSupported) {
+        bindlessMaterialLayout = device.createBindingLayout(
+            {{{0, CombinedTextureSampler, Fragment, kBindlessTextureCapacity},
+              {1, CombinedTextureSampler, Fragment, kBindlessTextureCapacity}}});
+        cullLayout = device.createBindingLayout(
+            {{{0, StorageBuffer, Compute}, {1, StorageBuffer, Compute}}});
+    }
     sampler = device.createSampler({rhi::Filter::Linear, rhi::AddressMode::Repeat});
     viewportSampler = device.createSampler({rhi::Filter::Linear, rhi::AddressMode::ClampToEdge});
     pointSampler = device.createSampler({rhi::Filter::Nearest, rhi::AddressMode::ClampToEdge});
     environmentSampler = device.createSampler({rhi::Filter::Linear, rhi::AddressMode::ClampToEdge, {}, 9});
+    if (bindlessSupported) {
+        constexpr std::array<std::uint8_t, 4> white{255, 255, 255, 255};
+        constexpr std::array<std::uint8_t, 4> normal{128, 128, 255, 255};
+        bindlessFallbackBase = device.uploadTexture(
+            {{1, 1}, rhi::Format::Rgba8Srgb, rhi::TextureUsage::CopyDestination | rhi::TextureUsage::Sampled, 1},
+            std::as_bytes(std::span(white)));
+        bindlessFallbackNormal = device.uploadTexture(
+            {{1, 1}, rhi::Format::Rgba8Unorm, rhi::TextureUsage::CopyDestination | rhi::TextureUsage::Sampled, 1},
+            std::as_bytes(std::span(normal)));
+    }
     uniformBuffer = device.createBuffer({sizeof(SceneUniform), rhi::BufferUsage::Uniform, rhi::MemoryUsage::Upload});
     if (uniformBuffer->mapped().size() < sizeof(SceneUniform))
         throw std::runtime_error("Scene uniform buffer is not host writable");
@@ -124,6 +144,17 @@ void Renderer::Impl::createDescriptors() {
         {{sceneLayout.get(), materialLayout.get(), shadowSetLayout.get(), environmentSetLayout.get()},
          sizeof(MaterialPush),
          Fragment});
+    if (bindlessSupported) {
+        bindlessPipelineLayout = device.createPipelineLayout(
+            {{sceneLayout.get(), bindlessMaterialLayout.get(), shadowSetLayout.get(), environmentSetLayout.get()},
+             sizeof(BindlessMaterialPush),
+             Fragment});
+        cullPipelineLayout = device.createPipelineLayout({{sceneLayout.get(), cullLayout.get()}, sizeof(GpuCullPush),
+                                                           Compute});
+        auto shader = device.createShader({rhi::ShaderStage::Compute, rhi::ShaderFormat::Spirv,
+                                           detail::embeddedShader(detail::ShaderId::CullCompute)});
+        cullPipeline = device.createComputePipeline({cullPipelineLayout.get(), shader.get()});
+    }
     shadowPipelineLayout =
         device.createPipelineLayout({{sceneLayout.get(), materialLayout.get()}, sizeof(ShadowPush), Vertex | Fragment});
     postLayout = device.createPipelineLayout({{postSetLayout.get()}, sizeof(aeg::math::Vec2), Fragment});
@@ -360,6 +391,7 @@ void Renderer::Impl::recordFrame(rhi::CommandList& commands, const RenderSetting
 
     graph.compile({output});
     graphDump = graph.debugDump();
+    prepareGpuCulling(commands, settings, uniform);
     graph.execute(commands, device, graphPool, ++graphFrame);
     if (aa.fxaa && !retryingFrame) {
         viewport->filtered = std::move(graphFiltered);

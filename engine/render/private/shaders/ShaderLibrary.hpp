@@ -11,13 +11,16 @@ enum class ShaderId {
     TaaFragment,
     ModelTaaVertex,
     ModelTaaFragment,
+    BindlessModelVertex,
     ShadowVertex,
     ShadowFragment,
     EnvironmentCompute,
     IrradianceCompute,
     PrefilterCompute,
     BrdfCompute,
-    ToneMappingFragment
+    ToneMappingFragment,
+    CullCompute,
+    BindlessModelFragment
 };
 
 [[nodiscard]] std::span<const std::byte> embeddedShader(ShaderId shader);

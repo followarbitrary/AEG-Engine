@@ -154,6 +154,8 @@ void Renderer::Impl::drawScene(rhi::CommandList& commands, const RenderSettings&
     const bool canCull = settings.frustumCulling && settings.viewProjection != math::identity() &&
                          math::try_extract_frustum(uniform.currentViewProjection, frustum,
                                                    {true, settings.clipSpace.reversed_z});
+    const bool gpuDriven = model && model->gpuDriven && !aa.taa && canCull;
+    auto& activeLayout = gpuDriven ? *bindlessPipelineLayout : *pipelineLayout;
     const auto visible = [&](const GpuMesh& mesh) {
         if (!canCull) return true;
         const auto localCenter = (mesh.minimum + mesh.maximum) * 0.5f;
@@ -194,13 +196,15 @@ void Renderer::Impl::drawScene(rhi::CommandList& commands, const RenderSettings&
     // Finish allocations and lazy pipeline creation before beginning a command pass.
     if (!transparent.empty()) scenePipeline(aa.msaaSamples, aa.taa, settings.clipSpace.reversed_z, true);
     commands.setViewport(viewport->extent());
-    commands.bindPipeline(*(settings.clipSpace.reversed_z ? scene.greater : scene.less));
-    commands.bindSet(*pipelineLayout, 0, *sceneDescriptor);
-    commands.bindSet(*pipelineLayout, 2,
+    commands.bindPipeline(*(gpuDriven ? (settings.clipSpace.reversed_z ? scene.bindlessGreater : scene.bindlessLess)
+                                      : (settings.clipSpace.reversed_z ? scene.greater : scene.less)));
+    commands.bindSet(activeLayout, 0, *sceneDescriptor);
+    if (gpuDriven) commands.bindSet(activeLayout, 1, *model->bindlessDescriptor);
+    commands.bindSet(activeLayout, 2,
                      uniform.shadowInfo.x > 0.5f
                          ? *shadow->descriptors[static_cast<std::uint32_t>(uniform.shadowInfo.w) - 1]
                          : *fallbackShadowDescriptor);
-    commands.bindSet(*pipelineLayout, 3,
+    commands.bindSet(activeLayout, 3,
                      environmentResources ? *environmentResources->descriptor : *fallbackEnvironmentDescriptor);
     if (model) {
         const auto drawMesh = [&](const GpuMesh& mesh) {
@@ -211,16 +215,63 @@ void Renderer::Impl::drawScene(rhi::CommandList& commands, const RenderSettings&
             commands.pushConstants(*pipelineLayout, std::as_bytes(std::span(&material.parameters, 1)));
             commands.drawIndexed(mesh.indexCount);
         };
-        for (const auto& mesh : model->meshes) {
-            if (model->materials[mesh.material].parameters.alphaMode !=
-                    static_cast<std::uint32_t>(assets::AlphaMode::Blend) &&
-                visible(mesh))
-                drawMesh(mesh);
+        if (gpuDriven) {
+            for (std::size_t i = 0; i < model->meshes.size(); ++i) {
+                const auto& mesh = model->meshes[i];
+                if (model->materials[mesh.material].parameters.alphaMode ==
+                    static_cast<std::uint32_t>(assets::AlphaMode::Blend))
+                    continue;
+                commands.bindVertexBuffer(*mesh.vertices);
+                commands.bindIndexBuffer(*mesh.indices);
+                const auto& material = model->materials[mesh.material];
+                const BindlessMaterialPush push{material.parameters, mesh.material, mesh.material, {}};
+                commands.pushConstants(*bindlessPipelineLayout, std::as_bytes(std::span(&push, 1)));
+                commands.drawIndexedIndirect(*model->indirectBuffer, i * sizeof(std::uint32_t) * 5, 1,
+                                             sizeof(std::uint32_t) * 5);
+            }
+        } else {
+            for (const auto& mesh : model->meshes) {
+                if (model->materials[mesh.material].parameters.alphaMode !=
+                        static_cast<std::uint32_t>(assets::AlphaMode::Blend) &&
+                    visible(mesh))
+                    drawMesh(mesh);
+            }
         }
         if (!transparent.empty()) {
             commands.bindPipeline(*(settings.clipSpace.reversed_z ? scene.blendGreater : scene.blendLess));
+            if (gpuDriven) {
+                commands.bindSet(*pipelineLayout, 0, *sceneDescriptor);
+                commands.bindSet(*pipelineLayout, 2,
+                                 uniform.shadowInfo.x > 0.5f
+                                     ? *shadow->descriptors[static_cast<std::uint32_t>(uniform.shadowInfo.w) - 1]
+                                     : *fallbackShadowDescriptor);
+                commands.bindSet(*pipelineLayout, 3,
+                                 environmentResources ? *environmentResources->descriptor
+                                                       : *fallbackEnvironmentDescriptor);
+            }
             for (const auto& draw : transparent) drawMesh(*draw.mesh);
         }
     }
+}
+
+void Renderer::Impl::prepareGpuCulling(rhi::CommandList& commands, const RenderSettings& settings,
+                                       const SceneUniform& uniform) {
+    if (!model || !model->gpuDriven || aa.taa || !settings.frustumCulling ||
+        settings.viewProjection == math::identity() || !cullPipeline)
+        return;
+    math::Frustum frustum;
+    if (!math::try_extract_frustum(uniform.currentViewProjection, frustum, {true, settings.clipSpace.reversed_z})) return;
+    commands.transition(*model->boundsBuffer, rhi::ResourceState::Storage, rhi::ResourceState::Storage);
+    commands.transition(*model->indirectBuffer, rhi::ResourceState::Indirect, rhi::ResourceState::Storage);
+    commands.bindComputePipeline(*cullPipeline);
+    commands.bindSet(*cullPipelineLayout, 0, *sceneDescriptor, rhi::PipelineBindPoint::Compute);
+    commands.bindSet(*cullPipelineLayout, 1, *model->cullDescriptor, rhi::PipelineBindPoint::Compute);
+    GpuCullPush push{};
+    for (std::size_t i = 0; i < push.planes.size(); ++i)
+        push.planes[i] = {frustum.planes[i].normal, frustum.planes[i].offset};
+    push.meshCount = static_cast<std::uint32_t>(model->meshes.size());
+    commands.pushConstants(*cullPipelineLayout, std::as_bytes(std::span(&push, 1)));
+    commands.dispatch((push.meshCount + 63) / 64, 1, 1);
+    commands.transition(*model->indirectBuffer, rhi::ResourceState::Storage, rhi::ResourceState::Indirect);
 }
 }

@@ -51,6 +51,13 @@ ScenePipeline& Renderer::Impl::scenePipeline(std::uint32_t samples, bool tempora
                                   temporal ? detail::ShaderId::ModelTaaFragment : detail::ShaderId::ModelFragment,
                                   temporal ? 2u : 1u, reversed ? rhi::DepthCompare::Greater : rhi::DepthCompare::Less,
                                   transparent);
+    if (bindlessSupported && !temporal && !transparent) {
+        auto& bindless = reversed ? cached->bindlessGreater : cached->bindlessLess;
+        if (!bindless)
+            bindless = createPipeline(*cached->pass, *bindlessPipelineLayout, samples, true,
+                                      detail::ShaderId::BindlessModelVertex, detail::ShaderId::BindlessModelFragment, 1,
+                                      reversed ? rhi::DepthCompare::Greater : rhi::DepthCompare::Less, false);
+    }
     return *cached;
 }
 }

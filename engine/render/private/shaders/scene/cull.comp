@@ -1,0 +1,34 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "scene_uniform.glsl"
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+struct MeshBounds { vec4 localMin; vec4 localMax; uvec4 draw; };
+layout(set = 1, binding = 0, std430) readonly buffer BoundsBuffer { MeshBounds meshes[]; } bounds;
+layout(set = 1, binding = 1, std430) buffer IndirectBuffer { uint commands[]; } indirect;
+layout(push_constant) uniform Culling { vec4 planes[6]; uint meshCount; } culling;
+void main() {
+    uint mesh = gl_GlobalInvocationID.x;
+    if (mesh >= culling.meshCount) return;
+    MeshBounds item = bounds.meshes[mesh];
+    vec3 lo = item.localMin.xyz, hi = item.localMax.xyz;
+    bool culled = false;
+    for (int i = 0; i < 6; ++i) {
+        bool outside = true;
+        for (uint corner = 0u; corner < 8u; ++corner) {
+            vec3 local = vec3((corner & 1u) != 0u ? hi.x : lo.x, (corner & 2u) != 0u ? hi.y : lo.y,
+                              (corner & 4u) != 0u ? hi.z : lo.z);
+            vec3 world = (scene.model * vec4(local, 1.0)).xyz;
+            if (dot(culling.planes[i].xyz, world) + culling.planes[i].w >= 0.0) {
+                outside = false;
+                break;
+            }
+        }
+        culled = culled || outside;
+    }
+    uint offset = mesh * 5u;
+    indirect.commands[offset + 0u] = culled ? 0u : item.draw.x;
+    indirect.commands[offset + 1u] = culled ? 0u : 1u;
+    indirect.commands[offset + 2u] = item.draw.y;
+    indirect.commands[offset + 3u] = item.draw.z;
+    indirect.commands[offset + 4u] = culled ? 0u : item.draw.w;
+}
