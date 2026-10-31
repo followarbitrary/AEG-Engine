@@ -24,12 +24,40 @@ VkDescriptorType descriptorType(BindingType type) {
     }
     throw std::invalid_argument("Unknown RHI binding type");
 }
+
+std::uint32_t roundedDescriptorCount(std::uint32_t count) {
+    if (!count) return 0;
+    std::uint64_t value = 1;
+    while (value < count) {
+        if (value > std::numeric_limits<std::uint32_t>::max() / 2u)
+            throw std::overflow_error("Descriptor pool size overflow");
+        value <<= 1;
+    }
+    return static_cast<std::uint32_t>(value);
+}
+
+std::uint32_t pageCapacity(std::array<std::uint32_t, 4> key) {
+    constexpr std::uint32_t requested = 64;
+    std::uint32_t capacity = requested;
+    for (auto descriptorCount : key) {
+        if (descriptorCount)
+            capacity = std::min(capacity, std::max<std::uint32_t>(1, std::numeric_limits<std::uint32_t>::max() /
+                                                                         descriptorCount));
+    }
+    return capacity;
+}
+}
+VulkanDescriptorPoolPage::~VulkanDescriptorPoolPage() {
+    if (pool && owner && owner->handle) vkDestroyDescriptorPool(owner->handle, pool, nullptr);
 }
 VulkanBindingLayout::~VulkanBindingLayout() {
     if (handle) vkDestroyDescriptorSetLayout(owner->handle, handle, nullptr);
 }
 VulkanBindingSet::~VulkanBindingSet() {
-    if (pool) vkDestroyDescriptorPool(owner->handle, pool, nullptr);
+    if (page && page->pool && handle) {
+        vkFreeDescriptorSets(owner->handle, page->pool, 1, &handle);
+        if (page->activeSets) --page->activeSets;
+    }
 }
 VulkanPipelineLayout::~VulkanPipelineLayout() {
     if (handle) vkDestroyPipelineLayout(owner->handle, handle, nullptr);
@@ -68,29 +96,73 @@ std::unique_ptr<BindingSet> VulkanDevice::createBindingSet(BindingLayout& generi
                                                            std::span<const BindingWrite> writes) {
     auto& layout = owned<VulkanBindingLayout>(*this, generic);
     auto result = std::make_unique<VulkanBindingSet>(*this, layout.desc);
-    std::array<std::uint32_t, 4> counts{};
+    std::array<std::uint64_t, 4> counts{};
     for (const auto& binding : layout.desc.bindings) {
         const auto index = static_cast<std::size_t>(binding.type);
         if (index >= counts.size()) throw std::invalid_argument("Unknown RHI binding type");
         counts[index] += binding.arraySize;
     }
-    std::vector<VkDescriptorPoolSize> sizes;
-    if (counts[0]) sizes.push_back({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, counts[0]});
-    if (counts[1]) sizes.push_back({VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, counts[1]});
-    if (counts[2]) sizes.push_back({VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, counts[2]});
-    if (counts[3]) sizes.push_back({VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, counts[3]});
-    VkDescriptorPoolCreateInfo info{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
-    info.maxSets = 1;
-    info.poolSizeCount = static_cast<std::uint32_t>(sizes.size());
-    info.pPoolSizes = sizes.data();
-    check(vkCreateDescriptorPool(handle, &info, nullptr, &result->pool), "vkCreateDescriptorPool");
-    VkDescriptorSetAllocateInfo allocate{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
-    allocate.descriptorPool = result->pool;
-    allocate.descriptorSetCount = 1;
-    allocate.pSetLayouts = &layout.handle;
-    check(vkAllocateDescriptorSets(handle, &allocate, &result->handle), "vkAllocateDescriptorSets");
+    std::array<std::uint32_t, 4> rounded{};
+    for (std::size_t i = 0; i < counts.size(); ++i) {
+        if (counts[i] > std::numeric_limits<std::uint32_t>::max())
+            throw std::overflow_error("Descriptor count overflow");
+        rounded[i] = roundedDescriptorCount(static_cast<std::uint32_t>(counts[i]));
+    }
+    result->page = allocateDescriptorSet(layout.handle, rounded, result->handle);
     result->update(writes);
     return result;
+}
+
+VulkanDescriptorPoolPage* VulkanDevice::allocateDescriptorSet(VkDescriptorSetLayout layout,
+                                                               std::array<std::uint32_t, 4> key,
+                                                               VkDescriptorSet& output) {
+    const auto tryPage = [&](VulkanDescriptorPoolPage& page) -> VkResult {
+        VkDescriptorSetAllocateInfo allocate{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        allocate.descriptorPool = page.pool;
+        allocate.descriptorSetCount = 1;
+        allocate.pSetLayouts = &layout;
+        const auto result = vkAllocateDescriptorSets(handle, &allocate, &output);
+        if (result == VK_SUCCESS) ++page.activeSets;
+        return result;
+    };
+
+    for (auto& candidate : descriptorPages) {
+        if (candidate->key != key || candidate->activeSets >= candidate->capacitySets) continue;
+        const auto result = tryPage(*candidate);
+        if (result == VK_SUCCESS) return candidate.get();
+        if (result != VK_ERROR_OUT_OF_POOL_MEMORY && result != VK_ERROR_FRAGMENTED_POOL)
+            check(result, "vkAllocateDescriptorSets");
+    }
+
+    auto page = std::make_unique<VulkanDescriptorPoolPage>(*this, key);
+    page->capacitySets = pageCapacity(key);
+    std::vector<VkDescriptorPoolSize> sizes;
+    constexpr VkDescriptorType types[] = {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                                          VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                          VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+                                          VK_DESCRIPTOR_TYPE_STORAGE_BUFFER};
+    for (std::size_t i = 0; i < key.size(); ++i) {
+        if (!key[i]) continue;
+        const auto descriptorCount = static_cast<std::uint64_t>(key[i]) * page->capacitySets;
+        if (descriptorCount > std::numeric_limits<std::uint32_t>::max())
+            throw std::overflow_error("Descriptor pool size overflow");
+        sizes.push_back({types[i], static_cast<std::uint32_t>(descriptorCount)});
+    }
+    VkDescriptorPoolCreateInfo info{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+    info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+    info.maxSets = page->capacitySets;
+    info.poolSizeCount = static_cast<std::uint32_t>(sizes.size());
+    info.pPoolSizes = sizes.data();
+    check(vkCreateDescriptorPool(handle, &info, nullptr, &page->pool), "vkCreateDescriptorPool");
+    const auto result = tryPage(*page);
+    if (result != VK_SUCCESS) {
+        if (result != VK_ERROR_OUT_OF_POOL_MEMORY && result != VK_ERROR_FRAGMENTED_POOL)
+            check(result, "vkAllocateDescriptorSets");
+        throw std::runtime_error("Descriptor pool page cannot allocate requested layout");
+    }
+    auto* outputPage = page.get();
+    descriptorPages.push_back(std::move(page));
+    return outputPage;
 }
 void VulkanBindingSet::update(std::span<const BindingWrite> writes) {
     std::vector<VkWriteDescriptorSet> native(writes.size());

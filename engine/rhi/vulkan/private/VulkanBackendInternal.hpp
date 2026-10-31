@@ -5,9 +5,13 @@
 #include <vk_mem_alloc.h>
 #include <VulkanBackend.hpp>
 #include <algorithm>
+#include <array>
 #include <atomic>
+#include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <limits>
+#include <memory>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -91,11 +95,21 @@ public:
         : owner(&device), desc(std::move(description)) {}
     ~VulkanBindingLayout() override;
 };
+struct VulkanDescriptorPoolPage {
+    VulkanDevice* owner;
+    std::array<std::uint32_t, 4> key{};
+    VkDescriptorPool pool{};
+    std::uint32_t activeSets{};
+    std::uint32_t capacitySets{};
+    VulkanDescriptorPoolPage(VulkanDevice& device, std::array<std::uint32_t, 4> descriptorKey)
+        : owner(&device), key(descriptorKey) {}
+    ~VulkanDescriptorPoolPage();
+};
 class VulkanBindingSet final : public BindingSet {
 public:
     VulkanDevice* owner;
     BindingLayoutDesc desc;
-    VkDescriptorPool pool{};
+    VulkanDescriptorPoolPage* page{};
     VkDescriptorSet handle{};
     std::set<std::pair<std::uint32_t, std::uint32_t>> initializedBindings;
     VulkanBindingSet(VulkanDevice& device, BindingLayoutDesc description)
@@ -239,6 +253,9 @@ public:
     std::string name;
     std::atomic_uint32_t errors{};
     std::vector<std::function<void()>> deferredCallbacks;
+    // Pages are individually heap allocated so vector growth never invalidates
+    // the page pointer retained by a live VulkanBindingSet.
+    std::vector<std::unique_ptr<VulkanDescriptorPoolPage>> descriptorPages;
     bool validation{}, syncValidation{}, debugUtils{};
     std::uint32_t timestampValidBits{};
     PFN_vkCmdBeginDebugUtilsLabelEXT cmdBeginDebugUtilsLabel{};
@@ -270,6 +287,9 @@ public:
     std::uint32_t validationErrorCount() const override { return errors.load(); }
     void immediate(const std::function<void(VulkanCommands&)>&);
     void drainDeferred() noexcept;
+    void resetDescriptorPools();
+    VulkanDescriptorPoolPage* allocateDescriptorSet(VkDescriptorSetLayout, std::array<std::uint32_t, 4>,
+                                                     VkDescriptorSet&);
 
 private:
     void createInstance();

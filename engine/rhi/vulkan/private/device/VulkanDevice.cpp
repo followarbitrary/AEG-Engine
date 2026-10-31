@@ -54,11 +54,30 @@ void VulkanDevice::drainDeferred() noexcept {
 void VulkanDevice::waitIdle() {
     check(vkDeviceWaitIdle(handle), "vkDeviceWaitIdle");
     drainDeferred();
+    resetDescriptorPools();
+}
+void VulkanDevice::resetDescriptorPools() {
+    if (!handle) return;
+    for (auto& page : descriptorPages) {
+        if (!page->pool || page->activeSets) continue;
+        check(vkResetDescriptorPool(handle, page->pool, 0), "vkResetDescriptorPool");
+    }
 }
 void VulkanDevice::cleanup() noexcept {
     if (handle) {
         vkDeviceWaitIdle(handle);
         drainDeferred();
+        // A whole-page reset is only legal after the device is idle and when
+        // no live binding set refers to that page. Live pages are left for
+        // vkDestroyDevice, which invalidates them as part of device teardown.
+        for (auto& page : descriptorPages) {
+            if (!page->pool) continue;
+            if (!page->activeSets) {
+                vkResetDescriptorPool(handle, page->pool, 0);
+                vkDestroyDescriptorPool(handle, page->pool, nullptr);
+                page->pool = VK_NULL_HANDLE;
+            }
+        }
         if (allocator) {
             vmaDestroyAllocator(allocator);
             allocator = VK_NULL_HANDLE;
@@ -67,6 +86,7 @@ void VulkanDevice::cleanup() noexcept {
         vkDestroyDevice(handle, nullptr);
         handle = VK_NULL_HANDLE;
         pool = VK_NULL_HANDLE;
+        for (auto& page : descriptorPages) page->pool = VK_NULL_HANDLE;
     }
     if (surface) {
         vkDestroySurfaceKHR(instance, surface, nullptr);
