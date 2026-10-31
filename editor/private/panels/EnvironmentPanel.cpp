@@ -5,7 +5,8 @@
 
 namespace aeg::editor {
 void drawEnvironmentSection(EditorState& state, render::Renderer& renderer) {
-    if (!ImGui::CollapsingHeader("环境光 IBL###Environment lighting")) return;
+    const auto summary = renderer.environment().enabled ? "开" : "关";
+    if (!ui::SectionHeader("环境漫反射###Environment lighting", summary)) return;
     const bool supported = renderer.supportsEnvironment();
     auto candidate = renderer.environment();
     ImGui::BeginDisabled(!supported);

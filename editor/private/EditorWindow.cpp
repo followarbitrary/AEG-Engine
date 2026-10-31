@@ -1,6 +1,18 @@
 #include "EditorState.hpp"
 #include <Utf8Path.hpp>
 #include <GLFW/glfw3.h>
+#ifdef _WIN32
+#define GLFW_EXPOSE_NATIVE_WIN32
+#include <GLFW/glfw3native.h>
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <commdlg.h>
+#include <windows.h>
+#endif
 
 #include <exception>
 #include <iostream>
@@ -39,5 +51,23 @@ void bindImportQueue(GLFWwindow* window, ImportQueue& imports) {
             queue.error = error.what();
         }
     });
+}
+
+std::filesystem::path browseModelFile(GLFWwindow* window) {
+#ifdef _WIN32
+    if (!window) return {};
+    std::array<wchar_t, 32768> buffer{};
+    OPENFILENAMEW dialog{};
+    dialog.lStructSize = sizeof(dialog);
+    dialog.hwndOwner = glfwGetWin32Window(window);
+    dialog.lpstrFilter = L"模型文件\0*.obj;*.gltf;*.glb;*.pmx\0所有文件\0*.*\0";
+    dialog.lpstrFile = buffer.data();
+    dialog.nMaxFile = static_cast<DWORD>(buffer.size());
+    dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+    if (GetOpenFileNameW(&dialog)) return std::filesystem::path(buffer.data());
+#else
+    (void)window;
+#endif
+    return {};
 }
 }

@@ -4,6 +4,7 @@ add_library(aeg_editor_module STATIC
     private/Editor.cpp
     private/EditorWindow.cpp
     private/EditorStyle.cpp
+    private/EditorWidgets.hpp
     private/EditorDocking.cpp
     private/graphics/EditorGraphics.cpp
     private/platform/NativeWindow.cpp

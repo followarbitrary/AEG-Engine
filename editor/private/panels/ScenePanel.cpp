@@ -36,9 +36,14 @@ void drawEntityNode(EditorState& state, const ecs::Entity entity) {
 void drawScenePanel(EditorState& state) {
     auto& model = state.model();
     auto& frameRequested = state.frameRequested;
-    if (ImGui::Begin(sceneWindow)) {
-        ImGui::TextDisabled("当前模型");
-        ImGui::Selectable(model.name.c_str(), true);
+    if (ImGui::Begin(sceneWindow, nullptr, workspacePanelFlags())) {
+        ImGui::TextColored({0.92f, 0.94f, 0.97f, 1.0f}, "场景");
+        ImGui::SameLine(ImGui::GetWindowWidth() - 34.0f);
+        ImGui::TextColored({0.28f, 0.72f, 0.92f, 1.0f}, "%zu", state.renderableEntities.size());
+        ImGui::TextDisabled("%zu 网格 · %zu 材质 · %zu 顶点 · %zu 三角形", model.meshes.size(), model.materials.size(),
+                            model.vertexCount(), model.triangleCount());
+        ImGui::Separator();
+        ImGui::TextDisabled("%s", model.name.empty() ? "未命名模型" : model.name.c_str());
         drawSectionHeading("场景树");
         for (const auto entity : state.renderableEntities) {
             if (state.scene.registry().all_of<Parent>(entity)) {
@@ -70,13 +75,23 @@ void drawScenePanel(EditorState& state) {
             ImGui::TableSetupColumn("名称", ImGuiTableColumnFlags_WidthStretch);
             ImGui::TableSetupColumn("三角形", ImGuiTableColumnFlags_WidthFixed, 72);
             ImGui::TableHeadersRow();
+            if (state.selectedMesh >= model.meshes.size()) state.selectedMesh = 0;
             for (std::size_t i = 0; i < model.meshes.size(); ++i) {
                 const auto& mesh = model.meshes[i];
                 ImGui::TableNextRow();
                 ImGui::TableNextColumn();
-                ImGui::TextUnformatted(mesh.name.empty() ? "网格" : mesh.name.c_str());
+                ImGui::PushID(static_cast<int>(i));
+                const bool selected = state.selectedMesh == i;
+                if (ImGui::Selectable(mesh.name.empty() ? "网格" : mesh.name.c_str(), selected,
+                                     ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick)) {
+                    state.selectedMesh = i;
+                    state.selectedMaterial = std::min<std::size_t>(mesh.materialIndex, model.materials.size() ? model.materials.size() - 1 : 0);
+                    state.materialEditorInitialized = false;
+                    state.materialDirty = false;
+                }
                 ImGui::TableNextColumn();
                 ImGui::Text("%zu", mesh.indices.size() / 3);
+                ImGui::PopID();
             }
             ImGui::EndTable();
         }

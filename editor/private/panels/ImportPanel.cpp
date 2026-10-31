@@ -7,6 +7,7 @@
 #include <exception>
 #include <iostream>
 #include <utility>
+#include <GLFW/glfw3.h>
 
 namespace aeg::editor {
 namespace {
@@ -15,6 +16,27 @@ void drawSectionHeading(const char* label) {
     ImGui::Separator();
     ImGui::TextDisabled("%s", label);
 }
+
+void drawDropZone(const ImVec2 size) {
+    const auto min = ImGui::GetCursorScreenPos();
+    const auto max = ImVec2(min.x + size.x, min.y + size.y);
+    auto* draw = ImGui::GetWindowDrawList();
+    const auto color = ImGui::GetColorU32(ImVec4{0.23f, 0.30f, 0.38f, 1.0f});
+    for (float x = min.x + 2.0f; x < max.x - 2.0f; x += 12.0f)
+        draw->AddLine({x, min.y}, {std::min(x + 7.0f, max.x - 2.0f), min.y}, color, 1.0f);
+    for (float x = min.x + 2.0f; x < max.x - 2.0f; x += 12.0f)
+        draw->AddLine({x, max.y}, {std::min(x + 7.0f, max.x - 2.0f), max.y}, color, 1.0f);
+    for (float y = min.y + 2.0f; y < max.y - 2.0f; y += 12.0f)
+        draw->AddLine({min.x, y}, {min.x, std::min(y + 7.0f, max.y - 2.0f)}, color, 1.0f);
+    for (float y = min.y + 2.0f; y < max.y - 2.0f; y += 12.0f)
+        draw->AddLine({max.x, y}, {max.x, std::min(y + 7.0f, max.y - 2.0f)}, color, 1.0f);
+    const auto label = "拖入 OBJ / glTF / GLB / PMX";
+    const auto labelSize = ImGui::CalcTextSize(label);
+    ImGui::SetCursorScreenPos({min.x + (size.x - labelSize.x) * 0.5f,
+                               min.y + (size.y - labelSize.y) * 0.5f});
+    ImGui::TextDisabled("%s", label);
+    ImGui::SetCursorScreenPos({min.x, max.y});
+}
 }
 
 void drawImportPanel(EditorState& state) {
@@ -22,24 +44,32 @@ void drawImportPanel(EditorState& state) {
     auto& imports = state.imports;
     auto& importPath = state.importPath;
     auto& status = state.status;
-    if (ImGui::Begin(importWindow)) {
-        ImGui::TextDisabled("模型库");
-        ImGui::TextWrapped("打开 OBJ、glTF、GLB 或 PMX 文件，也可将文件拖入窗口。");
-        ImGui::SetNextItemWidth(-1);
-        const bool enter = ImGui::InputTextWithHint("##ModelPath", "模型文件路径", importPath.data(), importPath.size(),
-                                                    ImGuiInputTextFlags_EnterReturnsTrue);
-        ImGui::PushStyleColor(ImGuiCol_Button, {0.12f, 0.40f, 0.68f, 1.0f});
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, {0.18f, 0.52f, 0.82f, 1.0f});
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, {0.24f, 0.62f, 0.92f, 1.0f});
-        const bool import = ImGui::Button("导入模型###Import model", {-1, 0});
-        ImGui::PopStyleColor(3);
-        if (import || enter) {
-            if (importPath[0])
-                imports.paths.push_back(foundation::pathFromUtf8(importPath.data()));
-            else
-                imports.error = "请先输入模型文件路径。";
+    if (ImGui::Begin(importWindow, nullptr, workspacePanelFlags())) {
+        ImGui::TextColored({0.92f, 0.94f, 0.97f, 1.0f}, "导入");
+        ImGui::Separator();
+        if (ui::AccentButton("浏览模型…###Import model", {-1.0f, ui::px(34.0f)})) {
+            if (const auto path = browseModelFile(glfwGetCurrentContext()); !path.empty()) {
+                imports.paths.push_back(path);
+                const auto text = foundation::pathToUtf8(path);
+                std::snprintf(importPath.data(), importPath.size(), "%s", text.c_str());
+            }
         }
-        drawSectionHeading("最近状态");
+        ImGui::Dummy({0.0f, 3.0f});
+        drawDropZone({ImGui::GetContentRegionAvail().x, 48.0f});
+        drawSectionHeading("最近打开");
+        if (state.recentFiles.empty()) {
+            ImGui::TextDisabled("暂无最近文件");
+        } else {
+            for (std::size_t index = 0; index < state.recentFiles.size(); ++index) {
+                const auto& recent = state.recentFiles[index];
+                const auto label = foundation::pathToUtf8(recent.filename());
+                ImGui::PushID(static_cast<int>(index));
+                if (ImGui::Selectable(label.c_str(), false)) imports.paths.push_back(recent);
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", foundation::pathToUtf8(recent).c_str());
+                ImGui::PopID();
+            }
+        }
+        drawSectionHeading("状态");
         ImGui::TextWrapped("%s", status.c_str());
         if (!imports.error.empty()) {
             ImGui::PushStyleColor(ImGuiCol_Text, {1, 0.49f, 0.43f, 1});
@@ -50,10 +80,6 @@ void drawImportPanel(EditorState& state) {
         drawSectionHeading("导入提示");
         if (!model.warnings.empty() && ImGui::CollapsingHeader("导入提示###Import notices"))
             for (const auto& warning : model.warnings) ImGui::TextWrapped("%s", warning.c_str());
-        drawSectionHeading("视口操作");
-        ImGui::TextWrapped(
-            "W / E / R：移动 / 旋转 / 缩放\n拖动手柄：变换模型\nEsc：取消本次拖动\n右上角方向轴：切换视角\n左键 / "
-            "右键拖动空白处：环绕\n中键拖动：平移\n滚轮：缩放\nF：聚焦模型");
     }
     ImGui::End();
 }
@@ -103,6 +129,7 @@ void processImports(EditorState& state, render::Renderer& renderer, assets::Mode
             status = "已加载：" + model.name;
             const auto text = foundation::pathToUtf8(completion.path);
             std::snprintf(importPath.data(), importPath.size(), "%s", text.c_str());
+            state.rememberRecentFile(completion.path);
             std::cout << "Model: " << text << " (" << model.vertexCount() << " vertices, " << model.triangleCount()
                       << " triangles)\n";
         } catch (const std::exception& error) {

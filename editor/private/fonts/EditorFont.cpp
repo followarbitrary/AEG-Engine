@@ -1,6 +1,7 @@
 #include "EditorFont.hpp"
 #include <Utf8Path.hpp>
 #include <imgui.h>
+#include "../EditorWidgets.hpp"
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -205,7 +206,7 @@ EditorFontInfo configureEditorFont(const std::filesystem::path& resources, const
     std::memcpy(config.Name, "AEG Chinese UI", sizeof("AEG Chinese UI"));
     io.Fonts->TexDesiredWidth = 4096;
     io.Fonts->Flags |= ImFontAtlasFlags_NoPowerOfTwoHeight;
-    constexpr float pixels = 18;
+    const float pixels = 18.0f * ui::dpi();
     auto* font = io.Fonts->AddFontFromMemoryTTF(owned, static_cast<int>(bytes.size()), pixels, &config, chineseRanges);
     if (!font || !io.Fonts->Build())
         throw std::runtime_error("Cannot build Chinese font atlas: " + foundation::pathToUtf8(source));

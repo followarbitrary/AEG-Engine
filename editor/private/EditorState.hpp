@@ -13,9 +13,11 @@
 #include <RenderSettings.hpp>
 #include <RenderDebugSettings.hpp>
 #include <Renderer.hpp>
+#include <Utf8Path.hpp>
 
 #include <math.hpp>
 #include <imgui.h>
+#include "EditorWidgets.hpp"
 
 #include <array>
 #include <algorithm>
@@ -24,6 +26,8 @@
 #include <deque>
 #include <filesystem>
 #include <cmath>
+#include <cstdlib>
+#include <fstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -88,6 +92,7 @@ struct EditorState {
     OrientationGizmoState orientationGizmo;
     render::RenderSettings settings;
     ImportQueue imports;
+    std::deque<std::filesystem::path> recentFiles;
     std::array<char, 4096> importPath{};
     std::size_t selectedMaterial{0};
     bool materialEditorInitialized{false};
@@ -112,6 +117,10 @@ struct EditorState {
     std::uint32_t viewportWidth{1}, viewportHeight{1};
     std::string status{"就绪。将模型拖入窗口即可导入。"};
     std::string hierarchyError;
+    bool debugPanelActive{false};
+    std::size_t selectedMesh{0};
+    bool materialDirty{false};
+    bool materialNormalMapClear{false};
 
     EditorState() : selectedEntity(scene.create()), cameraEntity(scene.create()) {
         settings.frustumCulling = true;
@@ -121,6 +130,7 @@ struct EditorState {
         scene.registry().emplace<WorldTransform>(selectedEntity);
         renderableEntities.push_back(selectedEntity);
         scene.registry().emplace<CameraComponent>(cameraEntity);
+        loadRecentFiles();
         const auto lightEntity = scene.create();
         scene.registry().emplace<LightComponent>(lightEntity);
         lightEntities.push_back(lightEntity);
@@ -132,6 +142,39 @@ struct EditorState {
             if (!rotate.enabled) return;
             value.rotation.y = std::fmod(value.rotation.y + deltaSeconds * rotate.degreesPerSecond, 360.0f);
         });
+    }
+
+    [[nodiscard]] static std::filesystem::path recentFilesPath() {
+#ifdef _WIN32
+        if (const auto* appData = std::getenv("APPDATA"); appData && *appData)
+            return std::filesystem::path(appData) / "AEG Engine" / "recent-models.txt";
+#endif
+        return std::filesystem::path(".aeg-recent-models.txt");
+    }
+
+    void loadRecentFiles() {
+        std::ifstream input(recentFilesPath(), std::ios::in);
+        std::string line;
+        while (input && std::getline(input, line)) {
+            if (line.empty()) continue;
+            const auto path = foundation::pathFromUtf8(line);
+            if (std::filesystem::is_regular_file(path) &&
+                std::find(recentFiles.begin(), recentFiles.end(), path) == recentFiles.end())
+                recentFiles.push_back(path);
+            if (recentFiles.size() >= 5) break;
+        }
+    }
+
+    void rememberRecentFile(const std::filesystem::path& path) {
+        if (path.empty()) return;
+        recentFiles.erase(std::remove(recentFiles.begin(), recentFiles.end(), path), recentFiles.end());
+        recentFiles.push_front(path);
+        while (recentFiles.size() > 5) recentFiles.pop_back();
+        std::error_code error;
+        std::filesystem::create_directories(recentFilesPath().parent_path(), error);
+        std::ofstream output(recentFilesPath(), std::ios::trunc);
+        if (!output) return;
+        for (const auto& recent : recentFiles) output << foundation::pathToUtf8(recent) << '\n';
     }
 
     [[nodiscard]] Transform& transform() { return scene.registry().get<Transform>(selectedEntity); }
@@ -205,8 +248,10 @@ struct EditorState {
 
 void initializeEditorWindow(WindowLifetime& lifetime, const EditorOptions& options);
 void bindImportQueue(GLFWwindow* window, ImportQueue& imports);
+[[nodiscard]] std::filesystem::path browseModelFile(GLFWwindow* window);
 void configureStyle();
-void drawWorkspace(render::Renderer& renderer);
+[[nodiscard]] ImGuiWindowFlags workspacePanelFlags();
+void drawWorkspace(EditorState& state, render::Renderer& renderer);
 void processImports(EditorState& state, render::Renderer& renderer, assets::ModelResources& resources);
 [[nodiscard]] bool addLight(EditorState& state);
 void drawScenePanel(EditorState& state);
@@ -214,9 +259,10 @@ void drawImportPanel(EditorState& state);
 void resetMaterialEditor(EditorState& state);
 void drawMaterialSection(EditorState& state, render::Renderer& renderer);
 void drawLightingSection(EditorState& state, render::Renderer& renderer);
+void drawShadowsSection(EditorState& state, render::Renderer& renderer);
 void drawEnvironmentSection(EditorState& state, render::Renderer& renderer);
 void drawToneMappingSection(EditorState& state, render::Renderer& renderer);
-void drawInspectorPanel(EditorState& state, render::Renderer& renderer);
+void drawInspectorPanel(EditorState& state, render::Renderer& renderer, EditorGraphics& graphics);
 void drawViewportPanel(EditorState& state, render::Renderer& renderer, EditorGraphics& graphics);
-void drawDebugPanel(EditorState& state, render::Renderer& renderer, EditorGraphics& graphics);
+void drawDebugContents(EditorState& state, render::Renderer& renderer, EditorGraphics& graphics);
 }

@@ -47,6 +47,7 @@ int runEditor(const EditorOptions& options, const EditorBackendFactory& factory)
     state.model() =
         assets::loadModel(options.initialModel.empty() ? options.resourceDirectory / "assets" / "models" / "demo.obj"
                                                        : options.initialModel);
+    state.rememberRecentFile(state.model().source);
     renderer.uploadModel(state.model());
     std::cout << "Model: " << foundation::pathToUtf8(state.model().source) << " (" << state.model().vertexCount()
               << " vertices, " << state.model().triangleCount() << " triangles)\n";
@@ -74,12 +75,11 @@ int runEditor(const EditorOptions& options, const EditorBackendFactory& factory)
         bool builtUi = false;
         graphics.drawFrame(state.settings, [&] {
             builtUi = true;
-            drawWorkspace(renderer);
+            drawWorkspace(state, renderer);
             drawScenePanel(state);
             drawImportPanel(state);
             // The inspector applies AA before the viewport records its image descriptor.
-            drawInspectorPanel(state, renderer);
-            drawDebugPanel(state, renderer, graphics);
+            drawInspectorPanel(state, renderer, graphics);
             drawViewportPanel(state, renderer, graphics);
         });
         if (builtUi) ++state.frames;

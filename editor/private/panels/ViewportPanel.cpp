@@ -36,7 +36,8 @@ void drawViewportPanel(EditorState& state, render::Renderer& renderer, EditorGra
     for (int button = 0; button < 3; ++button)
         if (!ImGui::IsMouseDown(button)) viewportDrag[button] = false;
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-    if (ImGui::Begin(viewportWindow, nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
+    if (ImGui::Begin(viewportWindow, nullptr,
+                     workspacePanelFlags() | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
         const auto available = ImGui::GetContentRegionAvail();
         if (available.x >= 1 && available.y >= 1) {
             visible = true;
@@ -103,6 +104,13 @@ void drawViewportPanel(EditorState& state, render::Renderer& renderer, EditorGra
                 if (hovered && io.MouseWheel != 0) camera.zoom(io.MouseWheel);
                 if (hovered && ImGui::IsKeyPressed(ImGuiKey_F, false)) frameRequested = true;
             }
+            const float hintHeight = ui::px(30.0f);
+            const ImVec2 hintMin{imagePosition.x, imagePosition.y + available.y - hintHeight};
+            const ImVec2 hintMax{imagePosition.x + available.x, imagePosition.y + available.y};
+            draw->AddRectFilled(hintMin, hintMax, ImGui::GetColorU32(ui::rgb(0x0f1216, 0.86f)));
+            draw->AddText({hintMin.x + ui::px(14.0f), hintMin.y + (hintHeight - ImGui::GetTextLineHeight()) * 0.5f},
+                          ImGui::GetColorU32(ui::rgb(0x9aa3b0)),
+                          "右键拖动 环绕 · 中键 平移 · 滚轮 缩放 · F 聚焦模型 · Esc 取消拖动");
             sceneRendered = true;
         }
     }

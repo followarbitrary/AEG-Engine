@@ -115,8 +115,9 @@ void drawLightList(EditorState& state, render::Renderer& renderer) {
     }
 }
 
-void drawShadows(EditorState& state, render::Renderer& renderer) {
-    if (!ImGui::CollapsingHeader("阴影###Shadows", ImGuiTreeNodeFlags_DefaultOpen)) return;
+void drawShadowsInternal(EditorState& state, render::Renderer& renderer) {
+    const auto summary = renderer.shadows().enabled ? "开" : "关";
+    if (!ui::SectionHeader("阴影###Shadows", summary)) return;
     if (!renderer.supportsShadows()) {
         ImGui::TextWrapped("当前设备不支持可采样的深度阴影贴图。");
         return;
@@ -222,9 +223,13 @@ void drawShadows(EditorState& state, render::Renderer& renderer) {
 }
 }
 
+void drawShadowsSection(EditorState& state, render::Renderer& renderer) { drawShadowsInternal(state, renderer); }
+
 void drawLightingSection(EditorState& state, render::Renderer& renderer) {
     auto& settings = state.settings;
-    if (ImGui::CollapsingHeader("光照###Lighting", ImGuiTreeNodeFlags_DefaultOpen)) {
+    const auto summary = std::to_string(std::min<std::size_t>(state.lightCount(), render::kMaxLights)) + " / " +
+                         std::to_string(render::kMaxLights) + " 光源";
+    if (ui::SectionHeader("光照###Lighting", summary.c_str())) {
         ImGui::Checkbox("无光照材质###Unlit materials", &settings.unlit);
         ImGui::BeginDisabled(settings.unlit);
         ImGui::Checkbox("使用法线贴图###Normal mapping", &settings.normalMapping);
@@ -242,7 +247,5 @@ void drawLightingSection(EditorState& state, render::Renderer& renderer) {
         if (ImGui::ColorEdit3("背景###Background", background))
             settings.background = {background[0], background[1], background[2], settings.background.w};
     }
-    drawEnvironmentSection(state, renderer);
-    drawShadows(state, renderer);
 }
 }

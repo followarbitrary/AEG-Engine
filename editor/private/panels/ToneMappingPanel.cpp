@@ -1,11 +1,15 @@
 #include "EditorState.hpp"
 #include <ToneMappingSettings.hpp>
 #include <exception>
+#include <string>
 
 namespace aeg::editor {
 void drawToneMappingSection(EditorState& state, render::Renderer& renderer) {
-    if (!ImGui::CollapsingHeader("色调映射###Tone mapping", ImGuiTreeNodeFlags_DefaultOpen)) return;
     auto candidate = renderer.toneMapping();
+    const auto mapperLabel = candidate.mapper == render::ToneMapper::Agx ? "AgX" :
+                             candidate.mapper == render::ToneMapper::Aces ? "ACES" : "线性";
+    const auto summary = std::string(mapperLabel) + " · " + std::to_string(candidate.exposureEV) + " EV";
+    if (!ui::SectionHeader("色调映射###Tone mapping", summary.c_str())) return;
     constexpr const char* names[]{"线性（对照）", "ACES fitted", "AgX"};
     int mapper = static_cast<int>(candidate.mapper);
     bool changed = ImGui::Combo("映射###Tone mapper", &mapper, names, 3);

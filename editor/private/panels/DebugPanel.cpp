@@ -18,12 +18,7 @@ void drawDebugHeading(const char* label, const char* detail = nullptr) {
 }
 }
 
-void drawDebugPanel(EditorState& state, render::Renderer& renderer, EditorGraphics& graphics) {
-    if (!ImGui::Begin(debugWindow)) {
-        ImGui::End();
-        return;
-    }
-
+void drawDebugContents(EditorState& state, render::Renderer& renderer, EditorGraphics& graphics) {
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8.0f, 6.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(6.0f, 3.0f));
     drawDebugHeading("RenderGraph pass", "Pass visibility");
@@ -81,6 +76,5 @@ void drawDebugPanel(EditorState& state, render::Renderer& renderer, EditorGraphi
         ImGui::EndChild();
     }
     ImGui::PopStyleVar(2);
-    ImGui::End();
 }
 }
