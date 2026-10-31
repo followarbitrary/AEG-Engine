@@ -330,8 +330,18 @@ void VulkanCommands::dispatch(std::uint32_t x, std::uint32_t y, std::uint32_t z)
     vkCmdDispatch(handle, x, y, z);
 }
 void VulkanCommands::transition(Texture& generic, ResourceState before, ResourceState after) {
+    auto& texture = owned<VulkanTexture>(*owner, generic);
+    transition(texture, before, after, 0, texture.desc.mipLevels, 0, textureLayerCount(texture.desc));
+}
+void VulkanCommands::transition(Texture& generic, ResourceState before, ResourceState after,
+                                std::uint32_t baseMip, std::uint32_t levelCount, std::uint32_t baseLayer,
+                                std::uint32_t layerCount) {
     if (inPass || after == ResourceState::Undefined) throw std::invalid_argument("Invalid image transition");
     auto& texture = owned<VulkanTexture>(*owner, generic);
+    if (!levelCount || baseMip >= texture.desc.mipLevels || levelCount > texture.desc.mipLevels - baseMip ||
+        !layerCount || baseLayer >= textureLayerCount(texture.desc) ||
+        layerCount > textureLayerCount(texture.desc) - baseLayer)
+        throw std::invalid_argument("Image transition subresource range is out of bounds");
     if ((before == ResourceState::Storage || after == ResourceState::Storage) &&
         (!owner->caps.compute || !contains(texture.desc.usage, TextureUsage::Storage)))
         throw std::invalid_argument("Storage transition requires a compute-capable storage texture");
@@ -348,8 +358,7 @@ void VulkanCommands::transition(Texture& generic, ResourceState before, Resource
     barrier.newLayout = imageLayout(after);
     barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.image = texture.handle;
-    barrier.subresourceRange = {imageAspect(texture.desc.format), 0, texture.desc.mipLevels, 0,
-                                textureLayerCount(texture.desc)};
+    barrier.subresourceRange = {imageAspect(texture.desc.format), baseMip, levelCount, baseLayer, layerCount};
     vkCmdPipelineBarrier(handle, source.stages, destination.stages, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 }
 void VulkanCommands::transition(Buffer& generic, ResourceState before, ResourceState after) {
@@ -384,16 +393,66 @@ void VulkanCommands::copyBuffer(Buffer& genericSource, Buffer& genericDestinatio
         !contains(source.desc.usage, BufferUsage::CopySource) ||
         !contains(destination.desc.usage, BufferUsage::CopyDestination) || &source == &destination)
         throw std::invalid_argument("Invalid buffer copy");
-    VkBufferCopy copy{0, 0, bytes};
+    copyBuffer(source, 0, destination, 0, bytes);
+}
+void VulkanCommands::copyBuffer(VulkanBuffer& source, VkDeviceSize sourceOffset, VulkanBuffer& destination,
+                                VkDeviceSize destinationOffset, VkDeviceSize bytes) {
+    if (inPass || !bytes || sourceOffset > source.desc.size || bytes > source.desc.size - sourceOffset ||
+        destinationOffset > destination.desc.size || bytes > destination.desc.size - destinationOffset ||
+        !contains(source.desc.usage, BufferUsage::CopySource) ||
+        !contains(destination.desc.usage, BufferUsage::CopyDestination) || &source == &destination)
+        throw std::invalid_argument("Invalid buffer copy");
+    VkBufferCopy copy{sourceOffset, destinationOffset, bytes};
     vkCmdCopyBuffer(handle, source.handle, destination.handle, 1, &copy);
     VkBufferMemoryBarrier barrier{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
     barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
     barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.buffer = destination.handle;
+    barrier.offset = destinationOffset;
     barrier.size = bytes;
     vkCmdPipelineBarrier(handle, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, nullptr, 1,
                          &barrier, 0, nullptr);
+}
+void VulkanCommands::copyBufferToTexture(VulkanBuffer& source, VkDeviceSize sourceOffset, VulkanTexture& texture,
+                                         std::uint32_t mipLevel) {
+    if (inPass || mipLevel >= texture.desc.mipLevels || sourceOffset % 4 ||
+        !contains(source.desc.usage, BufferUsage::CopySource) ||
+        !contains(texture.desc.usage, TextureUsage::CopyDestination))
+        throw std::invalid_argument("Invalid buffer to texture copy");
+    const auto extent = mipExtent(texture.desc, mipLevel);
+    if (extent.width && extent.height > std::numeric_limits<std::uint64_t>::max() / extent.width)
+        throw std::invalid_argument("Buffer to texture copy size overflows");
+    const auto layerCount = textureLayerCount(texture.desc);
+    const auto texelsPerLayer = static_cast<std::uint64_t>(extent.width) * extent.height;
+    if (texelsPerLayer > std::numeric_limits<std::uint64_t>::max() / layerCount)
+        throw std::invalid_argument("Buffer to texture copy size overflows");
+    const auto texelCount = texelsPerLayer * layerCount;
+    if (texelCount > std::numeric_limits<std::uint64_t>::max() / formatByteSize(texture.desc.format))
+        throw std::invalid_argument("Buffer to texture copy size overflows");
+    const auto bytes = texelCount * formatByteSize(texture.desc.format);
+    if (bytes > source.desc.size || sourceOffset > source.desc.size - bytes)
+        throw std::invalid_argument("Buffer to texture copy exceeds the staging buffer");
+    VkBufferImageCopy copy{};
+    copy.bufferOffset = sourceOffset;
+    copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, mipLevel, 0, textureLayerCount(texture.desc)};
+    copy.imageExtent = {extent.width, extent.height, 1};
+    vkCmdCopyBufferToImage(handle, source.handle, texture.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+}
+void VulkanCommands::blitTexture(VulkanTexture& texture, std::uint32_t sourceMip, std::uint32_t destinationMip) {
+    if (inPass || sourceMip >= texture.desc.mipLevels || destinationMip != sourceMip + 1)
+        throw std::invalid_argument("Invalid texture mip blit");
+    const auto sourceExtent = mipExtent(texture.desc, sourceMip);
+    const auto destinationExtent = mipExtent(texture.desc, destinationMip);
+    VkImageBlit blit{};
+    blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, sourceMip, 0, textureLayerCount(texture.desc)};
+    blit.srcOffsets[1] = {
+        static_cast<std::int32_t>(sourceExtent.width), static_cast<std::int32_t>(sourceExtent.height), 1};
+    blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, destinationMip, 0, textureLayerCount(texture.desc)};
+    blit.dstOffsets[1] = {static_cast<std::int32_t>(destinationExtent.width),
+                          static_cast<std::int32_t>(destinationExtent.height), 1};
+    vkCmdBlitImage(handle, texture.handle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, texture.handle,
+                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
 }
 void VulkanCommands::copyTextureToBuffer(Texture& genericSource, Buffer& genericDestination,
                                          TextureSubresource subresource) {

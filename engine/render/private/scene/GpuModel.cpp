@@ -13,14 +13,26 @@ void Renderer::Impl::uploadModel(const ModelData& source) {
     replacement->materials.reserve(materialCount);
     const MaterialData fallback{};
     const assets::ImageData neutralNormal{1, 1, {128, 128, 255, 255}};
+    auto batch = device.beginUploadBatch();
+    struct BatchCancelGuard {
+        rhi::UploadBatch* batch;
+        bool ended{};
+        ~BatchCancelGuard() {
+            if (!ended) batch->cancel();
+        }
+    } guard{batch.get()};
     const auto uploadTexture = [&](const assets::ImageData& image, rhi::Format format) {
         const auto maximum = device.capabilities().maximumImageDimension;
         const auto bytes = static_cast<std::uint64_t>(image.width) * image.height * 4;
         if (!image.width || !image.height || image.width > maximum || image.height > maximum ||
             bytes != image.rgba.size())
             throw std::runtime_error("Invalid or oversized material texture");
-        return device.uploadTexture(
-            {{image.width, image.height}, format, rhi::TextureUsage::CopyDestination | rhi::TextureUsage::Sampled, 1},
+        std::uint32_t mipLevels = 1;
+        for (auto dimension = std::max(image.width, image.height); dimension > 1; dimension = std::max(1u, dimension / 2))
+            ++mipLevels;
+        return batch->uploadTexture(
+            {{image.width, image.height}, format, rhi::TextureUsage::CopyDestination | rhi::TextureUsage::Sampled, 1,
+             mipLevels},
             std::as_bytes(std::span(image.rgba)));
     };
     for (std::size_t i = 0; i < materialCount; ++i) {
@@ -85,8 +97,8 @@ void Renderer::Impl::uploadModel(const ModelData& source) {
         gpu.maximum = maximum;
         replacement->minimum = math::min(replacement->minimum, minimum);
         replacement->maximum = math::max(replacement->maximum, maximum);
-        gpu.vertices = device.uploadBuffer(std::as_bytes(std::span(mesh.vertices)), rhi::BufferUsage::Vertex);
-        gpu.indices = device.uploadBuffer(std::as_bytes(std::span(mesh.indices)), rhi::BufferUsage::Index);
+        gpu.vertices = batch->uploadBuffer(std::as_bytes(std::span(mesh.vertices)), rhi::BufferUsage::Vertex);
+        gpu.indices = batch->uploadBuffer(std::as_bytes(std::span(mesh.indices)), rhi::BufferUsage::Index);
         gpu.indexCount = static_cast<std::uint32_t>(mesh.indices.size());
         gpu.material = mesh.materialIndex;
         replacement->meshes.push_back(std::move(gpu));
@@ -104,7 +116,7 @@ void Renderer::Impl::uploadModel(const ModelData& source) {
             bounds[i].localMaximum = {mesh.maximum, 0};
             bounds[i].draw = {mesh.indexCount, 0, 0, mesh.material};
         }
-        replacement->boundsBuffer = device.uploadBuffer(std::as_bytes(std::span(bounds)), rhi::BufferUsage::Storage);
+        replacement->boundsBuffer = batch->uploadBuffer(std::as_bytes(std::span(bounds)), rhi::BufferUsage::Storage);
         const auto commandBytes = meshCount * sizeof(std::uint32_t) * 5;
         replacement->indirectBuffer = device.createBuffer(
             {commandBytes, rhi::BufferUsage::Storage | rhi::BufferUsage::Indirect | rhi::BufferUsage::CopySource,
@@ -122,6 +134,8 @@ void Renderer::Impl::uploadModel(const ModelData& source) {
         scenePipeline(aa.msaaSamples, aa.taa, false, true);
         scenePipeline(aa.msaaSamples, aa.taa, true, true);
     }
+    batch->end();
+    guard.ended = true;
     model = std::move(replacement);
     resetTemporalHistory();
 }

@@ -102,7 +102,11 @@ void Renderer::Impl::createDescriptors() {
         cullLayout = device.createBindingLayout(
             {{{0, StorageBuffer, Compute}, {1, StorageBuffer, Compute}}});
     }
-    sampler = device.createSampler({rhi::Filter::Linear, rhi::AddressMode::Repeat});
+    const auto materialMipLevels = std::bit_width(caps.maximumImageDimension);
+    const auto materialMaxLod = materialMipLevels > 0 ? static_cast<float>(materialMipLevels - 1) : 0.0f;
+    const auto materialAnisotropy = caps.samplerAnisotropy ? std::min(8.0f, caps.maximumSamplerAnisotropy) : 1.0f;
+    sampler = device.createSampler(
+        {rhi::Filter::Linear, rhi::AddressMode::Repeat, {}, materialMaxLod, materialAnisotropy});
     viewportSampler = device.createSampler({rhi::Filter::Linear, rhi::AddressMode::ClampToEdge});
     pointSampler = device.createSampler({rhi::Filter::Nearest, rhi::AddressMode::ClampToEdge});
     environmentSampler = device.createSampler({rhi::Filter::Linear, rhi::AddressMode::ClampToEdge, {}, 9});

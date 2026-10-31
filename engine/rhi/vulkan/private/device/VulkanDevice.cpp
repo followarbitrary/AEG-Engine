@@ -237,6 +237,8 @@ void VulkanDevice::selectDevice() {
     features.pNext = &features11;
     vkGetPhysicalDeviceFeatures2(physical, &features);
     caps.independentBlend = features.features.independentBlend == VK_TRUE;
+    caps.samplerAnisotropy = features.features.samplerAnisotropy == VK_TRUE;
+    caps.maximumSamplerAnisotropy = caps.samplerAnisotropy ? properties.limits.maxSamplerAnisotropy : 1.0f;
     caps.descriptorIndexing = features.features.shaderSampledImageArrayDynamicIndexing == VK_TRUE;
     caps.shaderDrawParameters = features11.shaderDrawParameters == VK_TRUE;
     for (auto format : {Format::D32Float, Format::D24UnormS8, Format::D16Unorm})
@@ -270,6 +272,7 @@ void VulkanDevice::createLogicalDevice() {
     info.ppEnabledExtensionNames = &extension;
     VkPhysicalDeviceFeatures2 features{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
     features.features.independentBlend = caps.independentBlend ? VK_TRUE : VK_FALSE;
+    features.features.samplerAnisotropy = caps.samplerAnisotropy ? VK_TRUE : VK_FALSE;
     features.features.shaderSampledImageArrayDynamicIndexing = caps.descriptorIndexing ? VK_TRUE : VK_FALSE;
     VkPhysicalDeviceVulkan11Features features11{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
     features11.shaderDrawParameters = caps.shaderDrawParameters ? VK_TRUE : VK_FALSE;

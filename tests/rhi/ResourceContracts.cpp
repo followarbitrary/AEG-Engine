@@ -66,6 +66,16 @@ void uploadBatchContracts() {
     batch->cancel();
 }
 
+void multiMipUploadContracts() {
+    using namespace aeg::rhi;
+    aeg::tests::FakeDevice device;
+    constexpr std::array<std::byte, 4 * 4 * 4> pixels{};
+    const TextureDesc desc{{4, 4}, Format::Rgba8Unorm, TextureUsage::Sampled | TextureUsage::CopyDestination, 1, 3};
+    auto texture = device.uploadTexture(desc, pixels);
+    if (!texture || texture->description().mipLevels != 3 || texture->description().extent != Extent2D{4, 4})
+        throw std::runtime_error("Fake multi-mip upload lost the explicit mip range");
+}
+
 void computeImageContracts() {
     using namespace aeg::rhi;
     // A wrong mip footprint or treating a cube as one layer makes real selected-mip
@@ -318,6 +328,7 @@ int main() {
         deferredDestructionContracts();
         swapchainImageContracts();
         uploadBatchContracts();
+        multiMipUploadContracts();
         RenderPassDesc pass;
         pass.attachments = {
             {Format::Rgba8Unorm, 4, LoadOp::Clear, StoreOp::Discard, ResourceState::Undefined,

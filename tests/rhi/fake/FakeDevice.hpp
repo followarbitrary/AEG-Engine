@@ -232,8 +232,8 @@ public:
         rhi::validate(desc);
         if ((desc.format != rhi::Format::Rgba8Unorm && desc.format != rhi::Format::Rgba8Srgb &&
              desc.format != rhi::Format::Rgba32Float) ||
-            desc.mipLevels != 1 || desc.samples != 1 || !rhi::contains(desc.usage, rhi::TextureUsage::Sampled))
-            throw std::invalid_argument("Fake upload requires single-mip sampled RGBA8 or RGBA32F faces");
+            desc.samples != 1 || !rhi::contains(desc.usage, rhi::TextureUsage::Sampled))
+            throw std::invalid_argument("Fake upload requires sampled RGBA8 or RGBA32F faces");
         const auto pixelCount = static_cast<std::uint64_t>(desc.extent.width) * desc.extent.height;
         const auto pixelStride = rhi::formatByteSize(desc.format) * rhi::textureLayerCount(desc);
         if (pixelCount > std::numeric_limits<std::size_t>::max() / pixelStride ||

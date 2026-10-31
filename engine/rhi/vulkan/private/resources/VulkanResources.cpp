@@ -105,6 +105,147 @@ std::unique_ptr<Buffer> VulkanDevice::uploadBuffer(std::span<const std::byte> by
     immediate([&](VulkanCommands& commands) { commands.copyBuffer(*staging, *result, bytes.size()); });
     return result;
 }
+VulkanUploadBatch::VulkanUploadBatch(VulkanDevice& device) : owner(&device), commands(device) {
+    VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    VkCommandBufferAllocateInfo allocate{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    allocate.commandPool = device.pool;
+    allocate.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocate.commandBufferCount = 1;
+    try {
+        check(vkCreateFence(device.handle, &fenceInfo, nullptr, &fence), "vkCreateFence(upload batch)");
+        check(vkAllocateCommandBuffers(device.handle, &allocate, &commands.handle),
+              "vkAllocateCommandBuffers(upload batch)");
+        VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+        begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        check(vkBeginCommandBuffer(commands.handle, &begin), "vkBeginCommandBuffer(upload batch)");
+    } catch (...) {
+        cleanup();
+        throw;
+    }
+}
+VulkanUploadBatch::~VulkanUploadBatch() { cancel(); }
+void VulkanUploadBatch::ensureActive() const {
+    if (!active) throw std::logic_error("Upload batch is no longer active");
+}
+std::pair<VulkanBuffer*, VkDeviceSize> VulkanUploadBatch::allocate(std::span<const std::byte> bytes) {
+    ensureActive();
+    if (bytes.empty()) throw std::invalid_argument("Upload requires nonempty bytes");
+    const auto alignment = std::max<VkDeviceSize>(4, owner->properties.limits.optimalBufferCopyOffsetAlignment);
+    const auto aligned = [](VkDeviceSize offset, VkDeviceSize alignment) {
+        return (offset + alignment - 1) / alignment * alignment;
+    };
+    for (auto& block : staging) {
+        const auto offset = aligned(block.offset, alignment);
+        if (offset <= block.buffer->desc.size && bytes.size() <= block.buffer->desc.size - offset) {
+            block.offset = offset + bytes.size();
+            std::memcpy(static_cast<std::byte*>(block.buffer->mapping) + offset, bytes.data(), bytes.size());
+            return {block.buffer.get(), offset};
+        }
+    }
+    constexpr VkDeviceSize defaultBlockSize = 64 * 1024;
+    const auto required = aligned(bytes.size(), alignment);
+    const auto blockSize = std::max(defaultBlockSize, required);
+    auto generic = owner->createBuffer({static_cast<std::size_t>(blockSize), BufferUsage::CopySource, MemoryUsage::Upload});
+    auto* buffer = dynamic_cast<VulkanBuffer*>(generic.get());
+    if (!buffer) throw std::logic_error("Vulkan upload staging buffer type mismatch");
+    generic.release();
+    staging.push_back({std::unique_ptr<VulkanBuffer>(buffer), bytes.size()});
+    std::memcpy(static_cast<std::byte*>(buffer->mapping), bytes.data(), bytes.size());
+    return {buffer, 0};
+}
+std::unique_ptr<Buffer> VulkanUploadBatch::uploadBuffer(std::span<const std::byte> bytes, BufferUsage usage) {
+    ensureActive();
+    auto [stagingBuffer, sourceOffset] = allocate(bytes);
+    auto result = owner->createBuffer({bytes.size(), usage | BufferUsage::CopyDestination, MemoryUsage::Device});
+    auto& destination = owned<VulkanBuffer>(*owner, *result);
+    commands.copyBuffer(*stagingBuffer, sourceOffset, destination, 0, bytes.size());
+    return result;
+}
+std::unique_ptr<Texture> VulkanUploadBatch::uploadTexture(const TextureDesc& description,
+                                                          std::span<const std::byte> pixels) {
+    ensureActive();
+    validate(description);
+    if ((description.format != Format::Rgba8Unorm && description.format != Format::Rgba8Srgb &&
+         description.format != Format::Rgba32Float) ||
+        description.samples != 1 || !contains(description.usage, TextureUsage::Sampled))
+        throw std::invalid_argument("Texture upload requires sampled RGBA8 or RGBA32F faces");
+    const auto pixelCount = static_cast<std::uint64_t>(description.extent.width) * description.extent.height;
+    const auto pixelStride = formatByteSize(description.format) * textureLayerCount(description);
+    if (pixelCount > std::numeric_limits<std::size_t>::max() / pixelStride || pixelCount * pixelStride != pixels.size())
+        throw std::invalid_argument("Texture upload byte count mismatch");
+    auto desc = description;
+    desc.usage = desc.usage | TextureUsage::CopyDestination;
+    if (desc.mipLevels > 1) {
+        desc.usage = desc.usage | TextureUsage::CopySource;
+        VkFormatProperties properties{};
+        vkGetPhysicalDeviceFormatProperties(owner->physical, nativeFormat(desc.format), &properties);
+        constexpr auto required = VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT |
+                                  VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+        if ((properties.optimalTilingFeatures & required) != required)
+            throw std::invalid_argument("Texture format lacks linear transfer blit support");
+    }
+    auto [stagingBuffer, sourceOffset] = allocate(pixels);
+    auto result = owner->createTexture(desc);
+    auto& texture = owned<VulkanTexture>(*owner, *result);
+    const auto layers = textureLayerCount(desc);
+    commands.transition(texture, ResourceState::Undefined, ResourceState::CopyDestination, 0, desc.mipLevels, 0,
+                        layers);
+    commands.copyBufferToTexture(*stagingBuffer, sourceOffset, texture, 0);
+    if (desc.mipLevels == 1) {
+        commands.transition(texture, ResourceState::CopyDestination, ResourceState::Sampled, 0, 1, 0, layers);
+    } else {
+        for (std::uint32_t mip = 1; mip < desc.mipLevels; ++mip) {
+            commands.transition(texture, ResourceState::CopyDestination, ResourceState::CopySource, mip - 1, 1, 0,
+                                layers);
+            commands.blitTexture(texture, mip - 1, mip);
+        }
+        for (std::uint32_t mip = 0; mip + 1 < desc.mipLevels; ++mip)
+            commands.transition(texture, ResourceState::CopySource, ResourceState::Sampled, mip, 1, 0, layers);
+        commands.transition(texture, ResourceState::CopyDestination, ResourceState::Sampled, desc.mipLevels - 1, 1,
+                            0, layers);
+    }
+    return result;
+}
+void VulkanUploadBatch::end() {
+    ensureActive();
+    try {
+        if (commands.inPass) throw std::logic_error("Upload batch render pass was not ended");
+        check(vkEndCommandBuffer(commands.handle), "vkEndCommandBuffer(upload batch)");
+        VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+        submit.commandBufferCount = 1;
+        submit.pCommandBuffers = &commands.handle;
+        check(vkQueueSubmit(owner->graphicsQueue, 1, &submit, fence), "vkQueueSubmit(upload batch)");
+        submitted = true;
+        const auto firstWait = vkWaitForFences(owner->handle, 1, &fence, VK_TRUE, UINT64_MAX);
+        auto completion = firstWait;
+        while (completion != VK_SUCCESS && completion != VK_ERROR_DEVICE_LOST) {
+            completion = vkDeviceWaitIdle(owner->handle);
+            if (completion != VK_SUCCESS && completion != VK_ERROR_DEVICE_LOST)
+                completion = vkWaitForFences(owner->handle, 1, &fence, VK_TRUE, UINT64_MAX);
+        }
+        check(firstWait, "vkWaitForFences(upload batch)");
+        cleanup();
+    } catch (...) {
+        if (submitted) vkDeviceWaitIdle(owner->handle);
+        cleanup();
+        throw;
+    }
+}
+void VulkanUploadBatch::cancel() noexcept {
+    if (!active) return;
+    cleanup();
+}
+void VulkanUploadBatch::cleanup() noexcept {
+    if (owner && owner->handle) {
+        if (commands.handle) vkFreeCommandBuffers(owner->handle, owner->pool, 1, &commands.handle);
+        if (fence) vkDestroyFence(owner->handle, fence, nullptr);
+    }
+    commands.handle = VK_NULL_HANDLE;
+    fence = VK_NULL_HANDLE;
+    staging.clear();
+    active = false;
+}
+std::unique_ptr<UploadBatch> VulkanDevice::beginUploadBatch() { return std::make_unique<VulkanUploadBatch>(*this); }
 std::unique_ptr<Texture> VulkanDevice::createTexture(const TextureDesc& desc) {
     validate(desc);
     const auto support = textureSupport(desc.format, desc.usage, desc.dimension);
@@ -159,32 +300,15 @@ std::unique_ptr<Texture> VulkanDevice::createTexture(const TextureDesc& desc) {
 }
 std::unique_ptr<Texture> VulkanDevice::uploadTexture(const TextureDesc& description,
                                                      std::span<const std::byte> pixels) {
-    validate(description);
-    if ((description.format != Format::Rgba8Unorm && description.format != Format::Rgba8Srgb &&
-         description.format != Format::Rgba32Float) ||
-        description.samples != 1 || description.mipLevels != 1 || !contains(description.usage, TextureUsage::Sampled))
-        throw std::invalid_argument("Texture upload requires sampled single-mip RGBA8 or RGBA32F faces");
-    const auto pixelCount = static_cast<std::uint64_t>(description.extent.width) * description.extent.height;
-    const auto pixelStride = formatByteSize(description.format) * textureLayerCount(description);
-    if (pixelCount > std::numeric_limits<std::size_t>::max() / pixelStride || pixelCount * pixelStride != pixels.size())
-        throw std::invalid_argument("Texture upload byte count mismatch");
-    auto desc = description;
-    desc.usage = desc.usage | TextureUsage::CopyDestination;
-    auto staging = createBuffer({pixels.size(), BufferUsage::CopySource, MemoryUsage::Upload});
-    std::memcpy(staging->mapped().data(), pixels.data(), pixels.size());
-    auto result = createTexture(desc);
-    auto& texture = owned<VulkanTexture>(*this, *result);
-    auto& buffer = owned<VulkanBuffer>(*this, *staging);
-    immediate([&](VulkanCommands& commands) {
-        commands.transition(texture, ResourceState::Undefined, ResourceState::CopyDestination);
-        VkBufferImageCopy copy{};
-        copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, textureLayerCount(desc)};
-        copy.imageExtent = {desc.extent.width, desc.extent.height, 1};
-        vkCmdCopyBufferToImage(commands.handle, buffer.handle, texture.handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
-                               &copy);
-        commands.transition(texture, ResourceState::CopyDestination, ResourceState::Sampled);
-    });
-    return result;
+    auto batch = beginUploadBatch();
+    try {
+        auto result = batch->uploadTexture(description, pixels);
+        batch->end();
+        return result;
+    } catch (...) {
+        batch->cancel();
+        throw;
+    }
 }
 std::unique_ptr<Sampler> VulkanDevice::createSampler(const SamplerDesc& desc) {
     validate(desc);
@@ -197,7 +321,9 @@ std::unique_ptr<Sampler> VulkanDevice::createSampler(const SamplerDesc& desc) {
     info.addressModeV = desc.addressV.value_or(desc.address) == AddressMode::Repeat
                             ? VK_SAMPLER_ADDRESS_MODE_REPEAT
                             : VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
-    info.maxAnisotropy = 1;
+    const auto anisotropy = std::clamp(desc.maxAnisotropy, 1.0f, caps.maximumSamplerAnisotropy);
+    info.anisotropyEnable = caps.samplerAnisotropy && anisotropy > 1.0f ? VK_TRUE : VK_FALSE;
+    info.maxAnisotropy = info.anisotropyEnable ? anisotropy : 1.0f;
     info.maxLod = desc.maxLod;
     check(vkCreateSampler(handle, &info, nullptr, &result->handle), "vkCreateSampler");
     return result;

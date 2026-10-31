@@ -13,6 +13,8 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace aeg::rhi::vulkan::detail {
 inline void check(VkResult result, const char* operation) {
@@ -182,13 +184,43 @@ public:
     void drawIndexedIndirect(Buffer&, std::size_t, std::uint32_t, std::uint32_t) override;
     void dispatch(std::uint32_t, std::uint32_t, std::uint32_t) override;
     void transition(Texture&, ResourceState, ResourceState) override;
+    void transition(Texture&, ResourceState, ResourceState, std::uint32_t baseMip, std::uint32_t levelCount,
+                    std::uint32_t baseLayer, std::uint32_t layerCount);
     void transition(Buffer&, ResourceState, ResourceState) override;
     void copyBuffer(Buffer&, Buffer&, std::size_t) override;
+    void copyBuffer(VulkanBuffer&, VkDeviceSize sourceOffset, VulkanBuffer&, VkDeviceSize destinationOffset,
+                    VkDeviceSize bytes);
+    void copyBufferToTexture(VulkanBuffer&, VkDeviceSize sourceOffset, VulkanTexture&, std::uint32_t mipLevel);
+    void blitTexture(VulkanTexture&, std::uint32_t sourceMip, std::uint32_t destinationMip);
     void copyTextureToBuffer(Texture&, Buffer&, TextureSubresource = {}) override;
     void beginDebugLabel(std::string_view) override;
     void endDebugLabel() override;
     void beginGpuPass(std::string_view) override;
     void endGpuPass() override;
+};
+class VulkanUploadBatch final : public UploadBatch {
+public:
+    struct StagingBlock {
+        std::unique_ptr<VulkanBuffer> buffer;
+        VkDeviceSize offset{};
+    };
+    VulkanDevice* owner;
+    VulkanCommands commands;
+    VkFence fence{};
+    std::vector<StagingBlock> staging;
+    bool active{true};
+    bool submitted{};
+    explicit VulkanUploadBatch(VulkanDevice&);
+    ~VulkanUploadBatch() override;
+    std::unique_ptr<Buffer> uploadBuffer(std::span<const std::byte>, BufferUsage) override;
+    std::unique_ptr<Texture> uploadTexture(const TextureDesc&, std::span<const std::byte>) override;
+    void end() override;
+    void cancel() noexcept override;
+
+private:
+    void ensureActive() const;
+    std::pair<VulkanBuffer*, VkDeviceSize> allocate(std::span<const std::byte>);
+    void cleanup() noexcept;
 };
 class VulkanDevice final : public Device {
 public:
@@ -218,6 +250,7 @@ public:
     TextureSupport textureSupport(Format, TextureUsage, TextureDimension = TextureDimension::Texture2D) const override;
     std::unique_ptr<Buffer> createBuffer(const BufferDesc&) override;
     std::unique_ptr<Buffer> uploadBuffer(std::span<const std::byte>, BufferUsage) override;
+    std::unique_ptr<UploadBatch> beginUploadBatch() override;
     std::unique_ptr<Texture> createTexture(const TextureDesc&) override;
     std::unique_ptr<Texture> uploadTexture(const TextureDesc&, std::span<const std::byte>) override;
     std::unique_ptr<Sampler> createSampler(const SamplerDesc&) override;
