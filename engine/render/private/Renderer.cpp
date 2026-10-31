@@ -89,6 +89,7 @@ void Renderer::Impl::createDescriptors() {
                                                    {2, CombinedTextureSampler, Fragment},
                                                    {3, CombinedTextureSampler, Fragment}}});
     postSetLayout = device.createBindingLayout({{{0, CombinedTextureSampler, Fragment}}});
+    graphPostDescriptors.resize(framesInFlight);
     environmentSetLayout = device.createBindingLayout({{{0, CombinedTextureSampler, Fragment},
                                                         {1, CombinedTextureSampler, Fragment},
                                                         {2, CombinedTextureSampler, Fragment}}});
@@ -278,6 +279,8 @@ void Renderer::Impl::recordFrame(rhi::CommandList& commands, const RenderSetting
             graphPool.beginFrame(graphFrame, activeFrameSlot, framesInFlight);
         else
             graphPool.reclaimCompletedFrame(graphFrame);
+        graphPostDescriptors.at(activeFrameSlot).reset();
+        graphPostDescriptor = nullptr;
     }
     recordingTaa = aa.taa && debugPasses.taa;
     recordingFxaa = aa.fxaa && debugPasses.fxaa;
@@ -297,7 +300,6 @@ void Renderer::Impl::recordFrame(rhi::CommandList& commands, const RenderSetting
     pendingFrame = false;
     if (!retryingFrame) pendingOutput.reset();
     graphFiltered.reset();
-    graphPostDescriptor.reset();
     // Recording is speculative. Acquisition/submit failure must leave the
     // previous frame's jitter, history and capture image unchanged.
     recordingHistory = temporalHistory;
@@ -425,14 +427,13 @@ void Renderer::Impl::recordFrame(rhi::CommandList& commands, const RenderSetting
                                           graphFiltered = graphPool.lease(texture);
                                           const std::array writes{rhi::BindingWrite{0, nullptr, &context.texture(fxaaSource),
                                                                                    viewportSampler.get()}};
-                                          graphPostDescriptor = device.createBindingSet(*postSetLayout, writes);
-                                          commands.bindPipeline(*postPipeline);
-                                          commands.bindSet(*postLayout, 0, *graphPostDescriptor);
-                                          commands.setViewport(viewport->extent());
-                                          const aeg::math::Vec2 reciprocal{1.0f / static_cast<float>(viewport->width),
-                                                                           1.0f / static_cast<float>(viewport->height)};
-                                          commands.pushConstants(*postLayout, std::as_bytes(std::span(&reciprocal, 1)));
-                                          commands.draw(3);
+                                          auto& descriptor = graphPostDescriptors.at(activeFrameSlot);
+                                          if (descriptor)
+                                              descriptor->update(writes);
+                                          else
+                                              descriptor = device.createBindingSet(*postSetLayout, writes);
+                                          graphPostDescriptor = descriptor.get();
+                                          drawFxaa(commands);
                                       });
         fxaaPass.read(fxaaSource, RenderGraph::Usage::SampledRead)
             .write(intermediate, RenderGraph::Usage::ColorWrite)
@@ -454,7 +455,6 @@ void Renderer::Impl::recordFrame(rhi::CommandList& commands, const RenderSetting
                                                                            (recordingTaa ? viewport->historyColor[writeIndex]
                                                                                          : viewport->color));
     }
-    // std::cerr << "pending=" << pendingOutput.get() << " retry=" << retryingFrame << "\n";
     pendingSettings = settings;
     pendingFrame = true;
 }
@@ -482,8 +482,16 @@ void Renderer::Impl::selectFrameSlot() {
     activeFrameSlot = nextFrameSlot;
     activeUniformBuffer = uniformBuffers.at(activeFrameSlot).get();
     activeSceneDescriptor = sceneDescriptors.at(activeFrameSlot).get();
+    graphPostDescriptor = graphPostDescriptors.empty() ? nullptr : graphPostDescriptors.at(activeFrameSlot).get();
     const std::array write{rhi::BindingWrite{0, activeUniformBuffer, nullptr, nullptr}};
     activeSceneDescriptor->update(write);
+}
+
+rhi::BindingSet* Renderer::Impl::activeGraphPostDescriptor() const noexcept {
+    if (!graphPostDescriptors.empty()) {
+        if (auto* descriptor = graphPostDescriptors.at(activeFrameSlot).get()) return descriptor;
+    }
+    return graphPostDescriptor;
 }
 
 Renderer::Renderer(rhi::Device& device, std::uint32_t framesInFlight, bool slotAwareFrames)

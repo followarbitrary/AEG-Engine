@@ -3,7 +3,8 @@
 namespace aeg::render {
 void Renderer::Impl::drawFxaa(rhi::CommandList& commands) {
     if (!aa.fxaa) return;
-    auto* descriptor = graphPostDescriptor ? graphPostDescriptor.get() : viewport->postDescriptor.get();
+    auto* descriptor = activeGraphPostDescriptor();
+    if (!descriptor) descriptor = viewport->postDescriptor.get();
     if (!descriptor)
         throw std::logic_error("FXAA graph intermediate was not prepared");
     commands.setViewport(viewport->extent());

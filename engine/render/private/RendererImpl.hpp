@@ -47,7 +47,8 @@ struct Renderer::Impl {
     rhi::Texture* graphIntermediate{};
     std::shared_ptr<rhi::Texture> graphFiltered;
     std::unique_ptr<rhi::Framebuffer> graphPostFrame;
-    std::unique_ptr<rhi::BindingSet> graphPostDescriptor;
+    std::vector<std::unique_ptr<rhi::BindingSet>> graphPostDescriptors;
+    rhi::BindingSet* graphPostDescriptor{};
     std::string graphDump;
     AntialiasingSettings aa;
     RenderDebugSettings debugPasses;
@@ -139,6 +140,7 @@ struct Renderer::Impl {
     void recordFrame(rhi::CommandList& commands, const RenderSettings& settings);
     void frameSubmitted();
     void selectFrameSlot();
+    [[nodiscard]] rhi::BindingSet* activeGraphPostDescriptor() const noexcept;
     std::shared_ptr<rhi::Texture> outputTexture() const;
     void captureViewport(const std::filesystem::path& path);
 };
