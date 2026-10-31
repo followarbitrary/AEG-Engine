@@ -57,8 +57,11 @@ EditorGraphics::EditorGraphics(GLFWwindow* window, const EditorBackendFactory& f
     impl_->graphDebug = validation;
     if (!impl_->backend.device || !impl_->backend.swapchain || !impl_->backend.gui)
         throw std::runtime_error("Editor backend factory returned incomplete graphics services");
-    impl_->scene = std::make_unique<render::Renderer>(*impl_->backend.device,
-                                                      impl_->backend.swapchain->framesInFlight(), true);
+    const auto swapchainFramesInFlight = impl_->backend.swapchain->framesInFlight();
+    const auto rendererFramesInFlight = swapchainFramesInFlight == 1 ? 2 : swapchainFramesInFlight;
+    const auto slotAwareFrames = swapchainFramesInFlight != 1;
+    impl_->scene = std::make_unique<render::Renderer>(*impl_->backend.device, rendererFramesInFlight,
+                                                      slotAwareFrames);
     impl_->graphPool = std::make_unique<render::TransientTexturePool>(*impl_->backend.device);
     impl_->sampler = impl_->backend.device->createSampler({rhi::Filter::Linear, rhi::AddressMode::ClampToEdge});
 }
