@@ -1,8 +1,8 @@
 #include "RendererImpl.hpp"
 
 namespace aeg::render {
-Renderer::Impl::Impl(rhi::Device& target, std::uint32_t configuredFramesInFlight)
-    : device(target), framesInFlight(configuredFramesInFlight), graphPool(target) {
+Renderer::Impl::Impl(rhi::Device& target, std::uint32_t configuredFramesInFlight, bool configuredSlotAwareFrames)
+    : device(target), framesInFlight(configuredFramesInFlight), slotAwareFrames(configuredSlotAwareFrames), graphPool(target) {
     if (framesInFlight != 2 && framesInFlight != 3)
         throw std::invalid_argument("Renderer frame count must be 2 or 3");
     initialize();
@@ -120,11 +120,20 @@ void Renderer::Impl::createDescriptors() {
             {{1, 1}, rhi::Format::Rgba8Unorm, rhi::TextureUsage::CopyDestination | rhi::TextureUsage::Sampled, 1},
             std::as_bytes(std::span(normal)));
     }
-    uniformBuffer = device.createBuffer({sizeof(SceneUniform), rhi::BufferUsage::Uniform, rhi::MemoryUsage::Upload});
-    if (uniformBuffer->mapped().size() < sizeof(SceneUniform))
-        throw std::runtime_error("Scene uniform buffer is not host writable");
-    const std::array writes{rhi::BindingWrite{0, uniformBuffer.get(), nullptr, nullptr}};
-    sceneDescriptor = device.createBindingSet(*sceneLayout, writes);
+    uniformBuffers.clear();
+    sceneDescriptors.clear();
+    uniformBuffers.reserve(framesInFlight);
+    sceneDescriptors.reserve(framesInFlight);
+    for (std::uint32_t slot = 0; slot < framesInFlight; ++slot) {
+        auto uniform = device.createBuffer({sizeof(SceneUniform), rhi::BufferUsage::Uniform, rhi::MemoryUsage::Upload});
+        if (!uniform || uniform->mapped().size() < sizeof(SceneUniform))
+            throw std::runtime_error("Scene uniform buffer is not host writable");
+        const std::array writes{rhi::BindingWrite{0, uniform.get(), nullptr, nullptr}};
+        auto descriptor = device.createBindingSet(*sceneLayout, writes);
+        uniformBuffers.push_back(std::move(uniform));
+        sceneDescriptors.push_back(std::move(descriptor));
+    }
+    selectFrameSlot();
     // The scene shader always declares set 2, even while shadows are disabled.
     // Upload a real, initialized white image so every draw has a valid descriptor.
     constexpr std::array<std::uint8_t, 4> white{255, 255, 255, 255};
@@ -262,6 +271,14 @@ std::shared_ptr<rhi::Texture> Renderer::Impl::outputTexture() const {
 
 void Renderer::Impl::recordFrame(rhi::CommandList& commands, const RenderSettings& settings) {
     retryingFrame = pendingFrame;
+    if (!retryingFrame) {
+        selectFrameSlot();
+        ++graphFrame;
+        if (slotAwareFrames)
+            graphPool.beginFrame(graphFrame, activeFrameSlot, framesInFlight);
+        else
+            graphPool.reclaimCompletedFrame(graphFrame);
+    }
     recordingTaa = aa.taa && debugPasses.taa;
     recordingFxaa = aa.fxaa && debugPasses.fxaa;
     recordingToneMapping = debugPasses.toneMapping;
@@ -269,8 +286,13 @@ void Renderer::Impl::recordFrame(rhi::CommandList& commands, const RenderSetting
         // EditorGraphics has waited for the prior frame fence before recording
         // a replacement. CPU-only retries retain the pending lease and reuse
         // that same physical image instead of changing output identity.
-        graphPool.reclaimCompletedFrame(graphFrame + 1);
-        if (!retryingFrame) graphIntermediate = nullptr;
+        if (retryingFrame)
+            // The earlier recording was never submitted, so its transient
+            // lease can be returned for the speculative retry without
+            // completing any other frame slot.
+            graphPool.releaseImmediately(*graphIntermediate);
+        else
+            graphIntermediate = nullptr;
     }
     pendingFrame = false;
     if (!retryingFrame) pendingOutput.reset();
@@ -286,7 +308,7 @@ void Renderer::Impl::recordFrame(rhi::CommandList& commands, const RenderSetting
     auto uniform = sceneUniform(settings);
     configureShadowUniform(uniform, settings);
     if (!debugPasses.shadows) uniform.shadowInfo.x = 0.0f;
-    std::memcpy(uniformBuffer->mapped().data(), &uniform, sizeof(uniform));
+    std::memcpy(activeUniformBuffer->mapped().data(), &uniform, sizeof(uniform));
 
     // Create all lazy scene variants before graph execution starts. Graph
     // callbacks are draw bodies only and therefore run inside an active pass.
@@ -422,7 +444,7 @@ void Renderer::Impl::recordFrame(rhi::CommandList& commands, const RenderSetting
     graph.compile({output});
     graphDump = graph.debugDump();
     prepareGpuCulling(commands, settings, uniform);
-    graph.execute(commands, device, graphPool, ++graphFrame);
+    graph.execute(commands, device, graphPool, graphFrame);
     if (recordingFxaa && !retryingFrame) {
         viewport->filtered = std::move(graphFiltered);
     }
@@ -453,10 +475,19 @@ void Renderer::Impl::frameSubmitted() {
     }
     pendingFrame = false;
     pendingOutput.reset();
+    nextFrameSlot = (activeFrameSlot + 1) % framesInFlight;
 }
 
-Renderer::Renderer(rhi::Device& device, std::uint32_t framesInFlight)
-    : impl_(std::make_unique<Impl>(device, framesInFlight)) {}
+void Renderer::Impl::selectFrameSlot() {
+    activeFrameSlot = nextFrameSlot;
+    activeUniformBuffer = uniformBuffers.at(activeFrameSlot).get();
+    activeSceneDescriptor = sceneDescriptors.at(activeFrameSlot).get();
+    const std::array write{rhi::BindingWrite{0, activeUniformBuffer, nullptr, nullptr}};
+    activeSceneDescriptor->update(write);
+}
+
+Renderer::Renderer(rhi::Device& device, std::uint32_t framesInFlight, bool slotAwareFrames)
+    : impl_(std::make_unique<Impl>(device, framesInFlight, slotAwareFrames)) {}
 Renderer::~Renderer() = default;
 void Renderer::uploadModel(const ModelData& model) { impl_->uploadModel(model); }
 void Renderer::uploadEnvironment(const assets::HdrImageData& image) { impl_->uploadEnvironment(image); }

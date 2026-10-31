@@ -41,6 +41,7 @@ struct EnvironmentResources {
 struct Renderer::Impl {
     rhi::Device& device;
     std::uint32_t framesInFlight;
+    bool slotAwareFrames{};
     TransientTexturePool graphPool;
     FrameToken graphFrame{};
     rhi::Texture* graphIntermediate{};
@@ -64,11 +65,15 @@ struct Renderer::Impl {
     std::unique_ptr<rhi::BindingLayout> sceneLayout, materialLayout, shadowSetLayout, postSetLayout, temporalSetLayout,
         environmentSetLayout, bindlessMaterialLayout, cullLayout;
     std::unique_ptr<rhi::Sampler> sampler, viewportSampler, pointSampler, environmentSampler;
-    std::unique_ptr<rhi::Buffer> uniformBuffer;
+    std::vector<std::unique_ptr<rhi::Buffer>> uniformBuffers;
     std::unique_ptr<rhi::Texture> fallbackShadowTexture;
     std::unique_ptr<rhi::Texture> bindlessFallbackBase, bindlessFallbackNormal;
     std::unique_ptr<rhi::BindingSet> fallbackShadowDescriptor;
-    std::unique_ptr<rhi::BindingSet> sceneDescriptor;
+    std::vector<std::unique_ptr<rhi::BindingSet>> sceneDescriptors;
+    rhi::Buffer* activeUniformBuffer{};
+    rhi::BindingSet* activeSceneDescriptor{};
+    std::uint32_t activeFrameSlot{};
+    std::uint32_t nextFrameSlot{};
     std::unique_ptr<rhi::Texture> fallbackEnvironmentCube, fallbackEnvironmentLut;
     std::unique_ptr<rhi::BindingSet> fallbackEnvironmentDescriptor;
     std::unique_ptr<rhi::PipelineLayout> pipelineLayout, shadowPipelineLayout, postLayout, temporalLayout, toneLayout,
@@ -93,7 +98,7 @@ struct Renderer::Impl {
     bool bindlessSupported{};
     std::array<rhi::ResourceState, 2> pendingHistoryColorState{}, pendingHistoryDepthState{};
 
-    explicit Impl(rhi::Device& target, std::uint32_t configuredFramesInFlight);
+    explicit Impl(rhi::Device& target, std::uint32_t configuredFramesInFlight, bool configuredSlotAwareFrames);
     ~Impl() noexcept;
     void initialize();
     void createDescriptors();
@@ -133,6 +138,7 @@ struct Renderer::Impl {
     void recordFxaaGraph(rhi::CommandList& commands);
     void recordFrame(rhi::CommandList& commands, const RenderSettings& settings);
     void frameSubmitted();
+    void selectFrameSlot();
     std::shared_ptr<rhi::Texture> outputTexture() const;
     void captureViewport(const std::filesystem::path& path);
 };

@@ -8,12 +8,13 @@
 #include <ToneMappingSettings.hpp>
 #include <EnvironmentImage.hpp>
 #include <RhiDevice.hpp>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 namespace aeg::render {
 class Renderer {
 public:
-    explicit Renderer(rhi::Device& device, std::uint32_t framesInFlight = 2);
+    explicit Renderer(rhi::Device& device, std::uint32_t framesInFlight = 2, bool slotAwareFrames = false);
     ~Renderer();
     Renderer(const Renderer&) = delete;
     Renderer& operator=(const Renderer&) = delete;

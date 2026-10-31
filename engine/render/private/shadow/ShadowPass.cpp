@@ -109,7 +109,7 @@ void Renderer::Impl::drawShadow(rhi::CommandList& commands, const SceneUniform& 
     const rhi::Extent2D extent{shadow->resolution, shadow->resolution};
     commands.setViewport(extent);
     commands.bindPipeline(*shadow->pipeline);
-    commands.bindSet(*shadowPipelineLayout, 0, *sceneDescriptor);
+    commands.bindSet(*shadowPipelineLayout, 0, *activeSceneDescriptor);
     for (const auto& mesh : model->meshes) {
         const auto& material = model->materials[mesh.material];
         if (material.parameters.alphaMode == static_cast<std::uint32_t>(assets::AlphaMode::Blend)) continue;

@@ -57,6 +57,7 @@ struct FakeFramebuffer final : rhi::Framebuffer {
 struct FakeSet final : rhi::BindingSet {
     rhi::BindingLayoutDesc desc;
     std::vector<rhi::BindingWrite> writes;
+    std::function<void(FakeBuffer*)> uniformObserver;
     explicit FakeSet(rhi::BindingLayoutDesc value) : desc(std::move(value)) {}
     void update(std::span<const rhi::BindingWrite> value) override {
         std::vector<std::pair<std::uint32_t, std::uint32_t>> seen;
@@ -102,6 +103,15 @@ struct FakeSet final : rhi::BindingSet {
                 *found = write;
         }
         writes.swap(replacement);
+        if (uniformObserver) {
+            const auto uniform = std::ranges::find_if(writes, [&](const auto& write) {
+                const auto binding = std::ranges::find_if(desc.bindings, [&](const auto& entry) {
+                    return entry.binding == write.binding && entry.type == rhi::BindingType::UniformBuffer;
+                });
+                return binding != desc.bindings.end() && write.buffer && !write.texture && !write.sampler;
+            });
+            if (uniform != writes.end()) uniformObserver(dynamic_cast<FakeBuffer*>(uniform->buffer));
+        }
     }
 };
 struct BoundSetSnapshot {
@@ -270,6 +280,7 @@ public:
         if (failNthBindingSet && --failNthBindingSet == 0)
             throw std::runtime_error("Injected partial descriptor allocation failure");
         auto set = std::make_unique<FakeSet>(dynamic_cast<FakeBindingLayout&>(layout).desc);
+        set->uniformObserver = [this](FakeBuffer* buffer) { uniform = buffer; };
         set->update(writes);
         return set;
     }

@@ -198,7 +198,7 @@ void Renderer::Impl::drawScene(rhi::CommandList& commands, const RenderSettings&
     commands.setViewport(viewport->extent());
     commands.bindPipeline(*(gpuDriven ? (settings.clipSpace.reversed_z ? scene.bindlessGreater : scene.bindlessLess)
                                       : (settings.clipSpace.reversed_z ? scene.greater : scene.less)));
-    commands.bindSet(activeLayout, 0, *sceneDescriptor);
+    commands.bindSet(activeLayout, 0, *activeSceneDescriptor);
     if (gpuDriven) commands.bindSet(activeLayout, 1, *model->bindlessDescriptor);
     commands.bindSet(activeLayout, 2,
                      uniform.shadowInfo.x > 0.5f
@@ -240,7 +240,7 @@ void Renderer::Impl::drawScene(rhi::CommandList& commands, const RenderSettings&
         if (!transparent.empty()) {
             commands.bindPipeline(*(settings.clipSpace.reversed_z ? scene.blendGreater : scene.blendLess));
             if (gpuDriven) {
-                commands.bindSet(*pipelineLayout, 0, *sceneDescriptor);
+                commands.bindSet(*pipelineLayout, 0, *activeSceneDescriptor);
                 commands.bindSet(*pipelineLayout, 2,
                                  uniform.shadowInfo.x > 0.5f
                                      ? *shadow->descriptors[static_cast<std::uint32_t>(uniform.shadowInfo.w) - 1]
@@ -264,7 +264,7 @@ void Renderer::Impl::prepareGpuCulling(rhi::CommandList& commands, const RenderS
     commands.transition(*model->boundsBuffer, rhi::ResourceState::Storage, rhi::ResourceState::Storage);
     commands.transition(*model->indirectBuffer, rhi::ResourceState::Indirect, rhi::ResourceState::Storage);
     commands.bindComputePipeline(*cullPipeline);
-    commands.bindSet(*cullPipelineLayout, 0, *sceneDescriptor, rhi::PipelineBindPoint::Compute);
+    commands.bindSet(*cullPipelineLayout, 0, *activeSceneDescriptor, rhi::PipelineBindPoint::Compute);
     commands.bindSet(*cullPipelineLayout, 1, *model->cullDescriptor, rhi::PipelineBindPoint::Compute);
     GpuCullPush push{};
     for (std::size_t i = 0; i < push.planes.size(); ++i)

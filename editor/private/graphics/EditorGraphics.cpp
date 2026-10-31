@@ -57,7 +57,8 @@ EditorGraphics::EditorGraphics(GLFWwindow* window, const EditorBackendFactory& f
     impl_->graphDebug = validation;
     if (!impl_->backend.device || !impl_->backend.swapchain || !impl_->backend.gui)
         throw std::runtime_error("Editor backend factory returned incomplete graphics services");
-    impl_->scene = std::make_unique<render::Renderer>(*impl_->backend.device);
+    impl_->scene = std::make_unique<render::Renderer>(*impl_->backend.device,
+                                                      impl_->backend.swapchain->framesInFlight(), true);
     impl_->graphPool = std::make_unique<render::TransientTexturePool>(*impl_->backend.device);
     impl_->sampler = impl_->backend.device->createSampler({rhi::Filter::Linear, rhi::AddressMode::ClampToEdge});
 }
@@ -76,7 +77,8 @@ void EditorGraphics::drawFrame(render::RenderSettings& settings, const std::func
     auto& backend = impl_->backend;
     if (!backend.swapchain->beginFrame()) return;
     const auto frameToken = ++impl_->graphFrame;
-    impl_->graphPool->reclaimCompletedFrame(frameToken);
+    impl_->graphPool->beginFrame(frameToken, backend.swapchain->currentFrameSlot(),
+                                 backend.swapchain->framesInFlight());
     backend.gui->newFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();

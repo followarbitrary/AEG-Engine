@@ -306,6 +306,22 @@ void transientPoolContracts() {
                                               aeg::rhi::TextureUsage::ColorAttachment | aeg::rhi::TextureUsage::Sampled};
     auto& other = pool.acquire(incompatible);
     require(&other != &afterCompletion, "Transient pool reused an incompatible texture");
+
+    Pool slots(device);
+    slots.beginFrame(FrameToken{1}, 0, 2);
+    auto& slotZero = slots.acquire(desc);
+    slots.retire(slotZero, FrameToken{1});
+    slots.beginFrame(FrameToken{2}, 1, 2);
+    auto& slotOne = slots.acquire(desc);
+    require(&slotOne != &slotZero, "Slot-one recording reused a slot-zero transient before completion");
+    slots.retire(slotOne, FrameToken{2});
+    slots.beginFrame(FrameToken{3}, 0, 2);
+    auto& completedZero = slots.acquire(desc);
+    require(&completedZero == &slotZero, "Completed slot did not reclaim its own transient");
+    slots.retire(completedZero, FrameToken{3});
+    slots.beginFrame(FrameToken{4}, 1, 2);
+    auto& completedOne = slots.acquire(desc);
+    require(&completedOne == &slotOne, "Out-of-order slot completion reclaimed the wrong transient");
 }
 
 void executionContracts() {
