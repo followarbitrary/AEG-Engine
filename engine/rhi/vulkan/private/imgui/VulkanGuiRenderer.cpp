@@ -4,7 +4,8 @@
 #include <cstdint>
 #include <stdexcept>
 #include <string>
-#include <unordered_set>
+#include <unordered_map>
+#include <vector>
 
 namespace aeg::rhi::vulkan {
 namespace {
@@ -18,7 +19,11 @@ public:
         : device_(device), swapchain_(swapchain), native_(detail::nativeContext(device)) {}
     ~VulkanGuiRenderer() override {
         if (initialized_) {
-            for (const auto set : textures_) ImGui_ImplVulkan_RemoveTexture(set);
+            for (const auto& [set, owner] : textures_) {
+                (void)owner;
+                ImGui_ImplVulkan_RemoveTexture(set);
+            }
+            for (const auto& retired : retiredTextures_) ImGui_ImplVulkan_RemoveTexture(retired.set);
             ImGui_ImplVulkan_Shutdown();
         }
         if (pool_) vkDestroyDescriptorPool(native_.device, pool_, nullptr);
@@ -33,6 +38,7 @@ public:
         pool.poolSizeCount = 1;
         pool.pPoolSizes = &size;
         checkGui(vkCreateDescriptorPool(native_.device, &pool, nullptr, &pool_));
+        retiredTextures_.reserve(pool.maxSets);
         ImGui_ImplVulkan_InitInfo info{};
         info.ApiVersion = VK_API_VERSION_1_2;
         info.Instance = native_.instance;
@@ -66,12 +72,29 @@ public:
         }
         ImGui_ImplVulkan_NewFrame();
     }
+    void beginFrame(std::uint32_t slot, std::uint32_t slotCount) override {
+        if (!slotCount || slot >= slotCount) throw std::invalid_argument("GUI frame slot is out of range");
+        currentSlot_ = slot;
+        for (auto& [set, owner] : textures_) {
+            (void)set;
+            owner = slot;
+        }
+        auto retired = retiredTextures_.begin();
+        while (retired != retiredTextures_.end()) {
+            if (retired->ownerSlot != slot) {
+                ++retired;
+                continue;
+            }
+            ImGui_ImplVulkan_RemoveTexture(retired->set);
+            retired = retiredTextures_.erase(retired);
+        }
+    }
     ImTextureID registerTexture(Texture& texture, Sampler& sampler) override {
         const auto set = ImGui_ImplVulkan_AddTexture(detail::nativeSampler(device_, sampler),
                                                      detail::nativeImageView(device_, texture),
                                                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         try {
-            textures_.insert(set);
+            textures_.emplace(set, currentSlot_);
         } catch (...) {
             ImGui_ImplVulkan_RemoveTexture(set);
             throw;
@@ -79,22 +102,44 @@ public:
         return static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(set));
     }
     void updateTexture(ImTextureID id, Texture& texture, Sampler& sampler) override {
-        const auto set = descriptor(id);
-        const VkDescriptorImageInfo image{detail::nativeSampler(device_, sampler),
-                                          detail::nativeImageView(device_, texture),
-                                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-        VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-        write.dstSet = set;
-        write.dstBinding = 0;
-        write.descriptorCount = 1;
-        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        write.pImageInfo = &image;
-        vkUpdateDescriptorSets(native_.device, 1, &write, 0, nullptr);
+        (void)updateTextureForFrame(id, texture, sampler);
+    }
+    ImTextureID updateTextureForFrame(ImTextureID id, Texture& texture, Sampler& sampler) override {
+        const auto oldSet = descriptor(id);
+        const auto newSet = ImGui_ImplVulkan_AddTexture(detail::nativeSampler(device_, sampler),
+                                                        detail::nativeImageView(device_, texture),
+                                                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        const auto old = textures_.find(oldSet);
+        if (old == textures_.end()) {
+            ImGui_ImplVulkan_RemoveTexture(newSet);
+            throw std::invalid_argument("Unknown GUI texture registration");
+        }
+        const auto [inserted, success] = textures_.emplace(newSet, currentSlot_);
+        if (!success) {
+            ImGui_ImplVulkan_RemoveTexture(newSet);
+            throw std::runtime_error("Duplicate GUI texture descriptor");
+        }
+        try {
+            // The active slot is the slot whose draw data may still reference
+            // this descriptor, even when it was allocated by an earlier frame.
+            retiredTextures_.push_back({oldSet, old->second});
+        } catch (...) {
+            textures_.erase(inserted);
+            ImGui_ImplVulkan_RemoveTexture(newSet);
+            throw;
+        }
+        textures_.erase(old);
+        return static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(newSet));
     }
     void unregisterTexture(ImTextureID id) override {
         const auto set = descriptor(id);
-        ImGui_ImplVulkan_RemoveTexture(set);
-        textures_.erase(set);
+        const auto current = textures_.find(set);
+        try {
+            retiredTextures_.push_back({set, current->second});
+        } catch (...) {
+            throw;
+        }
+        textures_.erase(current);
     }
     void renderDrawData(CommandList& commands, ImDrawData* data) override {
         ImGui_ImplVulkan_RenderDrawData(data, detail::nativeCommandBuffer(device_, commands));
@@ -111,8 +156,14 @@ private:
     detail::NativeContext native_;
     VkDescriptorPool pool_{};
     std::uint32_t minimumImageCount_{};
+    std::uint32_t currentSlot_{};
     bool initialized_{};
-    std::unordered_set<VkDescriptorSet> textures_;
+    std::unordered_map<VkDescriptorSet, std::uint32_t> textures_;
+    struct RetiredTexture {
+        VkDescriptorSet set{};
+        std::uint32_t ownerSlot{};
+    };
+    std::vector<RetiredTexture> retiredTextures_;
 };
 }
 

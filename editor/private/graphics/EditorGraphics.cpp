@@ -41,7 +41,7 @@ struct EditorGraphics::Impl {
         if (!texture)
             texture = backend.gui->registerTexture(*output, *sampler);
         else if (output != registeredOutput)
-            backend.gui->updateTexture(texture, *output, *sampler);
+            texture = backend.gui->updateTextureForFrame(texture, *output, *sampler);
         // Release the previous view only after the descriptor stops referring to it.
         registeredOutput = std::move(output);
     }
@@ -76,6 +76,7 @@ std::span<const rhi::GpuPassTiming> EditorGraphics::gpuPassTimings() const {
 void EditorGraphics::drawFrame(render::RenderSettings& settings, const std::function<void()>& buildUi) {
     auto& backend = impl_->backend;
     if (!backend.swapchain->beginFrame()) return;
+    backend.gui->beginFrame(backend.swapchain->currentFrameSlot(), backend.swapchain->framesInFlight());
     const auto frameToken = ++impl_->graphFrame;
     impl_->graphPool->beginFrame(frameToken, backend.swapchain->currentFrameSlot(),
                                  backend.swapchain->framesInFlight());
