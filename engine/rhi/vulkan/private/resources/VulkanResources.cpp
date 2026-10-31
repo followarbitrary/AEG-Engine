@@ -50,6 +50,8 @@ VkBufferUsageFlags bufferUsage(BufferUsage usage) {
     if (contains(usage, BufferUsage::Vertex)) flags |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
     if (contains(usage, BufferUsage::Index)) flags |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
     if (contains(usage, BufferUsage::Uniform)) flags |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+    if (contains(usage, BufferUsage::Storage)) flags |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+    if (contains(usage, BufferUsage::Indirect)) flags |= VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT;
     if (contains(usage, BufferUsage::CopySource)) flags |= VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     if (contains(usage, BufferUsage::CopyDestination)) flags |= VK_BUFFER_USAGE_TRANSFER_DST_BIT;
     return flags;
@@ -59,27 +61,17 @@ VkImageAspectFlags imageAspect(Format format) {
     return isDepthFormat(format) ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT;
 }
 VulkanBuffer::~VulkanBuffer() {
-    if (mapping) vkUnmapMemory(owner->handle, memory);
-    if (handle) vkDestroyBuffer(owner->handle, handle, nullptr);
-    if (memory) vkFreeMemory(owner->handle, memory, nullptr);
+    if (handle) vmaDestroyBuffer(owner->allocator, handle, allocation);
 }
 VulkanTexture::~VulkanTexture() {
     if (nonOwning) return;
     for (const auto storageView : storageViews)
         if (storageView) vkDestroyImageView(owner->handle, storageView, nullptr);
     if (view) vkDestroyImageView(owner->handle, view, nullptr);
-    if (handle) vkDestroyImage(owner->handle, handle, nullptr);
-    if (memory) vkFreeMemory(owner->handle, memory, nullptr);
+    if (handle) vmaDestroyImage(owner->allocator, handle, allocation);
 }
 VulkanSampler::~VulkanSampler() {
     if (handle) vkDestroySampler(owner->handle, handle, nullptr);
-}
-std::uint32_t VulkanDevice::memoryType(std::uint32_t mask, VkMemoryPropertyFlags flags) const {
-    VkPhysicalDeviceMemoryProperties info{};
-    vkGetPhysicalDeviceMemoryProperties(physical, &info);
-    for (std::uint32_t i = 0; i < info.memoryTypeCount; ++i)
-        if ((mask & (1u << i)) && (info.memoryTypes[i].propertyFlags & flags) == flags) return i;
-    throw std::runtime_error("No compatible Vulkan memory type");
 }
 std::unique_ptr<Buffer> VulkanDevice::createBuffer(const BufferDesc& desc) {
     validate(desc);
@@ -90,19 +82,20 @@ std::unique_ptr<Buffer> VulkanDevice::createBuffer(const BufferDesc& desc) {
     info.size = desc.size;
     info.usage = bufferUsage(desc.usage);
     info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    check(vkCreateBuffer(handle, &info, nullptr, &result->handle), "vkCreateBuffer");
-    VkMemoryRequirements requirements{};
-    vkGetBufferMemoryRequirements(handle, result->handle, &requirements);
-    VkMemoryAllocateInfo allocation{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-    allocation.allocationSize = requirements.size;
-    allocation.memoryTypeIndex = memoryType(
-        requirements.memoryTypeBits, desc.memory == MemoryUsage::Device
-                                         ? VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
-                                         : VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    check(vkAllocateMemory(handle, &allocation, nullptr, &result->memory), "vkAllocateMemory(buffer)");
-    check(vkBindBufferMemory(handle, result->handle, result->memory, 0), "vkBindBufferMemory");
+    VmaAllocationCreateInfo allocation{};
+    allocation.usage = desc.memory == MemoryUsage::Device ? VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE
+                                                           : VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
+    allocation.requiredFlags = desc.memory == MemoryUsage::Device
+                                   ? VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+                                   : VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
     if (desc.memory != MemoryUsage::Device)
-        check(vkMapMemory(handle, result->memory, 0, desc.size, 0, &result->mapping), "vkMapMemory");
+        allocation.flags = (desc.memory == MemoryUsage::Upload ? VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT
+                                                                : VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT) |
+                           VMA_ALLOCATION_CREATE_MAPPED_BIT;
+    VmaAllocationInfo allocationInfo{};
+    check(vmaCreateBuffer(allocator, &info, &allocation, &result->handle, &result->allocation, &allocationInfo),
+          "vmaCreateBuffer");
+    result->mapping = allocationInfo.pMappedData;
     return result;
 }
 std::unique_ptr<Buffer> VulkanDevice::uploadBuffer(std::span<const std::byte> bytes, BufferUsage usage) {
@@ -138,14 +131,11 @@ std::unique_ptr<Texture> VulkanDevice::createTexture(const TextureDesc& desc) {
     info.usage = imageUsage(desc.usage);
     info.samples = static_cast<VkSampleCountFlagBits>(desc.samples);
     info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    check(vkCreateImage(handle, &info, nullptr, &result->handle), "vkCreateImage");
-    VkMemoryRequirements requirements{};
-    vkGetImageMemoryRequirements(handle, result->handle, &requirements);
-    VkMemoryAllocateInfo allocation{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-    allocation.allocationSize = requirements.size;
-    allocation.memoryTypeIndex = memoryType(requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    check(vkAllocateMemory(handle, &allocation, nullptr, &result->memory), "vkAllocateMemory(image)");
-    check(vkBindImageMemory(handle, result->handle, result->memory, 0), "vkBindImageMemory");
+    VmaAllocationCreateInfo allocation{};
+    allocation.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+    allocation.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+    check(vmaCreateImage(allocator, &info, &allocation, &result->handle, &result->allocation, nullptr),
+          "vmaCreateImage");
     VkImageViewCreateInfo view{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
     view.image = result->handle;
     view.viewType = desc.dimension == TextureDimension::Cube ? VK_IMAGE_VIEW_TYPE_CUBE : VK_IMAGE_VIEW_TYPE_2D;

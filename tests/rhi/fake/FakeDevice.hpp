@@ -59,13 +59,14 @@ struct FakeSet final : rhi::BindingSet {
     std::vector<rhi::BindingWrite> writes;
     explicit FakeSet(rhi::BindingLayoutDesc value) : desc(std::move(value)) {}
     void update(std::span<const rhi::BindingWrite> value) override {
-        std::vector<std::uint32_t> seen;
+        std::vector<std::pair<std::uint32_t, std::uint32_t>> seen;
         for (const auto& write : value) {
             const auto binding =
                 std::ranges::find_if(desc.bindings, [&](const auto& entry) { return entry.binding == write.binding; });
-            if (binding == desc.bindings.end() || std::ranges::find(seen, write.binding) != seen.end())
+            if (binding == desc.bindings.end() || !binding->arraySize || write.arrayElement >= binding->arraySize ||
+                std::ranges::find(seen, std::pair{write.binding, write.arrayElement}) != seen.end())
                 throw std::invalid_argument("Unknown or duplicate fake binding write");
-            seen.push_back(write.binding);
+            seen.emplace_back(write.binding, write.arrayElement);
             if (binding->type == rhi::BindingType::UniformBuffer) {
                 if (!write.buffer || write.texture || write.sampler || write.storageMipLevel ||
                     !rhi::contains(write.buffer->description().usage, rhi::BufferUsage::Uniform))
@@ -81,6 +82,10 @@ struct FakeSet final : rhi::BindingSet {
                     write.texture->description().samples != 1 ||
                     write.storageMipLevel >= write.texture->description().mipLevels)
                     throw std::invalid_argument("Invalid fake storage image binding");
+            } else if (binding->type == rhi::BindingType::StorageBuffer) {
+                if (!write.buffer || write.texture || write.sampler || write.storageMipLevel ||
+                    !rhi::contains(write.buffer->description().usage, rhi::BufferUsage::Storage))
+                    throw std::invalid_argument("Invalid fake storage buffer binding");
             } else {
                 throw std::invalid_argument("Unknown fake binding type");
             }
@@ -88,7 +93,9 @@ struct FakeSet final : rhi::BindingSet {
         auto replacement = writes;
         for (const auto& write : value) {
             const auto found =
-                std::ranges::find_if(replacement, [&](const auto& entry) { return entry.binding == write.binding; });
+                std::ranges::find_if(replacement, [&](const auto& entry) {
+                    return entry.binding == write.binding && entry.arrayElement == write.arrayElement;
+                });
             if (found == replacement.end())
                 replacement.push_back(write);
             else
@@ -377,7 +384,7 @@ public:
             for (const auto& binding : expected.bindings)
                 if (!std::ranges::any_of(actual.bindings, [&](const auto& other) {
                         return binding.binding == other.binding && binding.type == other.type &&
-                               binding.stages == other.stages;
+                               binding.stages == other.stages && binding.arraySize == other.arraySize;
                     }))
                     throw std::invalid_argument("Fake compute binding layout mismatch");
             if (computePipeline_ && computePipeline_->desc.layout != &layout)
@@ -408,6 +415,18 @@ public:
         ++indexedDraws;
         activePass_->draws.push_back({activePass_->pipeline, currentConstants_, indices_});
     }
+    void drawIndexedIndirect(rhi::Buffer& buffer, std::size_t offset, std::uint32_t drawCount,
+                             std::uint32_t stride) override {
+        if (!activePass_ || (caps_ && !caps_->indirectDraw) || !indices_ || !drawCount || offset % 4 ||
+            stride < sizeof(std::uint32_t) * 5 ||
+            stride % 4 || !rhi::contains(buffer.description().usage, rhi::BufferUsage::Indirect) ||
+            offset > buffer.description().size ||
+            drawCount > (buffer.description().size - offset) / stride)
+            throw std::invalid_argument("Invalid fake indirect draw");
+        indexedDraws += drawCount;
+        for (std::uint32_t i = 0; i < drawCount; ++i)
+            activePass_->draws.push_back({activePass_->pipeline, currentConstants_, indices_});
+    }
     void dispatch(std::uint32_t x, std::uint32_t y, std::uint32_t z) override {
         if (activePass_ || !computePipeline_ || !x || !y || !z)
             throw std::invalid_argument("Invalid fake dispatch state or group count");
@@ -424,10 +443,12 @@ public:
             if (!sets[i].set) throw std::invalid_argument("Missing fake compute descriptor set");
             const auto& set = dynamic_cast<FakeSet&>(*sets[i].set);
             for (const auto& binding : set.desc.bindings)
-                if (rhi::contains(binding.stages, rhi::ShaderStage::Compute) &&
-                    !std::ranges::any_of(set.writes,
-                                         [&](const auto& write) { return write.binding == binding.binding; }))
-                    throw std::invalid_argument("Uninitialized fake compute binding");
+                if (rhi::contains(binding.stages, rhi::ShaderStage::Compute))
+                    for (std::uint32_t element = 0; element < binding.arraySize; ++element)
+                        if (!std::ranges::any_of(set.writes, [&](const auto& write) {
+                                return write.binding == binding.binding && write.arrayElement == element;
+                            }))
+                            throw std::invalid_argument("Uninitialized fake compute binding");
             sets[i].writes = set.writes;
         }
         dispatches.push_back({computePipeline_->desc, std::move(sets), currentConstants_, groups});

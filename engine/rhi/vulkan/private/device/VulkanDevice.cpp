@@ -59,6 +59,10 @@ void VulkanDevice::cleanup() noexcept {
     if (handle) {
         vkDeviceWaitIdle(handle);
         drainDeferred();
+        if (allocator) {
+            vmaDestroyAllocator(allocator);
+            allocator = VK_NULL_HANDLE;
+        }
         if (pool) vkDestroyCommandPool(handle, pool, nullptr);
         vkDestroyDevice(handle, nullptr);
         handle = VK_NULL_HANDLE;
@@ -203,12 +207,14 @@ void VulkanDevice::selectDevice() {
     std::copy_n(properties.limits.maxComputeWorkGroupCount, 3, caps.maximumComputeGroupCount.begin());
     std::copy_n(properties.limits.maxComputeWorkGroupSize, 3, caps.maximumComputeGroupSize.begin());
     caps.maximumComputeInvocations = properties.limits.maxComputeWorkGroupInvocations;
+    caps.indirectDraw = properties.limits.maxDrawIndirectCount != 0;
     caps.maximumFramebufferDimension =
         std::min(properties.limits.maxFramebufferWidth, properties.limits.maxFramebufferHeight);
     caps.maximumColorAttachments = properties.limits.maxColorAttachments;
     VkPhysicalDeviceFeatures features{};
     vkGetPhysicalDeviceFeatures(physical, &features);
     caps.independentBlend = features.independentBlend == VK_TRUE;
+    caps.descriptorIndexing = features.shaderSampledImageArrayDynamicIndexing == VK_TRUE;
     for (auto format : {Format::D32Float, Format::D24UnormS8, Format::D16Unorm})
         if (textureSupport(format, TextureUsage::DepthAttachment).supported) {
             caps.depthFormat = format;
@@ -237,8 +243,15 @@ void VulkanDevice::createLogicalDevice() {
     info.ppEnabledExtensionNames = &extension;
     VkPhysicalDeviceFeatures features{};
     features.independentBlend = caps.independentBlend ? VK_TRUE : VK_FALSE;
+    features.shaderSampledImageArrayDynamicIndexing = caps.descriptorIndexing ? VK_TRUE : VK_FALSE;
     info.pEnabledFeatures = &features;
     check(vkCreateDevice(physical, &info, nullptr, &handle), "vkCreateDevice");
+    VmaAllocatorCreateInfo allocatorInfo{};
+    allocatorInfo.instance = instance;
+    allocatorInfo.physicalDevice = physical;
+    allocatorInfo.device = handle;
+    allocatorInfo.vulkanApiVersion = VK_API_VERSION_1_2;
+    check(vmaCreateAllocator(&allocatorInfo, &allocator), "vmaCreateAllocator");
     vkGetDeviceQueue(handle, graphicsFamily, 0, &graphicsQueue);
     vkGetDeviceQueue(handle, presentFamily, 0, &presentQueue);
     VkCommandPoolCreateInfo commandPool{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};

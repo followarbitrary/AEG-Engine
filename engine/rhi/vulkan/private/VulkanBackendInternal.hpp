@@ -1,12 +1,8 @@
 #pragma once
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#ifndef VK_USE_PLATFORM_WIN32_KHR
-#define VK_USE_PLATFORM_WIN32_KHR
-#endif
+#include "VmaConfig.hpp"
 #include <windows.h>
 #include "VulkanInterop.hpp"
+#include <vk_mem_alloc.h>
 #include <VulkanBackend.hpp>
 #include <algorithm>
 #include <atomic>
@@ -46,7 +42,7 @@ public:
     VulkanDevice* owner;
     BufferDesc desc;
     VkBuffer handle{};
-    VkDeviceMemory memory{};
+    VmaAllocation allocation{};
     void* mapping{};
     VulkanBuffer(VulkanDevice& device, BufferDesc description) : owner(&device), desc(description) {}
     ~VulkanBuffer() override;
@@ -60,7 +56,7 @@ public:
     VulkanDevice* owner;
     TextureDesc desc;
     VkImage handle{};
-    VkDeviceMemory memory{};
+    VmaAllocation allocation{};
     VkImageView view{};
     std::vector<VkImageView> storageViews;
     bool nonOwning{};
@@ -98,7 +94,7 @@ public:
     BindingLayoutDesc desc;
     VkDescriptorPool pool{};
     VkDescriptorSet handle{};
-    std::set<std::uint32_t> initializedBindings;
+    std::set<std::pair<std::uint32_t, std::uint32_t>> initializedBindings;
     VulkanBindingSet(VulkanDevice& device, BindingLayoutDesc description)
         : owner(&device), desc(std::move(description)) {}
     ~VulkanBindingSet() override;
@@ -150,6 +146,7 @@ public:
     VulkanDevice* owner;
     VkCommandBuffer handle{};
     bool inPass{};
+    bool indexBound{};
     VulkanComputePipeline* computePipeline{};
     VulkanPipelineLayout* computeBoundLayout{};
     std::vector<VulkanBindingSet*> computeSets;
@@ -165,6 +162,7 @@ public:
     void pushConstants(PipelineLayout&, std::span<const std::byte>) override;
     void draw(std::uint32_t) override;
     void drawIndexed(std::uint32_t) override;
+    void drawIndexedIndirect(Buffer&, std::size_t, std::uint32_t, std::uint32_t) override;
     void dispatch(std::uint32_t, std::uint32_t, std::uint32_t) override;
     void transition(Texture&, ResourceState, ResourceState) override;
     void copyBuffer(Buffer&, Buffer&, std::size_t) override;
@@ -182,6 +180,7 @@ public:
     std::uint32_t graphicsFamily{}, presentFamily{};
     VkQueue graphicsQueue{}, presentQueue{};
     VkCommandPool pool{};
+    VmaAllocator allocator{};
     DeviceCapabilities caps;
     std::string name;
     std::atomic_uint32_t errors{};
@@ -211,7 +210,6 @@ public:
     void waitIdle() override;
     const std::string& deviceName() const override { return name; }
     std::uint32_t validationErrorCount() const override { return errors.load(); }
-    std::uint32_t memoryType(std::uint32_t, VkMemoryPropertyFlags) const;
     void immediate(const std::function<void(VulkanCommands&)>&);
     void drainDeferred() noexcept;
 

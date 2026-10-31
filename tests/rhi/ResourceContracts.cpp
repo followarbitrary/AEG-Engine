@@ -163,11 +163,80 @@ void deferredDestructionContracts() {
     device.waitIdle();
     if (completed != 2) throw std::runtime_error("Deferred callback queue did not drain");
 }
+void descriptorArrayContracts() {
+    using namespace aeg::rhi;
+    using namespace aeg::tests;
+    FakeTexture base{{{1, 1}, Format::Rgba8Unorm, TextureUsage::Sampled}};
+    FakeTexture normal{{{1, 1}, Format::Rgba8Unorm, TextureUsage::Sampled}};
+    FakeSampler sampler({});
+    FakeBindingLayout layout({{{3, BindingType::CombinedTextureSampler, ShaderStage::Fragment, 2}}});
+    FakeSet set(layout.desc);
+    const std::array writes{
+        BindingWrite{3, nullptr, &base, &sampler, 0, 0},
+        BindingWrite{3, nullptr, &normal, &sampler, 0, 1},
+    };
+    set.update(writes);
+    if (set.writes.size() != 2 || set.writes[0].arrayElement != 0 || set.writes[1].arrayElement != 1)
+        throw std::runtime_error("Fake descriptor array writes lost their array slots");
+    rejects([&] {
+        const std::array duplicate{BindingWrite{3, nullptr, &base, &sampler, 0, 0},
+                                   BindingWrite{3, nullptr, &normal, &sampler, 0, 0}};
+        set.update(duplicate);
+    });
+    const BindingWrite replacement{3, nullptr, &base, &sampler, 0, 1};
+    set.update(std::span(&replacement, 1));
+    if (set.writes.size() != 2 || set.writes[1].texture != &base)
+        throw std::runtime_error("Fake descriptor array replacement did not preserve its slot");
+    FakeBuffer storage({64, BufferUsage::Storage, MemoryUsage::Device});
+    FakeBuffer uniform({64, BufferUsage::Uniform, MemoryUsage::Device});
+    FakeBindingLayout storageLayout({{{4, BindingType::StorageBuffer, ShaderStage::Compute, 1}}});
+    FakeSet storageSet(storageLayout.desc);
+    const BindingWrite storageWrite{4, &storage, nullptr, nullptr, 0, 0};
+    storageSet.update(std::span(&storageWrite, 1));
+    rejects([&] {
+        const BindingWrite wrongStorage{4, &uniform, nullptr, nullptr, 0, 0};
+        storageSet.update(std::span(&wrongStorage, 1));
+    });
+    rejects([&] {
+        const BindingWrite outOfRange{3, nullptr, &base, &sampler, 0, 2};
+        set.update(std::span(&outOfRange, 1));
+    });
+}
+void indirectDrawContracts() {
+    using namespace aeg::rhi;
+    using namespace aeg::tests;
+    FakeDevice device;
+    FakeTexture color{{{4, 4}, Format::Rgba8Unorm, TextureUsage::ColorAttachment}};
+    FakePass pass({{{Format::Rgba8Unorm, 1, LoadOp::Clear, StoreOp::Store, ResourceState::Undefined,
+                     ResourceState::ColorAttachment}},
+                   {0}, {}, {}});
+    FakeFramebuffer framebuffer({&pass, {&color}, {4, 4}});
+    FakeBuffer indices({4, BufferUsage::Index, MemoryUsage::Device});
+    FakeBuffer indirect({20, BufferUsage::Indirect, MemoryUsage::Device});
+    FakeBuffer wrongUsage({20, BufferUsage::Storage, MemoryUsage::Device});
+    FakeCommands commands(&device.caps);
+    const std::array clearValues{ClearValue{}};
+    commands.beginRenderPass(pass, framebuffer, {4, 4}, clearValues);
+    commands.bindIndexBuffer(indices);
+    commands.drawIndexedIndirect(indirect, 0, 1, 20);
+    rejects([&] { commands.drawIndexedIndirect(indirect, 0, 0, 20); });
+    rejects([&] { commands.drawIndexedIndirect(wrongUsage, 0, 1, 20); });
+    rejects([&] { commands.drawIndexedIndirect(indirect, 0, 1, 21); });
+    rejects([&] { commands.drawIndexedIndirect(indirect, 2, 1, 20); });
+    rejects([&] { commands.drawIndexedIndirect(indirect, 4, 1, 20); });
+    rejects([&] { commands.drawIndexedIndirect(indirect, 0, 2, 20); });
+    const auto alignedMax = std::numeric_limits<std::size_t>::max() - 3;
+    rejects([&] { commands.drawIndexedIndirect(indirect, alignedMax, 2, 20); });
+    commands.endRenderPass();
+    rejects([&] { commands.drawIndexedIndirect(indirect, 0, 1, 20); });
+}
 }
 int main() {
     using namespace aeg::rhi;
     try {
         computeImageContracts();
+        descriptorArrayContracts();
+        indirectDrawContracts();
         validate(BufferDesc{32, BufferUsage::Uniform, MemoryUsage::Upload});
         rejects([] { validate(BufferDesc{}); });
         rejects([] { validate(BufferDesc{32, BufferUsage::None}); });

@@ -19,6 +19,8 @@ VkDescriptorType descriptorType(BindingType type) {
         return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     case BindingType::StorageImage:
         return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    case BindingType::StorageBuffer:
+        return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     }
     throw std::invalid_argument("Unknown RHI binding type");
 }
@@ -36,6 +38,7 @@ std::unique_ptr<BindingLayout> VulkanDevice::createBindingLayout(const BindingLa
     auto result = std::make_unique<VulkanBindingLayout>(*this, desc);
     std::vector<VkDescriptorSetLayoutBinding> bindings;
     std::set<std::uint32_t> indices;
+    std::array<std::uint64_t, 4> descriptorCounts{};
     for (const auto& binding : desc.bindings) {
         if (!indices.insert(binding.binding).second || !shaderStages(binding.stages))
             throw std::invalid_argument("Invalid or duplicate RHI binding");
@@ -43,8 +46,18 @@ std::unique_ptr<BindingLayout> VulkanDevice::createBindingLayout(const BindingLa
             throw std::invalid_argument("Compute binding visibility is unsupported");
         if (binding.type == BindingType::StorageImage && binding.stages != ShaderStage::Compute)
             throw std::invalid_argument("Storage image bindings require compute-only visibility");
-        bindings.push_back({binding.binding, descriptorType(binding.type), 1, shaderStages(binding.stages), nullptr});
+        if (!binding.arraySize) throw std::invalid_argument("Descriptor array size must be nonzero");
+        const auto type = static_cast<std::size_t>(binding.type);
+        if (type >= descriptorCounts.size()) throw std::invalid_argument("Unknown RHI binding type");
+        descriptorCounts[type] += binding.arraySize;
+        bindings.push_back({binding.binding, descriptorType(binding.type), binding.arraySize, shaderStages(binding.stages), nullptr});
     }
+    if (descriptorCounts[0] > properties.limits.maxDescriptorSetUniformBuffers ||
+        descriptorCounts[1] > std::min(properties.limits.maxDescriptorSetSampledImages,
+                                        properties.limits.maxDescriptorSetSamplers) ||
+        descriptorCounts[2] > properties.limits.maxDescriptorSetStorageImages ||
+        descriptorCounts[3] > properties.limits.maxDescriptorSetStorageBuffers)
+        throw std::invalid_argument("Descriptor array count exceeds device limits");
     VkDescriptorSetLayoutCreateInfo info{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
     info.bindingCount = static_cast<std::uint32_t>(bindings.size());
     info.pBindings = bindings.data();
@@ -55,16 +68,17 @@ std::unique_ptr<BindingSet> VulkanDevice::createBindingSet(BindingLayout& generi
                                                            std::span<const BindingWrite> writes) {
     auto& layout = owned<VulkanBindingLayout>(*this, generic);
     auto result = std::make_unique<VulkanBindingSet>(*this, layout.desc);
-    std::array<std::uint32_t, 3> counts{};
+    std::array<std::uint32_t, 4> counts{};
     for (const auto& binding : layout.desc.bindings) {
         const auto index = static_cast<std::size_t>(binding.type);
         if (index >= counts.size()) throw std::invalid_argument("Unknown RHI binding type");
-        ++counts[index];
+        counts[index] += binding.arraySize;
     }
     std::vector<VkDescriptorPoolSize> sizes;
     if (counts[0]) sizes.push_back({VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, counts[0]});
     if (counts[1]) sizes.push_back({VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, counts[1]});
     if (counts[2]) sizes.push_back({VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, counts[2]});
+    if (counts[3]) sizes.push_back({VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, counts[3]});
     VkDescriptorPoolCreateInfo info{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
     info.maxSets = 1;
     info.poolSizeCount = static_cast<std::uint32_t>(sizes.size());
@@ -82,17 +96,19 @@ void VulkanBindingSet::update(std::span<const BindingWrite> writes) {
     std::vector<VkWriteDescriptorSet> native(writes.size());
     std::vector<VkDescriptorBufferInfo> buffers(writes.size());
     std::vector<VkDescriptorImageInfo> images(writes.size());
-    std::set<std::uint32_t> indices;
+    std::set<std::pair<std::uint32_t, std::uint32_t>> indices;
     for (std::size_t i = 0; i < writes.size(); ++i) {
         const auto& write = writes[i];
         auto found =
             std::ranges::find_if(desc.bindings, [&](const auto& entry) { return entry.binding == write.binding; });
-        if (found == desc.bindings.end() || !indices.insert(write.binding).second)
+        if (found == desc.bindings.end() || !indices.insert({write.binding, write.arrayElement}).second)
             throw std::invalid_argument("Unknown or duplicate binding write");
         auto& output = native[i];
         output.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         output.dstSet = handle;
         output.dstBinding = write.binding;
+        if (write.arrayElement >= found->arraySize) throw std::invalid_argument("Descriptor array element exceeds layout");
+        output.dstArrayElement = write.arrayElement;
         output.descriptorCount = 1;
         output.descriptorType = descriptorType(found->type);
         if (found->type == BindingType::UniformBuffer) {
@@ -112,7 +128,7 @@ void VulkanBindingSet::update(std::span<const BindingWrite> writes) {
                 throw std::invalid_argument("Texture is not a single-sample sampled image");
             images[i] = {sampler.handle, texture.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
             output.pImageInfo = &images[i];
-        } else {
+        } else if (found->type == BindingType::StorageImage) {
             if (write.buffer || !write.texture || write.sampler)
                 throw std::invalid_argument("Storage image binding requires only a texture");
             auto& texture = owned<VulkanTexture>(*owner, *write.texture);
@@ -121,6 +137,14 @@ void VulkanBindingSet::update(std::span<const BindingWrite> writes) {
                 throw std::invalid_argument("Texture storage usage or mip is invalid");
             images[i] = {VK_NULL_HANDLE, texture.storageViews[write.storageMipLevel], VK_IMAGE_LAYOUT_GENERAL};
             output.pImageInfo = &images[i];
+        } else {
+            if (!write.buffer || write.texture || write.sampler || write.storageMipLevel)
+                throw std::invalid_argument("Storage buffer binding requires only a buffer");
+            auto& buffer = owned<VulkanBuffer>(*owner, *write.buffer);
+            if (!contains(buffer.desc.usage, BufferUsage::Storage))
+                throw std::invalid_argument("Buffer lacks storage usage");
+            buffers[i] = {buffer.handle, 0, buffer.desc.size};
+            output.pBufferInfo = &buffers[i];
         }
     }
     auto initialized = initializedBindings;

@@ -156,7 +156,8 @@ void VulkanCommands::bindSet(PipelineLayout& genericLayout, std::uint32_t index,
         throw std::invalid_argument("Binding set layout mismatch");
     for (const auto& binding : expected.desc.bindings)
         if (!std::ranges::any_of(set.desc.bindings, [&](const auto& other) {
-                return binding.binding == other.binding && binding.type == other.type && binding.stages == other.stages;
+                return binding.binding == other.binding && binding.type == other.type &&
+                       binding.stages == other.stages && binding.arraySize == other.arraySize;
             }))
             throw std::invalid_argument("Binding set layout mismatch");
     if (point == PipelineBindPoint::Compute) {
@@ -181,6 +182,7 @@ void VulkanCommands::bindIndexBuffer(Buffer& generic) {
     auto& buffer = owned<VulkanBuffer>(*owner, generic);
     if (!contains(buffer.desc.usage, BufferUsage::Index)) throw std::invalid_argument("Buffer lacks index usage");
     vkCmdBindIndexBuffer(handle, buffer.handle, 0, VK_INDEX_TYPE_UINT32);
+    indexBound = true;
 }
 void VulkanCommands::pushConstants(PipelineLayout& generic, std::span<const std::byte> bytes) {
     auto& layout = owned<VulkanPipelineLayout>(*owner, generic);
@@ -197,8 +199,20 @@ void VulkanCommands::draw(std::uint32_t vertices) {
     vkCmdDraw(handle, vertices, 1, 0, 0);
 }
 void VulkanCommands::drawIndexed(std::uint32_t indices) {
-    if (!inPass) throw std::logic_error("Draw outside render pass");
+    if (!inPass || !indexBound) throw std::logic_error("Indexed draw requires a render pass and index buffer");
     vkCmdDrawIndexed(handle, indices, 1, 0, 0, 0);
+}
+void VulkanCommands::drawIndexedIndirect(Buffer& generic, const std::size_t offset, const std::uint32_t drawCount,
+                                         const std::uint32_t stride) {
+    if (!inPass || !indexBound || !owner->caps.indirectDraw || !drawCount ||
+        drawCount > owner->properties.limits.maxDrawIndirectCount || stride < sizeof(std::uint32_t) * 5 ||
+        stride % 4 || offset % 4)
+        throw std::invalid_argument("Indirect indexed draw requires a render pass and valid arguments");
+    auto& buffer = owned<VulkanBuffer>(*owner, generic);
+    if (!contains(buffer.desc.usage, BufferUsage::Indirect) || offset > buffer.desc.size ||
+        drawCount > (buffer.desc.size - offset) / stride)
+        throw std::invalid_argument("Buffer lacks indirect usage or is too small");
+    vkCmdDrawIndexedIndirect(handle, buffer.handle, offset, drawCount, stride);
 }
 void VulkanCommands::dispatch(std::uint32_t x, std::uint32_t y, std::uint32_t z) {
     if (inPass || !owner->caps.compute || !computePipeline || !x || !y || !z)
@@ -215,9 +229,10 @@ void VulkanCommands::dispatch(std::uint32_t x, std::uint32_t y, std::uint32_t z)
             throw std::invalid_argument("Compute descriptor set is not bound");
         } else {
             for (const auto& binding : computeSets[i]->desc.bindings)
-                if (contains(binding.stages, ShaderStage::Compute) &&
-                    !computeSets[i]->initializedBindings.contains(binding.binding))
-                    throw std::invalid_argument("Compute descriptor binding is not initialized");
+                if (contains(binding.stages, ShaderStage::Compute))
+                    for (std::uint32_t element = 0; element < binding.arraySize; ++element)
+                        if (!computeSets[i]->initializedBindings.contains({binding.binding, element}))
+                            throw std::invalid_argument("Compute descriptor binding is not initialized");
         }
     vkCmdDispatch(handle, x, y, z);
 }

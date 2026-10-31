@@ -77,7 +77,14 @@ FetchContent_Declare(entt
     # the upstream project (which has a newer CMake floor than AEG Engine).
     SOURCE_SUBDIR aeg-source-only)
 
-FetchContent_MakeAvailable(glfw assimp imgui stb imguizmo entt)
+FetchContent_Declare(vma
+    DOWNLOAD_DIR "${PROJECT_SOURCE_DIR}/build/downloads"
+    DOWNLOAD_NAME vma.tar.gz
+    URL https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator/archive/refs/tags/v3.3.0.tar.gz
+    URL_HASH SHA256=C4F6BBE6B5A45C2EB610CA9D231158E313086D5B1A40C9922CB42B597419B14E
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+
+FetchContent_MakeAvailable(glfw assimp imgui stb imguizmo entt vma)
 include("${CMAKE_CURRENT_LIST_DIR}/ApplyAssimpMmdPatch.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/ApplyImGuiVulkanPatch.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/ApplyImGuizmoPatch.cmake")
@@ -87,6 +94,13 @@ if(NOT TARGET aeg_entt)
     add_library(aeg::entt ALIAS aeg_entt)
     target_include_directories(aeg_entt SYSTEM INTERFACE "${entt_SOURCE_DIR}/src")
     target_compile_features(aeg_entt INTERFACE cxx_std_20)
+endif()
+
+if(NOT TARGET aeg_vma)
+    add_library(aeg_vma INTERFACE)
+    add_library(aeg::vma ALIAS aeg_vma)
+    target_link_libraries(aeg_vma INTERFACE VulkanMemoryAllocator)
+    target_include_directories(aeg_vma SYSTEM INTERFACE "${vma_SOURCE_DIR}/include")
 endif()
 
 if(MINGW)

@@ -51,7 +51,9 @@ enum class BufferUsage : std::uint32_t {
     Index = 2,
     Uniform = 4,
     CopySource = 8,
-    CopyDestination = 16
+    CopyDestination = 16,
+    Storage = 32,
+    Indirect = 64
 };
 enum class ShaderStage : std::uint32_t { None = 0, Vertex = 1, Fragment = 2, Compute = 4 };
 enum class TextureDimension { Texture2D, Cube };
@@ -96,6 +98,10 @@ struct DeviceCapabilities {
     std::uint32_t maximumCubeImageDimension{1};
     std::array<std::uint32_t, 3> maximumComputeGroupCount{}, maximumComputeGroupSize{};
     std::uint32_t maximumComputeInvocations{};
+    // Indicates shader-side dynamic indexing of sampled-image arrays. Runtime or
+    // partially-bound bindless descriptors still require a future feature gate.
+    bool descriptorIndexing{};
+    bool indirectDraw{true};
 };
 struct ClearValue {
     std::array<float, 4> color{};

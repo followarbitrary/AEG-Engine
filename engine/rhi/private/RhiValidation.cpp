@@ -56,7 +56,8 @@ std::uint32_t formatByteSize(Format format) {
 }
 void validate(const BufferDesc& desc) {
     constexpr auto valid = std::to_underlying(BufferUsage::Vertex | BufferUsage::Index | BufferUsage::Uniform |
-                                              BufferUsage::CopySource | BufferUsage::CopyDestination);
+                                              BufferUsage::CopySource | BufferUsage::CopyDestination |
+                                              BufferUsage::Storage | BufferUsage::Indirect);
     if (desc.size == 0 || desc.usage == BufferUsage::None || (std::to_underlying(desc.usage) & ~valid))
         throw std::invalid_argument("Buffer requires nonzero size and valid usage");
 }

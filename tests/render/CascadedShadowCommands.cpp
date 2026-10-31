@@ -89,6 +89,10 @@ public:
         if (shadow_) shadowUniforms.push_back(device_.uniform->bytes);
         commands.drawIndexed(count);
     }
+    void drawIndexedIndirect(rhi::Buffer& buffer, std::size_t offset, std::uint32_t count,
+                             std::uint32_t stride) override {
+        commands.drawIndexedIndirect(buffer, offset, count, stride);
+    }
     void transition(rhi::Texture& texture, rhi::ResourceState before, rhi::ResourceState after) override {
         commands.transition(texture, before, after);
     }

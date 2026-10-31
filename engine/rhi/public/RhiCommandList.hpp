@@ -18,6 +18,8 @@ public:
     virtual void pushConstants(PipelineLayout& layout, std::span<const std::byte> bytes) = 0;
     virtual void draw(std::uint32_t vertices) = 0;
     virtual void drawIndexed(std::uint32_t indices) = 0;
+    virtual void drawIndexedIndirect(Buffer& buffer, std::size_t offset, std::uint32_t drawCount,
+                                     std::uint32_t stride) = 0;
     virtual void dispatch(std::uint32_t x, std::uint32_t y, std::uint32_t z) = 0;
     virtual void transition(Texture& texture, ResourceState before, ResourceState after) = 0;
     virtual void copyBuffer(Buffer& source, Buffer& destination, std::size_t bytes) = 0;

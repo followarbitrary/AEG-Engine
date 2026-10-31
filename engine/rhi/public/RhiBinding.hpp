@@ -5,11 +5,12 @@
 #include <span>
 #include <vector>
 namespace aeg::rhi {
-enum class BindingType { UniformBuffer, CombinedTextureSampler, StorageImage };
+enum class BindingType { UniformBuffer, CombinedTextureSampler, StorageImage, StorageBuffer };
 struct BindingDesc {
     std::uint32_t binding{};
     BindingType type{BindingType::UniformBuffer};
     ShaderStage stages{ShaderStage::Fragment};
+    std::uint32_t arraySize{1};
 };
 struct BindingLayoutDesc {
     std::vector<BindingDesc> bindings;
@@ -24,6 +25,7 @@ struct BindingWrite {
     Texture* texture{};
     Sampler* sampler{};
     std::uint32_t storageMipLevel{};
+    std::uint32_t arrayElement{};
 };
 class BindingSet {
 public:

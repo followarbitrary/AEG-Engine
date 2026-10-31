@@ -210,6 +210,7 @@ bool VulkanSwapchain::beginFrame() {
         check(result, "vkAcquireNextImageKHR");
     check(vkResetCommandBuffer(commands.handle, 0), "vkResetCommandBuffer(frame)");
     commands.inPass = false;
+    commands.indexBound = false;
     commands.computePipeline = nullptr;
     commands.computeBoundLayout = nullptr;
     commands.computeSets.clear();
