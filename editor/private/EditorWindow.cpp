@@ -70,4 +70,23 @@ std::filesystem::path browseModelFile(GLFWwindow* window) {
 #endif
     return {};
 }
+
+std::filesystem::path browseEnvironmentFile(GLFWwindow* window) {
+#ifdef _WIN32
+    if (!window) return {};
+    std::array<wchar_t, 32768> buffer{};
+    OPENFILENAMEW dialog{};
+    dialog.lStructSize = sizeof(dialog);
+    dialog.hwndOwner = glfwGetWin32Window(window);
+    dialog.lpstrTitle = L"选择 HDR 环境图";
+    dialog.lpstrFilter = L"Radiance HDR (*.hdr)\0*.hdr\0所有文件\0*.*\0";
+    dialog.lpstrFile = buffer.data();
+    dialog.nMaxFile = static_cast<DWORD>(buffer.size());
+    dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+    if (GetOpenFileNameW(&dialog)) return std::filesystem::path(buffer.data());
+#else
+    (void)window;
+#endif
+    return {};
+}
 }

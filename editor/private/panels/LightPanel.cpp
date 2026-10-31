@@ -51,7 +51,7 @@ void drawLightList(EditorState& state, render::Renderer& renderer) {
     ImGui::SetNextItemWidth(-1);
     ImGui::Combo("##New light type", &state.newLightType, lightNames.data(), static_cast<int>(lightNames.size()));
     ImGui::BeginDisabled(count >= render::kMaxLights);
-    const bool addRequested = ImGui::Button("添加光源###Add light", {-1, 0});
+    const bool addRequested = ui::AccentButton("添加光源###Add light", {-1, 0});
     ImGui::EndDisabled();
     if (addRequested && addLight(state)) return;
     if (!count) {
@@ -68,7 +68,7 @@ void drawLightList(EditorState& state, render::Renderer& renderer) {
         }
         ImGui::EndCombo();
     }
-    if (ImGui::Button("删除所选光源###Remove light", {-1, 0})) {
+    if (ui::SecondaryButton("删除所选光源###Remove light", {-1, 0})) {
         auto shadows = renderer.shadows();
         if (shadows.lightIndex == state.selectedLight)
             shadows.enabled = false;

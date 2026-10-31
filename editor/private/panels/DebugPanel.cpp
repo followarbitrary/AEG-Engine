@@ -53,7 +53,7 @@ void drawDebugContents(EditorState& state, render::Renderer& renderer, EditorGra
     }
     if (renderer.antialiasing().taa)
         ImGui::Text("历史帧：%u", renderer.temporalFrameCount());
-    if (ImGui::Button("重置 TAA 历史###Debug reset TAA")) renderer.resetTemporalHistory();
+    if (ui::SecondaryButton("重置 TAA 历史###Debug reset TAA")) renderer.resetTemporalHistory();
 
     drawDebugHeading("上一帧 GPU 时间戳", "Pass timings");
     const auto timings = graphics.gpuPassTimings();

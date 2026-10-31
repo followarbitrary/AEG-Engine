@@ -6,29 +6,19 @@
 
 namespace aeg::editor {
 namespace {
-void drawInspectorHeading(const char* label, const char* detail = nullptr) {
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(label);
-    if (detail) {
-        ImGui::SameLine();
-        ImGui::TextDisabled("%s", detail);
-    }
-    ImGui::Spacing();
-}
-
 bool drawRightTab(const char* label, const bool active) {
-    ImGui::PushStyleColor(ImGuiCol_Button, active ? ImVec4{0.12f, 0.30f, 0.40f, 1.0f} : ImVec4{0, 0, 0, 0});
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, {0.14f, 0.34f, 0.46f, 1.0f});
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive, {0.18f, 0.42f, 0.56f, 1.0f});
-    const bool clicked = ImGui::Button(label, {72.0f, 32.0f});
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, ui::px(5.0f));
+    ImGui::PushStyleColor(ImGuiCol_Button, active ? ui::rgb(0x1f3a4a) : ui::rgb(0x000000, 0.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ui::rgb(0x20252d));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ui::rgb(0x2a303a));
+    const bool clicked = ImGui::Button(label, {ui::px(72.0f), ui::px(32.0f)});
     ImGui::PopStyleColor(3);
+    ImGui::PopStyleVar();
     if (active) {
         const auto min = ImGui::GetItemRectMin();
         const auto max = ImGui::GetItemRectMax();
-        ImGui::GetWindowDrawList()->AddRectFilled({min.x, max.y - 2.0f}, {max.x, max.y},
-                                                   ImGui::GetColorU32(ImVec4{0.25f, 0.72f, 0.92f, 1.0f}));
+        ImGui::GetWindowDrawList()->AddRectFilled({min.x, max.y - ui::px(2.0f)}, {max.x, max.y},
+                                                   ImGui::GetColorU32(ui::rgb(0x3fb4e6)));
     }
     return clicked;
 }
@@ -42,10 +32,12 @@ void drawInspectorPanel(EditorState& state, render::Renderer& renderer, EditorGr
     auto& supportedMsaa = state.supportedMsaa;
     auto& antialiasing = state.antialiasing;
     auto& antialiasingNotice = state.antialiasingNotice;
-    auto& viewportWidth = state.viewportWidth;
-    auto& viewportHeight = state.viewportHeight;
     bool antialiasingChanged = false;
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ui::rgb(0x1a1e25));
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ui::rgb(0x1a1e25));
+    ImGui::SetNextWindowBgAlpha(1.0f);
     if (ImGui::Begin(inspectorWindow, nullptr, workspacePanelFlags())) {
+        ui::PaintPanelBackground();
         if (drawRightTab("属性", !state.debugPanelActive)) state.debugPanelActive = false;
         ImGui::SameLine(0.0f, 2.0f);
         if (drawRightTab("调试", state.debugPanelActive)) state.debugPanelActive = true;
@@ -56,7 +48,6 @@ void drawInspectorPanel(EditorState& state, render::Renderer& renderer, EditorGr
         } else {
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8.0f, 6.0f));
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(6.0f, 3.0f));
-        drawInspectorHeading("对象属性", "Transform / Material / Lighting");
         if (ImGui::CollapsingHeader("变换###Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
             float translation[]{transform.translation.x, transform.translation.y, transform.translation.z};
             float rotation[]{transform.rotation.x, transform.rotation.y, transform.rotation.z};
@@ -75,7 +66,7 @@ void drawInspectorPanel(EditorState& state, render::Renderer& renderer, EditorGr
                     transform.scale[axis] = std::signbit(transform.scale[axis]) ? -0.001f : 0.001f;
             }
             ImGui::Checkbox("自动旋转###Auto rotate", &autoRotate);
-            if (ImGui::Button("重置变换###Reset transform")) {
+            if (ui::SecondaryButton("重置变换###Reset transform")) {
                 cancelTransformGizmo(state.gizmo, transform, false);
                 transform = {};
                 renderer.resetTemporalHistory();
@@ -125,15 +116,12 @@ void drawInspectorPanel(EditorState& state, render::Renderer& renderer, EditorGr
                 if (!antialiasingNotice.empty()) ImGui::TextWrapped("%s", antialiasingNotice.c_str());
             }
         }
-        drawInspectorHeading("渲染器", "Device / Validation / Viewport");
-        ImGui::TextWrapped("Vulkan | %s", renderer.deviceName().c_str());
-        ImGui::Text("验证错误：%u", renderer.validationErrorCount());
-        ImGui::Text("视口：%u x %u", viewportWidth, viewportHeight);
         ImGui::PopStyleVar(2);
         }
         ImGui::EndChild();
     }
     ImGui::End();
+    ImGui::PopStyleColor(2);
 
     // Changing AA can replace the viewport descriptor. Apply it before Image
     // records its texture ID, never after this callback has recorded the image.

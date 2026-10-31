@@ -16,7 +16,7 @@ void drawToneMappingSection(EditorState& state, render::Renderer& renderer) {
     if (changed) candidate.mapper = static_cast<render::ToneMapper>(mapper);
     changed |= ImGui::SliderFloat("曝光###Exposure EV", &candidate.exposureEV, -12, 12, "%.2f EV",
                                   ImGuiSliderFlags_AlwaysClamp);
-    if (ImGui::Button("重置曝光与映射###Reset tone mapping", {-1, 0})) {
+    if (ui::SecondaryButton("重置曝光与映射###Reset tone mapping", {-1, 0})) {
         candidate = {};
         changed = true;
     }

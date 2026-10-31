@@ -13,11 +13,14 @@ void configureStyle() {
     style.ItemInnerSpacing = {px(5.0f), px(4.0f)};
     style.IndentSpacing = px(16.0f);
     style.WindowRounding = 0.0f;
-    style.ChildRounding = px(2.0f);
-    style.FrameRounding = px(2.0f);
-    style.PopupRounding = px(2.0f);
-    style.GrabRounding = px(2.0f);
-    style.TabRounding = px(2.0f);
+    // Keep the shell squared off while giving interactive controls a soft,
+    // deliberate corner.  The reference UI uses a small radius rather than
+    // pill-shaped controls, so scale the values with the active DPI.
+    style.ChildRounding = px(4.0f);
+    style.FrameRounding = px(5.0f);
+    style.PopupRounding = px(5.0f);
+    style.GrabRounding = px(5.0f);
+    style.TabRounding = px(5.0f);
     style.WindowBorderSize = px(1.0f);
     style.ChildBorderSize = px(1.0f);
     style.FrameBorderSize = px(1.0f);

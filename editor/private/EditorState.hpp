@@ -249,6 +249,7 @@ struct EditorState {
 void initializeEditorWindow(WindowLifetime& lifetime, const EditorOptions& options);
 void bindImportQueue(GLFWwindow* window, ImportQueue& imports);
 [[nodiscard]] std::filesystem::path browseModelFile(GLFWwindow* window);
+[[nodiscard]] std::filesystem::path browseEnvironmentFile(GLFWwindow* window);
 void configureStyle();
 [[nodiscard]] ImGuiWindowFlags workspacePanelFlags();
 void drawWorkspace(EditorState& state, render::Renderer& renderer);

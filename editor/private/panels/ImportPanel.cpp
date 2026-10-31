@@ -40,12 +40,14 @@ void drawDropZone(const ImVec2 size) {
 }
 
 void drawImportPanel(EditorState& state) {
-    auto& model = state.model();
     auto& imports = state.imports;
     auto& importPath = state.importPath;
-    auto& status = state.status;
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ui::rgb(0x1a1e25));
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ui::rgb(0x1a1e25));
+    ImGui::SetNextWindowBgAlpha(1.0f);
     if (ImGui::Begin(importWindow, nullptr, workspacePanelFlags())) {
-        ImGui::TextColored({0.92f, 0.94f, 0.97f, 1.0f}, "导入");
+        ui::PaintPanelBackground();
+        ImGui::TextUnformatted("导入");
         ImGui::Separator();
         if (ui::AccentButton("浏览模型…###Import model", {-1.0f, ui::px(34.0f)})) {
             if (const auto path = browseModelFile(glfwGetCurrentContext()); !path.empty()) {
@@ -69,19 +71,9 @@ void drawImportPanel(EditorState& state) {
                 ImGui::PopID();
             }
         }
-        drawSectionHeading("状态");
-        ImGui::TextWrapped("%s", status.c_str());
-        if (!imports.error.empty()) {
-            ImGui::PushStyleColor(ImGuiCol_Text, {1, 0.49f, 0.43f, 1});
-            ImGui::TextUnformatted("导入错误");
-            ImGui::TextWrapped("%s", imports.error.c_str());
-            ImGui::PopStyleColor();
-        }
-        drawSectionHeading("导入提示");
-        if (!model.warnings.empty() && ImGui::CollapsingHeader("导入提示###Import notices"))
-            for (const auto& warning : model.warnings) ImGui::TextWrapped("%s", warning.c_str());
     }
     ImGui::End();
+    ImGui::PopStyleColor(2);
 }
 
 void processImports(EditorState& state, render::Renderer& renderer, assets::ModelResources& resources) {

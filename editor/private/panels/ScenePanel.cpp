@@ -2,100 +2,63 @@
 
 namespace aeg::editor {
 namespace {
-void drawSectionHeading(const char* label) {
-    ImGui::Spacing();
-    ImGui::Separator();
-    ImGui::TextDisabled("%s", label);
-}
-
-void drawEntityNode(EditorState& state, const ecs::Entity entity) {
-    auto& registry = state.scene.registry();
-    const auto& renderable = registry.get<Renderable>(entity);
-    const std::string fallback = "实体 " + std::to_string(static_cast<std::uint32_t>(entity.raw()));
-    const char* name = renderable.model.name.empty() ? fallback.c_str() : renderable.model.name.c_str();
-    const bool hasChildren = std::ranges::any_of(state.renderableEntities, [&](const auto child) {
-        return registry.all_of<Parent>(child) && registry.get<Parent>(child).entity == entity;
-    });
-    ImGui::PushID(static_cast<int>(entity.raw()));
-    const bool selected = state.selectedEntity == entity;
-    ImGuiTreeNodeFlags flags = selected ? ImGuiTreeNodeFlags_Selected : ImGuiTreeNodeFlags_None;
-    if (!hasChildren) flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-    const bool open = ImGui::TreeNodeEx(name, flags);
-    if (ImGui::IsItemClicked()) state.selectedEntity = entity;
-    if (open) {
-        for (const auto child : state.renderableEntities) {
-            if (!registry.all_of<Parent>(child) || registry.get<Parent>(child).entity != entity) continue;
-            drawEntityNode(state, child);
-        }
-        if (hasChildren) ImGui::TreePop();
-    }
-    ImGui::PopID();
-}
 }
 
 void drawScenePanel(EditorState& state) {
     auto& model = state.model();
-    auto& frameRequested = state.frameRequested;
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ui::rgb(0x1a1e25));
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ui::rgb(0x1a1e25));
+    ImGui::SetNextWindowBgAlpha(1.0f);
     if (ImGui::Begin(sceneWindow, nullptr, workspacePanelFlags())) {
-        ImGui::TextColored({0.92f, 0.94f, 0.97f, 1.0f}, "场景");
-        ImGui::SameLine(ImGui::GetWindowWidth() - 34.0f);
-        ImGui::TextColored({0.28f, 0.72f, 0.92f, 1.0f}, "%zu", state.renderableEntities.size());
+        ui::PaintPanelBackground();
+        ImGui::TextUnformatted("场景");
         ImGui::TextDisabled("%zu 网格 · %zu 材质 · %zu 顶点 · %zu 三角形", model.meshes.size(), model.materials.size(),
                             model.vertexCount(), model.triangleCount());
-        ImGui::Separator();
-        ImGui::TextDisabled("%s", model.name.empty() ? "未命名模型" : model.name.c_str());
-        drawSectionHeading("场景树");
-        for (const auto entity : state.renderableEntities) {
-            if (state.scene.registry().all_of<Parent>(entity)) {
-                const auto parent = state.scene.registry().get<Parent>(entity).entity;
-                if (parent.raw() != entt::null &&
-                    std::ranges::find(state.renderableEntities, parent) != state.renderableEntities.end())
-                    continue;
-            }
-            drawEntityNode(state, entity);
-        }
-        drawSectionHeading("场景统计");
-        if (ImGui::BeginTable("SceneStats", 2, ImGuiTableFlags_SizingStretchProp)) {
-            const auto stat = [](const char* label, const std::size_t value) {
-                ImGui::TableNextRow();
-                ImGui::TableNextColumn();
-                ImGui::TextDisabled("%s", label);
-                ImGui::TableNextColumn();
-                ImGui::Text("%zu", value);
-            };
-            stat("网格", model.meshes.size());
-            stat("材质", model.materials.size());
-            stat("顶点", model.vertexCount());
-            stat("三角形", model.triangleCount());
-            ImGui::EndTable();
-        }
-        if (ImGui::Button("聚焦模型###Frame model", {-1, 0})) frameRequested = true;
-        drawSectionHeading("网格列表");
-        if (ImGui::BeginTable("MeshList", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
-            ImGui::TableSetupColumn("名称", ImGuiTableColumnFlags_WidthStretch);
-            ImGui::TableSetupColumn("三角形", ImGuiTableColumnFlags_WidthFixed, 72);
-            ImGui::TableHeadersRow();
-            if (state.selectedMesh >= model.meshes.size()) state.selectedMesh = 0;
-            for (std::size_t i = 0; i < model.meshes.size(); ++i) {
-                const auto& mesh = model.meshes[i];
-                ImGui::TableNextRow();
-                ImGui::TableNextColumn();
-                ImGui::PushID(static_cast<int>(i));
-                const bool selected = state.selectedMesh == i;
-                if (ImGui::Selectable(mesh.name.empty() ? "网格" : mesh.name.c_str(), selected,
-                                     ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick)) {
-                    state.selectedMesh = i;
-                    state.selectedMaterial = std::min<std::size_t>(mesh.materialIndex, model.materials.size() ? model.materials.size() - 1 : 0);
-                    state.materialEditorInitialized = false;
-                    state.materialDirty = false;
+        if (state.renderableEntities.empty()) {
+            ImGui::TextDisabled("暂无模型");
+        } else {
+            const auto root = state.renderableEntities.front();
+            const auto modelName = model.name.empty() ? "未命名模型" : model.name.c_str();
+            ImGui::PushID("SceneRoot");
+            const bool rootSelected = state.selectedEntity == root;
+            const auto rootFlags = ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth |
+                                   (rootSelected ? ImGuiTreeNodeFlags_Selected : ImGuiTreeNodeFlags_None);
+            const bool open = ImGui::TreeNodeEx(modelName, rootFlags);
+            if (ImGui::IsItemClicked()) state.selectedEntity = root;
+            if (open) {
+                if (state.selectedMesh >= model.meshes.size()) state.selectedMesh = 0;
+                if (ImGui::BeginTable("SceneMeshes", 2, ImGuiTableFlags_SizingStretchProp)) {
+                    ImGui::TableSetupColumn("名称", ImGuiTableColumnFlags_WidthStretch);
+                    ImGui::TableSetupColumn("三角形", ImGuiTableColumnFlags_WidthFixed, ui::px(52.0f));
+                    for (std::size_t i = 0; i < model.meshes.size(); ++i) {
+                        const auto& mesh = model.meshes[i];
+                        const auto meshName = mesh.name.empty() ? "网格" : mesh.name.c_str();
+                        ImGui::PushID(static_cast<int>(i));
+                        ImGui::TableNextRow();
+                        ImGui::TableNextColumn();
+                        const bool selected = state.selectedMesh == i;
+                        ImGui::PushStyleColor(ImGuiCol_Header, ui::rgb(selected ? 0x1f3a4a : 0x20252d));
+                        ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ui::rgb(0x2a5063));
+                        if (ImGui::Selectable(meshName, selected, ImGuiSelectableFlags_SpanAllColumns)) {
+                            state.selectedMesh = i;
+                            state.selectedMaterial = std::min<std::size_t>(
+                                mesh.materialIndex, model.materials.empty() ? 0 : model.materials.size() - 1);
+                            state.materialEditorInitialized = false;
+                            state.materialDirty = false;
+                        }
+                        ImGui::PopStyleColor(2);
+                        ImGui::TableNextColumn();
+                        ImGui::TextDisabled("%zu", mesh.indices.size() / 3);
+                        ImGui::PopID();
+                    }
+                    ImGui::EndTable();
                 }
-                ImGui::TableNextColumn();
-                ImGui::Text("%zu", mesh.indices.size() / 3);
-                ImGui::PopID();
+                ImGui::TreePop();
             }
-            ImGui::EndTable();
+            ImGui::PopID();
         }
     }
     ImGui::End();
+    ImGui::PopStyleColor(2);
 }
 }
