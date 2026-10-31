@@ -113,7 +113,8 @@ void drawViewportPanel(EditorState& state, render::Renderer& renderer, EditorGra
         state.orientationGizmo = {};
         viewportDrag = {};
     }
-    settings.model = transform.matrix();
+    (void)state.updateWorldTransforms();
+    settings.model = state.worldMatrix();
     if (frameRequested) {
         camera.fit(transformedBounds(model.bounds, settings.model));
         renderer.resetTemporalHistory();

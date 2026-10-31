@@ -27,6 +27,7 @@ int runEditor(const EditorOptions& options, const EditorBackendFactory& factory)
     renderer.setAntialiasing({options.msaaSamples, options.fxaa, options.taa});
     renderer.setToneMapping(options.toneMapping);
     EditorState state;
+    assets::ModelResources resources;
     state.antialiasing = renderer.antialiasing();
     state.supportedMsaa = renderer.supportedMsaaSamples();
     state.supportedTaa = renderer.supportsTemporalAA();
@@ -64,7 +65,7 @@ int runEditor(const EditorOptions& options, const EditorBackendFactory& factory)
             previousTime = glfwGetTime();
             continue;
         }
-        processImports(state, renderer);
+        processImports(state, renderer, resources);
         const double now = glfwGetTime();
         const auto elapsed = static_cast<float>(std::clamp(now - previousTime, 0.0, 0.1));
         previousTime = now;

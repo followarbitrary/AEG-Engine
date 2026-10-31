@@ -150,6 +150,22 @@ SceneUniform Renderer::Impl::sceneUniform(const RenderSettings& settings) {
 void Renderer::Impl::drawScene(rhi::CommandList& commands, const RenderSettings& settings,
                                const SceneUniform& uniform) {
     auto& scene = scenePipeline(aa.msaaSamples, aa.taa, settings.clipSpace.reversed_z);
+    math::Frustum frustum;
+    const bool canCull = settings.frustumCulling && settings.viewProjection != math::identity() &&
+                         math::try_extract_frustum(uniform.currentViewProjection, frustum,
+                                                   {true, settings.clipSpace.reversed_z});
+    const auto visible = [&](const GpuMesh& mesh) {
+        if (!canCull) return true;
+        const auto localCenter = (mesh.minimum + mesh.maximum) * 0.5f;
+        const auto localExtent = (mesh.maximum - mesh.minimum) * 0.5f;
+        const auto worldCenter = math::transform_point(settings.model, localCenter);
+        math::Vec3 worldExtent{};
+        for (unsigned row = 0; row < 3; ++row)
+            for (unsigned column = 0; column < 3; ++column)
+                worldExtent[row] += std::abs(settings.model.at(row, column)) * localExtent[column];
+        if (!math::is_finite(worldCenter) || !math::is_finite(worldExtent)) return true;
+        return math::intersects_aabb(frustum, worldCenter - worldExtent, worldCenter + worldExtent);
+    };
     struct TransparentDraw {
         const GpuMesh* mesh;
         double depth;
@@ -159,7 +175,8 @@ void Renderer::Impl::drawScene(rhi::CommandList& commands, const RenderSettings&
         const auto transform = uniform.currentViewProjection * settings.model;
         for (const auto& mesh : model->meshes) {
             if (model->materials[mesh.material].parameters.alphaMode !=
-                static_cast<std::uint32_t>(assets::AlphaMode::Blend))
+                    static_cast<std::uint32_t>(assets::AlphaMode::Blend) ||
+                !visible(mesh))
                 continue;
             const auto clip = transform * math::Vec4(mesh.center, 1);
             double depth = 0;
@@ -196,7 +213,8 @@ void Renderer::Impl::drawScene(rhi::CommandList& commands, const RenderSettings&
         };
         for (const auto& mesh : model->meshes) {
             if (model->materials[mesh.material].parameters.alphaMode !=
-                static_cast<std::uint32_t>(assets::AlphaMode::Blend))
+                    static_cast<std::uint32_t>(assets::AlphaMode::Blend) &&
+                visible(mesh))
                 drawMesh(mesh);
         }
         if (!transparent.empty()) {

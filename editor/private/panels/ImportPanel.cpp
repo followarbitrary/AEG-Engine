@@ -3,6 +3,7 @@
 #include <Utf8Path.hpp>
 
 #include <cstdio>
+#include <algorithm>
 #include <exception>
 #include <iostream>
 #include <utility>
@@ -44,7 +45,7 @@ void drawImportPanel(EditorState& state) {
     ImGui::End();
 }
 
-void processImports(EditorState& state, render::Renderer& renderer) {
+void processImports(EditorState& state, render::Renderer& renderer, assets::ModelResources& resources) {
     auto& model = state.model();
     auto& imports = state.imports;
     auto& importPath = state.importPath;
@@ -54,8 +55,27 @@ void processImports(EditorState& state, render::Renderer& renderer) {
     while (!imports.paths.empty()) {
         const auto path = std::move(imports.paths.front());
         imports.paths.pop_front();
+        const auto handle = resources.request(path);
+        const auto serial = ++imports.nextSerial;
+        imports.latestSerial = serial;
+        imports.serials[handle] = serial;
+        imports.pending.push_back(handle);
+        imports.error.clear();
+        status = "后台加载中…";
+    }
+    for (auto& completion : resources.drainCompleted()) {
+        imports.pending.erase(std::remove(imports.pending.begin(), imports.pending.end(), completion.handle),
+                              imports.pending.end());
+        const auto found = imports.serials.find(completion.handle);
+        if (found == imports.serials.end() || found->second != imports.latestSerial) continue;
+        if (completion.state == assets::ModelLoadState::Failed) {
+            imports.error = completion.error;
+            status = "导入失败，已保留当前模型。";
+            continue;
+        }
+        if (completion.state != assets::ModelLoadState::Ready || !completion.data) continue;
         try {
-            auto candidate = assets::loadModel(path);
+            auto candidate = *completion.data;
             renderer.uploadModel(candidate);
             model = std::move(candidate);
             resetMaterialEditor(state);
@@ -63,13 +83,12 @@ void processImports(EditorState& state, render::Renderer& renderer) {
             state.orientationGizmo = {};
             state.viewportDrag = {};
             transform = {};
-            // Each successful import starts from the front; ordinary focus keeps the orbit angle.
             camera = {};
             camera.fit(model.bounds);
             renderer.resetTemporalHistory();
             imports.error.clear();
             status = "已加载：" + model.name;
-            const auto text = foundation::pathToUtf8(path);
+            const auto text = foundation::pathToUtf8(completion.path);
             std::snprintf(importPath.data(), importPath.size(), "%s", text.c_str());
             std::cout << "Model: " << text << " (" << model.vertexCount() << " vertices, " << model.triangleCount()
                       << " triangles)\n";

@@ -338,6 +338,38 @@ void transparencyContracts() {
     transactional.recordFrame(recovered, {});
     require(pass(recovered, 0).draws.size() == 4, "Failed transparent AA replacement lost the model");
 }
+
+void frustumCullingContracts() {
+    tests::FakeDevice device;
+    render::Renderer renderer(device);
+    renderer.resizeViewport(32, 32);
+    assets::ModelData model;
+    model.materials.emplace_back();
+    for (const float x : {0.0f, 100.0f}) {
+        assets::MeshData mesh;
+        mesh.vertices = {{{x - 0.5f, -0.5f, 0}, {0, 0, 1}, {}},
+                         {{x + 0.5f, -0.5f, 0}, {0, 0, 1}, {}},
+                         {{x, 0.5f, 0}, {0, 0, 1}, {}}};
+        mesh.indices = {0, 1, 2};
+        model.meshes.push_back(std::move(mesh));
+    }
+    renderer.uploadModel(model);
+    render::RenderSettings settings;
+    const math::ClipSpaceConvention convention{true, false};
+    settings.set_camera({math::look_at({0, 0, 5}, {0, 0, 0}, {0, 1, 0}),
+                         math::perspective(1, 1, 0.1f, 20, convention), convention});
+    settings.frustumCulling = true;
+    tests::FakeCommands culled;
+    renderer.recordFrame(culled, settings);
+    require(culled.recordedPasses.at(0).draws.size() == 1, "CPU frustum culling kept a mesh outside the view");
+    renderer.frameSubmitted();
+
+    settings.viewProjection = math::identity();
+    tests::FakeCommands fallback;
+    renderer.recordFrame(fallback, settings);
+    require(fallback.recordedPasses.at(0).draws.size() == 2, "invalid/default camera incorrectly culled every mesh");
+    renderer.frameSubmitted();
+}
 void pbrContracts() {
     render::RenderSettings settings;
     require(settings.lights[0].color == math::Vec3(1) && settings.lights[0].intensity == 3,
@@ -507,6 +539,7 @@ int main(int argc, char** argv) {
         using namespace aeg;
         transientOutputLeaseContract();
         transparencyContracts();
+        frustumCullingContracts();
         pbrContracts();
         tests::FakeDevice device;
         render::Renderer renderer(device);

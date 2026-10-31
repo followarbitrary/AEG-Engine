@@ -2,11 +2,13 @@
 #include "gizmo/Transform.hpp"
 #include "gizmo/ViewportGizmo.hpp"
 #include "gizmo/OrientationGizmo.hpp"
+#include "SceneHierarchy.hpp"
 #include <Editor.hpp>
 #include <AntialiasingSettings.hpp>
 #include <Bounds.hpp>
 #include <EcsSystem.hpp>
 #include <ModelData.hpp>
+#include <ModelResources.hpp>
 #include <OrbitCamera.hpp>
 #include <RenderSettings.hpp>
 #include <Renderer.hpp>
@@ -24,6 +26,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <unordered_map>
 
 struct GLFWwindow;
 
@@ -42,6 +45,10 @@ struct WindowLifetime {
 
 struct ImportQueue {
     std::deque<std::filesystem::path> paths;
+    std::deque<assets::ModelHandle> pending;
+    std::unordered_map<assets::ModelHandle, std::uint64_t> serials;
+    std::uint64_t nextSerial{0};
+    std::uint64_t latestSerial{0};
     std::string error;
 };
 
@@ -101,11 +108,14 @@ struct EditorState {
     std::uint32_t frames{0};
     std::uint32_t viewportWidth{1}, viewportHeight{1};
     std::string status{"就绪。将模型拖入窗口即可导入。"};
+    std::string hierarchyError;
 
     EditorState() : selectedEntity(scene.create()), cameraEntity(scene.create()) {
+        settings.frustumCulling = true;
         scene.registry().emplace<Transform>(selectedEntity);
         scene.registry().emplace<AutoRotate>(selectedEntity);
         scene.registry().emplace<Renderable>(selectedEntity);
+        scene.registry().emplace<WorldTransform>(selectedEntity);
         renderableEntities.push_back(selectedEntity);
         scene.registry().emplace<CameraComponent>(cameraEntity);
         const auto lightEntity = scene.create();
@@ -133,6 +143,30 @@ struct EditorState {
     [[nodiscard]] const assets::ModelData& model() const {
         return scene.registry().get<Renderable>(selectedEntity).model;
     }
+    [[nodiscard]] const math::Mat4& worldMatrix() const {
+        return scene.registry().get<WorldTransform>(selectedEntity).matrix;
+    }
+    [[nodiscard]] bool updateWorldTransforms() {
+        const auto result = aeg::editor::updateWorldTransforms(scene, renderableEntities);
+        hierarchyError = result.error;
+        return result.success;
+    }
+    [[nodiscard]] bool setParent(const ecs::Entity child, const ecs::Entity parent) {
+        const bool hadParent = scene.registry().all_of<Parent>(child);
+        const auto previous = hadParent ? scene.registry().get<Parent>(child).entity : ecs::Entity{};
+        std::string error;
+        if (!trySetParent(scene, child, parent, error)) {
+            hierarchyError = std::move(error);
+            return false;
+        }
+        if (updateWorldTransforms()) return true;
+        if (hadParent)
+            scene.registry().emplace_or_replace<Parent>(child, Parent{previous});
+        else
+            scene.registry().remove<Parent>(child);
+        (void)updateWorldTransforms();
+        return false;
+    }
     [[nodiscard]] std::size_t lightCount() const noexcept { return lightEntities.size(); }
     [[nodiscard]] render::Light& light(const std::size_t index) {
         return scene.registry().get<LightComponent>(lightEntities.at(index)).value;
@@ -147,6 +181,7 @@ struct EditorState {
     [[nodiscard]] ecs::Entity createRenderable(std::string name = {}) {
         const auto entity = scene.create();
         scene.registry().emplace<Transform>(entity);
+        scene.registry().emplace<WorldTransform>(entity);
         auto& renderable = scene.registry().emplace<Renderable>(entity);
         renderable.model.name = std::move(name);
         renderableEntities.push_back(entity);
@@ -156,6 +191,10 @@ struct EditorState {
         if (entity == selectedEntity) return;
         const auto found = std::find(renderableEntities.begin(), renderableEntities.end(), entity);
         if (found == renderableEntities.end()) return;
+        for (const auto& other : renderableEntities) {
+            if (other == entity || !scene.registry().all_of<Parent>(other)) continue;
+            if (scene.registry().get<Parent>(other).entity == entity) scene.registry().remove<Parent>(other);
+        }
         static_cast<void>(scene.destroy(entity));
         renderableEntities.erase(found);
     }
@@ -165,7 +204,7 @@ void initializeEditorWindow(WindowLifetime& lifetime, const EditorOptions& optio
 void bindImportQueue(GLFWwindow* window, ImportQueue& imports);
 void configureStyle();
 void drawWorkspace(render::Renderer& renderer);
-void processImports(EditorState& state, render::Renderer& renderer);
+void processImports(EditorState& state, render::Renderer& renderer, assets::ModelResources& resources);
 [[nodiscard]] bool addLight(EditorState& state);
 void drawScenePanel(EditorState& state);
 void drawImportPanel(EditorState& state);

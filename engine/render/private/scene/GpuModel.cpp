@@ -67,6 +67,8 @@ void Renderer::Impl::uploadModel(const ModelData& source) {
         gpu.center = {static_cast<float>((static_cast<double>(minimum.x) + maximum.x) * 0.5),
                       static_cast<float>((static_cast<double>(minimum.y) + maximum.y) * 0.5),
                       static_cast<float>((static_cast<double>(minimum.z) + maximum.z) * 0.5)};
+        gpu.minimum = minimum;
+        gpu.maximum = maximum;
         replacement->minimum = math::min(replacement->minimum, minimum);
         replacement->maximum = math::max(replacement->maximum, maximum);
         gpu.vertices = device.uploadBuffer(std::as_bytes(std::span(mesh.vertices)), rhi::BufferUsage::Vertex);

@@ -37,5 +37,6 @@ struct RenderSettings {
     bool unlit{false};
     bool normalMapping{true};
     float normalStrength{1}; // Global multiplier on material normalScale, clamped to [0, 4].
+    bool frustumCulling{false}; // CPU mesh culling is opt-in for legacy direct-record callers.
 };
 }

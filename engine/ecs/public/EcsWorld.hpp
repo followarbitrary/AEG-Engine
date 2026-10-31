@@ -56,6 +56,7 @@ public:
     World& operator=(World&&) noexcept = default;
 
     [[nodiscard]] Entity create();
+    [[nodiscard]] bool valid(Entity entity) const noexcept;
     // Returns false for a foreign or already-destroyed handle.
     [[nodiscard]] bool destroy(Entity entity) noexcept;
     void clear();

@@ -4,6 +4,7 @@ add_library(aeg_assets STATIC
     public/ModelImporter.hpp
     public/MaterialTextures.hpp
     public/MaterialProperties.hpp
+    public/ModelResources.hpp
     private/ModelData.cpp
     private/ModelImporter.cpp
     private/material/MaterialTextures.cpp
@@ -16,7 +17,8 @@ add_library(aeg_assets STATIC
     private/assimp/AssimpFileSystem.cpp
     private/image/ImageDecoder.cpp
     private/image/EnvironmentImage.cpp
-    private/pmx/PmxValidation.cpp)
+    private/pmx/PmxValidation.cpp
+    private/ModelResources.cpp)
 add_library(aeg::assets ALIAS aeg_assets)
 target_include_directories(aeg_assets
     PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/public"

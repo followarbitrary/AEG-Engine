@@ -54,12 +54,35 @@ void addingLightSelectsTheNewEntity() {
     require(state.lightCount() == previousCount + 1, "adding a light did not create an ECS entity");
     require(state.selectedLight == previousCount, "adding a light did not select the new light");
 }
+
+void hierarchyPropagatesAndRejectsCycles() {
+    aeg::editor::EditorState state;
+    const auto parent = state.createRenderable("parent");
+    const auto child = state.createRenderable("child");
+    state.scene.registry().get<aeg::editor::Transform>(parent).translation = {2, 0, 0};
+    state.scene.registry().get<aeg::editor::Transform>(child).translation = {0, 3, 0};
+    require(state.setParent(child, parent), "valid parent hierarchy was rejected");
+
+    require(state.updateWorldTransforms(), "valid parent hierarchy failed to update");
+    const auto childWorld = state.scene.registry().get<aeg::editor::WorldTransform>(child).matrix;
+    require(aeg::math::nearly_equal(aeg::math::transform_point(childWorld, {0, 0, 0}), {2, 3, 0}, 0.0001f),
+            "child world transform did not include its parent");
+
+    require(!state.setParent(parent, child), "cyclic hierarchy was accepted");
+    require(state.hierarchyError.find("cycle") != std::string::npos,
+            "cyclic hierarchy did not produce a diagnostic");
+
+    aeg::ecs::World foreignWorld;
+    const auto foreign = foreignWorld.create();
+    require(!state.setParent(child, foreign), "foreign parent entity was accepted");
+}
 }
 
 int main() {
     try {
         editorStateUsesEcsWorld();
         addingLightSelectsTheNewEntity();
+        hierarchyPropagatesAndRejectsCycles();
         std::cout << "PASS editor ECS state\n";
         return 0;
     } catch (const std::exception& error) {
