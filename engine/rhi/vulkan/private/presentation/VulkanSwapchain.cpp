@@ -1,19 +1,30 @@
 #include "VulkanBackendInternal.hpp"
 
 namespace aeg::rhi::vulkan::detail {
-VulkanSwapchain::VulkanSwapchain(VulkanDevice& device) : owner(&device), commands(device) {
+VulkanSwapchain::VulkanSwapchain(VulkanDevice& device, std::uint32_t framesInFlight)
+    : owner(&device), configuredFramesInFlight(framesInFlight) {
+    if (configuredFramesInFlight != 2 && configuredFramesInFlight != 3)
+        throw std::invalid_argument("Vulkan swapchain supports only 2 or 3 frames in flight");
     try {
-        commands.initializeTimestampQueries();
+        frameContexts.reserve(configuredFramesInFlight);
         VkCommandBufferAllocateInfo allocate{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
         allocate.commandPool = owner->pool;
         allocate.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         allocate.commandBufferCount = 1;
-        check(vkAllocateCommandBuffers(owner->handle, &allocate, &commands.handle), "vkAllocateCommandBuffers(frame)");
         VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
         fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-        check(vkCreateFence(owner->handle, &fenceInfo, nullptr, &fence), "vkCreateFence(frame)");
         VkSemaphoreCreateInfo semaphore{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
-        check(vkCreateSemaphore(owner->handle, &semaphore, nullptr, &acquired), "vkCreateSemaphore(acquire)");
+        for (std::uint32_t index = 0; index < configuredFramesInFlight; ++index) {
+            auto context = std::make_unique<FrameContext>(*owner);
+            frameContexts.push_back(std::move(context));
+            auto& slot = *frameContexts.back();
+            slot.commands.initializeTimestampQueries();
+            check(vkAllocateCommandBuffers(owner->handle, &allocate, &slot.commands.handle),
+                  "vkAllocateCommandBuffers(frame)");
+            check(vkCreateFence(owner->handle, &fenceInfo, nullptr, &slot.fence), "vkCreateFence(frame)");
+            check(vkCreateSemaphore(owner->handle, &semaphore, nullptr, &slot.acquired),
+                  "vkCreateSemaphore(acquire)");
+        }
         create();
     } catch (...) {
         cleanup();
@@ -37,22 +48,26 @@ void VulkanSwapchain::destroyImages() noexcept {
 }
 void VulkanSwapchain::cleanup() noexcept {
     vkDeviceWaitIdle(owner->handle);
-    commands.destroyTimestampQueries();
     destroyImages();
     pass.reset();
     loadPass.reset();
-    if (acquired) {
-        vkDestroySemaphore(owner->handle, acquired, nullptr);
-        acquired = VK_NULL_HANDLE;
+    for (auto& context : frameContexts) {
+        if (!context) continue;
+        context->commands.destroyTimestampQueries();
+        if (context->acquired) {
+            vkDestroySemaphore(owner->handle, context->acquired, nullptr);
+            context->acquired = VK_NULL_HANDLE;
+        }
+        if (context->fence) {
+            vkDestroyFence(owner->handle, context->fence, nullptr);
+            context->fence = VK_NULL_HANDLE;
+        }
+        if (context->commands.handle) {
+            vkFreeCommandBuffers(owner->handle, owner->pool, 1, &context->commands.handle);
+            context->commands.handle = VK_NULL_HANDLE;
+        }
     }
-    if (fence) {
-        vkDestroyFence(owner->handle, fence, nullptr);
-        fence = VK_NULL_HANDLE;
-    }
-    if (commands.handle) {
-        vkFreeCommandBuffers(owner->handle, owner->pool, 1, &commands.handle);
-        commands.handle = VK_NULL_HANDLE;
-    }
+    frameContexts.clear();
 }
 void VulkanSwapchain::create() {
     VkSurfaceCapabilitiesKHR caps{};
@@ -192,8 +207,10 @@ void VulkanSwapchain::create() {
 }
 bool VulkanSwapchain::beginFrame() {
     if (acquiredFrame || submitted) throw std::logic_error("Previous swapchain frame was not presented");
-    check(vkWaitForFences(owner->handle, 1, &fence, VK_TRUE, UINT64_MAX), "vkWaitForFences(frame)");
-    commands.resolveTimestampQueries();
+    const auto candidateSlot = nextFrameSlot;
+    auto& context = *frameContexts.at(candidateSlot);
+    check(vkWaitForFences(owner->handle, 1, &context.fence, VK_TRUE, UINT64_MAX), "vkWaitForFences(frame)");
+    context.commands.resolveTimestampQueries();
     const auto requested = owner->creationDesc.window.framebufferExtent();
     if (!requested.width || !requested.height) return false;
     if (rebuild || requested != size) {
@@ -202,7 +219,8 @@ bool VulkanSwapchain::beginFrame() {
         create();
         rebuild = false;
     }
-    const auto result = vkAcquireNextImageKHR(owner->handle, handle, UINT64_MAX, acquired, VK_NULL_HANDLE, &imageIndex);
+    const auto result = vkAcquireNextImageKHR(owner->handle, handle, UINT64_MAX, context.acquired, VK_NULL_HANDLE,
+                                              &imageIndex);
     if (result == VK_ERROR_OUT_OF_DATE_KHR) {
         rebuild = true;
         return false;
@@ -211,22 +229,24 @@ bool VulkanSwapchain::beginFrame() {
         rebuild = true;
     else
         check(result, "vkAcquireNextImageKHR");
-    check(vkResetCommandBuffer(commands.handle, 0), "vkResetCommandBuffer(frame)");
-    commands.inPass = false;
-    commands.indexBound = false;
-    commands.computePipeline = nullptr;
-    commands.computeBoundLayout = nullptr;
-    commands.computeSets.clear();
+    check(vkResetCommandBuffer(context.commands.handle, 0), "vkResetCommandBuffer(frame)");
+    context.commands.inPass = false;
+    context.commands.indexBound = false;
+    context.commands.computePipeline = nullptr;
+    context.commands.computeBoundLayout = nullptr;
+    context.commands.computeSets.clear();
     VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    check(vkBeginCommandBuffer(commands.handle, &begin), "vkBeginCommandBuffer(frame)");
-    commands.beginTimestampFrame();
+    check(vkBeginCommandBuffer(context.commands.handle, &begin), "vkBeginCommandBuffer(frame)");
+    context.commands.beginTimestampFrame();
+    currentFrameSlotIndex = candidateSlot;
+    nextFrameSlot = (candidateSlot + 1) % configuredFramesInFlight;
     acquiredFrame = true;
     return true;
 }
 CommandList& VulkanSwapchain::commandList() {
     if (!acquiredFrame) throw std::logic_error("No recording swapchain frame");
-    return commands;
+    return frameContexts.at(currentFrameSlotIndex)->commands;
 }
 Framebuffer& VulkanSwapchain::framebuffer() {
     if (!acquiredFrame) throw std::logic_error("No acquired swapchain framebuffer");
@@ -245,24 +265,25 @@ ResourceState VulkanSwapchain::imageState() const {
     return imageStates.at(imageIndex);
 }
 void VulkanSwapchain::submit() {
-    if (!acquiredFrame || submitted || commands.inPass)
+    auto& context = *frameContexts.at(currentFrameSlotIndex);
+    if (!acquiredFrame || submitted || context.commands.inPass)
         throw std::logic_error("Swapchain frame is not ready to submit");
-    check(vkEndCommandBuffer(commands.handle), "vkEndCommandBuffer(frame)");
+    check(vkEndCommandBuffer(context.commands.handle), "vkEndCommandBuffer(frame)");
     // Reset only after successful acquisition and recording. A skipped frame keeps its signaled fence.
-    check(vkResetFences(owner->handle, 1, &fence), "vkResetFences(frame)");
+    check(vkResetFences(owner->handle, 1, &context.fence), "vkResetFences(frame)");
     // The graph emits the acquire-image layout transition before beginning the
     // first render pass.  Wait at ALL_COMMANDS so the acquire semaphore also
     // orders that explicit barrier (not just color attachment writes).
     const VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
     VkSubmitInfo info{VK_STRUCTURE_TYPE_SUBMIT_INFO};
     info.waitSemaphoreCount = 1;
-    info.pWaitSemaphores = &acquired;
+    info.pWaitSemaphores = &context.acquired;
     info.pWaitDstStageMask = &waitStage;
     info.commandBufferCount = 1;
-    info.pCommandBuffers = &commands.handle;
+    info.pCommandBuffers = &context.commands.handle;
     info.signalSemaphoreCount = 1;
     info.pSignalSemaphores = &finished.at(imageIndex);
-    check(vkQueueSubmit(owner->graphicsQueue, 1, &info, fence), "vkQueueSubmit(frame)");
+    check(vkQueueSubmit(owner->graphicsQueue, 1, &info, context.fence), "vkQueueSubmit(frame)");
     acquiredFrame = false;
     submitted = true;
 }
@@ -291,7 +312,9 @@ VkRenderPass nativeGuiRenderPass(Device& device, Swapchain& swapchain) {
 }
 }
 namespace aeg::rhi::vulkan {
-std::unique_ptr<Swapchain> createVulkanSwapchain(Device& device) {
-    return std::make_unique<detail::VulkanSwapchain>(detail::nativeDevice(device));
+std::unique_ptr<Swapchain> createVulkanSwapchain(Device& device, std::uint32_t framesInFlight) {
+    if (framesInFlight != 2 && framesInFlight != 3)
+        throw std::invalid_argument("Vulkan swapchain supports only 2 or 3 frames in flight");
+    return std::make_unique<detail::VulkanSwapchain>(detail::nativeDevice(device), framesInFlight);
 }
 }

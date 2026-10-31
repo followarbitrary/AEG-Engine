@@ -30,6 +30,8 @@ struct FakeSwapchainContract final : aeg::rhi::Swapchain {
 };
 void swapchainImageContracts() {
     FakeSwapchainContract swapchain;
+    if (swapchain.framesInFlight() != 1 || swapchain.currentFrameSlot() != 0)
+        throw std::runtime_error("Default swapchain frame information changed");
     if (&swapchain.image() != &swapchain.texture || swapchain.imageState() != aeg::rhi::ResourceState::Undefined)
         throw std::runtime_error("Swapchain image contract did not expose Undefined image");
     swapchain.present();

@@ -302,6 +302,12 @@ private:
 };
 class VulkanSwapchain final : public Swapchain {
 public:
+    struct FrameContext {
+        VulkanCommands commands;
+        VkFence fence{};
+        VkSemaphore acquired{};
+        explicit FrameContext(VulkanDevice& device) : commands(device) {}
+    };
     VulkanDevice* owner;
     VkSwapchainKHR handle{};
     VkFormat format{VK_FORMAT_UNDEFINED};
@@ -316,10 +322,11 @@ public:
     std::vector<ResourceState> imageStates;
     std::vector<VkImageView> views;
     std::vector<VkSemaphore> finished;
-    VulkanCommands commands;
-    VkFence fence{};
-    VkSemaphore acquired{};
-    explicit VulkanSwapchain(VulkanDevice&);
+    std::uint32_t configuredFramesInFlight{2};
+    std::uint32_t nextFrameSlot{};
+    std::uint32_t currentFrameSlotIndex{};
+    std::vector<std::unique_ptr<FrameContext>> frameContexts;
+    explicit VulkanSwapchain(VulkanDevice&, std::uint32_t framesInFlight = 2);
     ~VulkanSwapchain() override;
     bool beginFrame() override;
     CommandList& commandList() override;
@@ -332,8 +339,10 @@ public:
     std::uint32_t imageCount() const override { return static_cast<std::uint32_t>(frames.size()); }
     Texture& image() override;
     ResourceState imageState() const override;
+    [[nodiscard]] std::uint32_t framesInFlight() const override { return configuredFramesInFlight; }
+    [[nodiscard]] std::uint32_t currentFrameSlot() const override { return currentFrameSlotIndex; }
     [[nodiscard]] std::span<const GpuPassTiming> gpuPassTimings() const override {
-        return commands.gpuPassTimings();
+        return frameContexts.at(currentFrameSlotIndex)->commands.gpuPassTimings();
     }
     void submit() override;
     void present() override;
