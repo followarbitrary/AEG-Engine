@@ -46,7 +46,7 @@ struct Renderer::Impl {
     FrameToken graphFrame{};
     rhi::Texture* graphIntermediate{};
     std::shared_ptr<rhi::Texture> graphFiltered;
-    std::unique_ptr<rhi::Framebuffer> graphPostFrame;
+    std::vector<std::unique_ptr<rhi::Framebuffer>> graphPostFrames;
     std::vector<std::unique_ptr<rhi::BindingSet>> graphPostDescriptors;
     rhi::BindingSet* graphPostDescriptor{};
     std::string graphDump;

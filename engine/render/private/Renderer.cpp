@@ -89,6 +89,7 @@ void Renderer::Impl::createDescriptors() {
                                                    {2, CombinedTextureSampler, Fragment},
                                                    {3, CombinedTextureSampler, Fragment}}});
     postSetLayout = device.createBindingLayout({{{0, CombinedTextureSampler, Fragment}}});
+    graphPostFrames.resize(framesInFlight);
     graphPostDescriptors.resize(framesInFlight);
     environmentSetLayout = device.createBindingLayout({{{0, CombinedTextureSampler, Fragment},
                                                         {1, CombinedTextureSampler, Fragment},
@@ -438,7 +439,7 @@ void Renderer::Impl::recordFrame(rhi::CommandList& commands, const RenderSetting
         fxaaPass.read(fxaaSource, RenderGraph::Usage::SampledRead)
             .write(intermediate, RenderGraph::Usage::ColorWrite)
             .setFinalState(intermediate, rhi::ResourceState::Sampled)
-            .setExternalRenderPass(*postPass, viewport->extent(), &graphPostFrame);
+            .setExternalRenderPass(*postPass, viewport->extent(), &graphPostFrames.at(activeFrameSlot));
         output = intermediate;
     }
 
