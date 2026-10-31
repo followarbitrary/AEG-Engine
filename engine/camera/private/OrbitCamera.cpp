@@ -2,12 +2,15 @@
 #include <math.hpp>
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <numbers>
 
 namespace aeg::camera {
 namespace {
 constexpr float fieldOfView = 0.78539816339f;
 constexpr float halfPi = std::numbers::pi_v<float> * 0.5f;
+constexpr float maximumSafeRadius = std::numeric_limits<float>::max() / 16.0f;
+constexpr float maximumSafeDistance = std::numeric_limits<float>::max() / 8.0f;
 bool finite(math::Vec3 v) { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); }
 struct OrbitBasis {
     math::Vec3 backward;
@@ -30,12 +33,20 @@ void OrbitCamera::fit(const foundation::Bounds& bounds) {
     if (!finite(bounds.min) || !finite(bounds.max)) return;
     // Difference-first avoids overflow for models far from the origin.
     target_ = bounds.min + (bounds.max - bounds.min) * 0.5f;
-    radius_ = bounds.radius();
+    // Keep the derived clip range representable. The importer accepts finite
+    // float coordinates, but a finite model radius can still overflow after
+    // the fit distance and far-plane multipliers are applied.
+    radius_ = std::min(bounds.radius(), maximumSafeRadius);
     if (!finite(target_) || !std::isfinite(radius_)) {
         target_ = {0, 0, 0};
         radius_ = 1;
     }
-    distance_ = radius_ / std::sin(fieldOfView * 0.5f) * 1.2f;
+    distance_ = std::min(radius_ / std::sin(fieldOfView * 0.5f) * 1.2f, maximumSafeDistance);
+    if (!finite(position())) {
+        target_ = {0, 0, 0};
+        radius_ = 1;
+        distance_ = 1.0f / std::sin(fieldOfView * 0.5f) * 1.2f;
+    }
 }
 bool OrbitCamera::setViewDirection(math::Vec3 towardViewer) {
     if (!finite(towardViewer)) return false;
@@ -68,8 +79,9 @@ void OrbitCamera::pan(float deltaX, float deltaY, float viewportHeight) {
 }
 void OrbitCamera::zoom(float steps) {
     if (!std::isfinite(steps)) return;
-    distance_ =
-        std::clamp(distance_ * std::exp(std::clamp(-steps * 0.15f, -30.0f, 30.0f)), radius_ * 0.02f, radius_ * 1000.0f);
+    const auto maximumDistance = std::min(radius_ * 1000.0f, maximumSafeDistance);
+    distance_ = std::clamp(distance_ * std::exp(std::clamp(-steps * 0.15f, -30.0f, 30.0f)), radius_ * 0.02f,
+                            maximumDistance);
 }
 math::Vec3 OrbitCamera::position() const { return target_ + distance_ * orbitBasis(yaw_, pitch_).backward; }
 math::Mat4 OrbitCamera::view() const { return math::look_at(position(), target_, orbitBasis(yaw_, pitch_).up); }

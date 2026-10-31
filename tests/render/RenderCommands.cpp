@@ -403,6 +403,9 @@ void pbrContracts() {
     settings.set_camera(smallCamera.render_camera(1));
     require(math::nearly_equal(settings.cameraPosition, smallCamera.position(), 1e-7f),
             "Small fitted camera at minimum zoom lost its eye position");
+    camera::OrbitCamera hugeCamera;
+    hugeCamera.fit({math::Vec3(-7.0e37f), math::Vec3(7.0e37f)});
+    settings.set_camera(hugeCamera.render_camera(1.6f));
     const math::Vec3 distantEye{2000000, 3000000, 4000000};
     for (const bool perspective : {false, true}) {
         const auto projection =

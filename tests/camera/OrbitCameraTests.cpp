@@ -296,6 +296,17 @@ void renderCameraContract() {
         }
     }
 }
+void hugeFiniteBoundsKeepCameraValid() {
+    aeg::camera::OrbitCamera camera;
+    camera.fit({aeg::math::Vec3(-7.0e37f), aeg::math::Vec3(7.0e37f)});
+    require(finite(camera.view()) && camera.view() != aeg::math::Mat4{} &&
+                finite(camera.projection(1.6f)) && camera.projection(1.6f) != aeg::math::Mat4{},
+            "finite but very large model bounds must not produce an invalid render camera");
+    camera.zoom(-1.0e8f);
+    require(finite(camera.view()) && camera.view() != aeg::math::Mat4{} &&
+                finite(camera.projection(1.6f)) && camera.projection(1.6f) != aeg::math::Mat4{},
+            "zooming out a very large model must keep the render camera finite");
+}
 }
 int main() {
     int failures = 0;
@@ -307,6 +318,7 @@ int main() {
         {"view direction failure preserves state", viewDirectionPreservesStateOnFailure},
         {"orbit camera", camera},
         {"render camera matrix and convention contract", renderCameraContract},
+        {"huge finite bounds keep camera valid", hugeFiniteBoundsKeepCameraValid},
         {"horizontal orbit follows drag", horizontalOrbitFollowsDrag},
         {"close view preserves layer depth", closeViewPreservesLayerDepth},
         {"full zoom preserves nearby surfaces", fullZoomPreservesNearbySurfaces}};
