@@ -5,6 +5,20 @@
 #include <iostream>
 
 namespace aeg::editor {
+namespace {
+void drawInspectorHeading(const char* label, const char* detail = nullptr) {
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(label);
+    if (detail) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", detail);
+    }
+    ImGui::Spacing();
+}
+}
+
 void drawInspectorPanel(EditorState& state, render::Renderer& renderer) {
     auto& transform = state.transform();
     auto& autoRotate = state.autoRotate();
@@ -18,6 +32,9 @@ void drawInspectorPanel(EditorState& state, render::Renderer& renderer) {
     auto& viewportHeight = state.viewportHeight;
     bool antialiasingChanged = false;
     if (ImGui::Begin(inspectorWindow)) {
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8.0f, 6.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(6.0f, 3.0f));
+        drawInspectorHeading("对象属性", "Transform / Material / Lighting");
         if (ImGui::CollapsingHeader("变换###Transform", ImGuiTreeNodeFlags_DefaultOpen)) {
             float translation[]{transform.translation.x, transform.translation.y, transform.translation.z};
             float rotation[]{transform.rotation.x, transform.rotation.y, transform.rotation.z};
@@ -43,9 +60,13 @@ void drawInspectorPanel(EditorState& state, render::Renderer& renderer) {
                 frameRequested = true;
             }
         }
+        ImGui::Spacing();
         drawToneMappingSection(state, renderer);
+        ImGui::Spacing();
         drawMaterialSection(state, renderer);
+        ImGui::Spacing();
         drawLightingSection(state, renderer);
+        ImGui::Spacing();
         if (ImGui::CollapsingHeader("抗锯齿###Antialiasing", ImGuiTreeNodeFlags_DefaultOpen)) {
             ImGui::BeginDisabled(!supportedTaa);
             antialiasingChanged |= ImGui::Checkbox("TAA 时域抗锯齿###TAA", &antialiasing.taa);
@@ -79,11 +100,11 @@ void drawInspectorPanel(EditorState& state, render::Renderer& renderer) {
             }
             if (!antialiasingNotice.empty()) ImGui::TextWrapped("%s", antialiasingNotice.c_str());
         }
-        ImGui::Spacing();
-        ImGui::TextDisabled("渲染器");
+        drawInspectorHeading("渲染器", "Device / Validation / Viewport");
         ImGui::TextWrapped("Vulkan | %s", renderer.deviceName().c_str());
         ImGui::Text("验证错误：%u", renderer.validationErrorCount());
         ImGui::Text("视口：%u x %u", viewportWidth, viewportHeight);
+        ImGui::PopStyleVar(2);
     }
     ImGui::End();
 

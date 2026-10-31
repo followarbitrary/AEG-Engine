@@ -4,13 +4,29 @@
 #include <exception>
 
 namespace aeg::editor {
+namespace {
+void drawDebugHeading(const char* label, const char* detail = nullptr) {
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(label);
+    if (detail) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", detail);
+    }
+    ImGui::Spacing();
+}
+}
+
 void drawDebugPanel(EditorState& state, render::Renderer& renderer, EditorGraphics& graphics) {
     if (!ImGui::Begin(debugWindow)) {
         ImGui::End();
         return;
     }
 
-    ImGui::TextDisabled("RenderGraph pass");
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8.0f, 6.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(6.0f, 3.0f));
+    drawDebugHeading("RenderGraph pass", "Pass visibility");
     auto passes = renderer.renderDebugSettings();
     bool passChanged = false;
     passChanged |= ImGui::Checkbox("阴影 pass###Debug shadows", &passes.shadows);
@@ -25,8 +41,7 @@ void drawDebugPanel(EditorState& state, render::Renderer& renderer, EditorGraphi
     }
     ImGui::TextDisabled("Scene 与 Present 始终保留。");
 
-    ImGui::Separator();
-    ImGui::TextDisabled("TAA 参数");
+    drawDebugHeading("TAA 参数", "Temporal accumulation");
     auto aa = renderer.antialiasing();
     bool taaChanged = false;
     ImGui::BeginDisabled(!renderer.supportsTemporalAA());
@@ -45,8 +60,7 @@ void drawDebugPanel(EditorState& state, render::Renderer& renderer, EditorGraphi
         ImGui::Text("历史帧：%u", renderer.temporalFrameCount());
     if (ImGui::Button("重置 TAA 历史###Debug reset TAA")) renderer.resetTemporalHistory();
 
-    ImGui::Separator();
-    ImGui::TextDisabled("上一帧 GPU 时间戳");
+    drawDebugHeading("上一帧 GPU 时间戳", "Pass timings");
     const auto timings = graphics.gpuPassTimings();
     if (timings.empty()) {
         ImGui::TextDisabled("暂无可用 query 结果。");
@@ -59,12 +73,14 @@ void drawDebugPanel(EditorState& state, render::Renderer& renderer, EditorGraphi
         }
     }
 
+    ImGui::Spacing();
     if (ImGui::CollapsingHeader("RenderGraph dump###Debug graph dump")) {
         ImGui::BeginChild("##GraphDump", ImVec2(0, 180), true);
         ImGui::TextUnformatted(graphics.renderGraphDump().empty() ? "暂无 graph dump。"
                                                                     : graphics.renderGraphDump().c_str());
         ImGui::EndChild();
     }
+    ImGui::PopStyleVar(2);
     ImGui::End();
 }
 }

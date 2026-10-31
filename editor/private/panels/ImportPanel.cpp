@@ -9,6 +9,14 @@
 #include <utility>
 
 namespace aeg::editor {
+namespace {
+void drawSectionHeading(const char* label) {
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::TextDisabled("%s", label);
+}
+}
+
 void drawImportPanel(EditorState& state) {
     auto& model = state.model();
     auto& imports = state.imports;
@@ -20,13 +28,18 @@ void drawImportPanel(EditorState& state) {
         ImGui::SetNextItemWidth(-1);
         const bool enter = ImGui::InputTextWithHint("##ModelPath", "模型文件路径", importPath.data(), importPath.size(),
                                                     ImGuiInputTextFlags_EnterReturnsTrue);
-        if (ImGui::Button("导入模型###Import model", {-1, 0}) || enter) {
+        ImGui::PushStyleColor(ImGuiCol_Button, {0.12f, 0.40f, 0.68f, 1.0f});
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, {0.18f, 0.52f, 0.82f, 1.0f});
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, {0.24f, 0.62f, 0.92f, 1.0f});
+        const bool import = ImGui::Button("导入模型###Import model", {-1, 0});
+        ImGui::PopStyleColor(3);
+        if (import || enter) {
             if (importPath[0])
                 imports.paths.push_back(foundation::pathFromUtf8(importPath.data()));
             else
                 imports.error = "请先输入模型文件路径。";
         }
-        ImGui::Separator();
+        drawSectionHeading("最近状态");
         ImGui::TextWrapped("%s", status.c_str());
         if (!imports.error.empty()) {
             ImGui::PushStyleColor(ImGuiCol_Text, {1, 0.49f, 0.43f, 1});
@@ -34,10 +47,10 @@ void drawImportPanel(EditorState& state) {
             ImGui::TextWrapped("%s", imports.error.c_str());
             ImGui::PopStyleColor();
         }
+        drawSectionHeading("导入提示");
         if (!model.warnings.empty() && ImGui::CollapsingHeader("导入提示###Import notices"))
             for (const auto& warning : model.warnings) ImGui::TextWrapped("%s", warning.c_str());
-        ImGui::Spacing();
-        ImGui::TextDisabled("视口操作");
+        drawSectionHeading("视口操作");
         ImGui::TextWrapped(
             "W / E / R：移动 / 旋转 / 缩放\n拖动手柄：变换模型\nEsc：取消本次拖动\n右上角方向轴：切换视角\n左键 / "
             "右键拖动空白处：环绕\n中键拖动：平移\n滚轮：缩放\nF：聚焦模型");

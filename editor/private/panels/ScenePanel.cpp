@@ -2,6 +2,12 @@
 
 namespace aeg::editor {
 namespace {
+void drawSectionHeading(const char* label) {
+    ImGui::Spacing();
+    ImGui::Separator();
+    ImGui::TextDisabled("%s", label);
+}
+
 void drawEntityNode(EditorState& state, const ecs::Entity entity) {
     auto& registry = state.scene.registry();
     const auto& renderable = registry.get<Renderable>(entity);
@@ -33,8 +39,7 @@ void drawScenePanel(EditorState& state) {
     if (ImGui::Begin(sceneWindow)) {
         ImGui::TextDisabled("当前模型");
         ImGui::Selectable(model.name.c_str(), true);
-        ImGui::Separator();
-        ImGui::TextDisabled("场景树");
+        drawSectionHeading("场景树");
         for (const auto entity : state.renderableEntities) {
             if (state.scene.registry().all_of<Parent>(entity)) {
                 const auto parent = state.scene.registry().get<Parent>(entity).entity;
@@ -44,14 +49,23 @@ void drawScenePanel(EditorState& state) {
             }
             drawEntityNode(state, entity);
         }
-        ImGui::Separator();
-        ImGui::Text("网格：%zu", model.meshes.size());
-        ImGui::Text("材质：%zu", model.materials.size());
-        ImGui::Text("顶点：%zu", model.vertexCount());
-        ImGui::Text("三角形：%zu", model.triangleCount());
+        drawSectionHeading("场景统计");
+        if (ImGui::BeginTable("SceneStats", 2, ImGuiTableFlags_SizingStretchProp)) {
+            const auto stat = [](const char* label, const std::size_t value) {
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::TextDisabled("%s", label);
+                ImGui::TableNextColumn();
+                ImGui::Text("%zu", value);
+            };
+            stat("网格", model.meshes.size());
+            stat("材质", model.materials.size());
+            stat("顶点", model.vertexCount());
+            stat("三角形", model.triangleCount());
+            ImGui::EndTable();
+        }
         if (ImGui::Button("聚焦模型###Frame model", {-1, 0})) frameRequested = true;
-        ImGui::Spacing();
-        ImGui::TextDisabled("网格列表");
+        drawSectionHeading("网格列表");
         if (ImGui::BeginTable("MeshList", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
             ImGui::TableSetupColumn("名称", ImGuiTableColumnFlags_WidthStretch);
             ImGui::TableSetupColumn("三角形", ImGuiTableColumnFlags_WidthFixed, 72);
