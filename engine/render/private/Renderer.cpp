@@ -234,6 +234,13 @@ void Renderer::Impl::prepareRenderGraph(rhi::CommandList& commands) {
     (void)commands;
 }
 
+void Renderer::Impl::setRenderDebugSettings(const RenderDebugSettings& settings) {
+    if (settings == debugPasses) return;
+    debugPasses = settings;
+    invalidateOutput();
+    resetTemporalHistory();
+}
+
 void Renderer::Impl::recordFxaaGraph(rhi::CommandList& commands) {
     (void)commands;
 }
@@ -246,6 +253,9 @@ std::shared_ptr<rhi::Texture> Renderer::Impl::outputTexture() const {
 
 void Renderer::Impl::recordFrame(rhi::CommandList& commands, const RenderSettings& settings) {
     retryingFrame = pendingFrame;
+    recordingTaa = aa.taa && debugPasses.taa;
+    recordingFxaa = aa.fxaa && debugPasses.fxaa;
+    recordingToneMapping = debugPasses.toneMapping;
     if (graphIntermediate) {
         // EditorGraphics has waited for the prior frame fence before recording
         // a replacement. CPU-only retries retain the pending lease and reuse
@@ -260,16 +270,20 @@ void Renderer::Impl::recordFrame(rhi::CommandList& commands, const RenderSetting
     // Recording is speculative. Acquisition/submit failure must leave the
     // previous frame's jitter, history and capture image unchanged.
     recordingHistory = temporalHistory;
-    if (aa.taa) {
+    if (recordingTaa) {
         pendingHistoryColorState = viewport->historyColorState;
         pendingHistoryDepthState = viewport->historyDepthState;
     }
     auto uniform = sceneUniform(settings);
     configureShadowUniform(uniform, settings);
+    if (!debugPasses.shadows) uniform.shadowInfo.x = 0.0f;
     std::memcpy(uniformBuffer->mapped().data(), &uniform, sizeof(uniform));
 
     // Create all lazy scene variants before graph execution starts. Graph
     // callbacks are draw bodies only and therefore run inside an active pass.
+    // Keep the scene pass attachment shape tied to the effective AA mode. A
+    // debug toggle may skip the TAA resolve, but it must not mismatch the
+    // temporal scene framebuffer owned by the viewport.
     auto& scene = scenePipeline(aa.msaaSamples, aa.taa, settings.clipSpace.reversed_z);
     const bool hasTransparent = model && std::ranges::any_of(model->materials, [](const auto& material) {
         return material.parameters.alphaMode == static_cast<std::uint32_t>(assets::AlphaMode::Blend);
@@ -278,7 +292,7 @@ void Renderer::Impl::recordFrame(rhi::CommandList& commands, const RenderSetting
 
     RenderGraph graph;
     std::vector<RenderGraph::Handle> shadowHandles;
-    if (uniform.shadowInfo.x >= 0.5f && shadow && model) {
+    if (uniform.shadowInfo.x >= 0.5f && debugPasses.shadows && shadow && model) {
         const auto count = static_cast<std::uint32_t>(uniform.shadowInfo.w);
         shadowHandles.reserve(count);
         for (std::uint32_t cascade = 0; cascade < count; ++cascade) {
@@ -331,7 +345,7 @@ void Renderer::Impl::recordFrame(rhi::CommandList& commands, const RenderSetting
     const auto writeIndex = 1u - readIndex;
     std::optional<RenderGraph::Handle> historyColorWrite;
     std::optional<RenderGraph::Handle> historyDepthWrite;
-    if (aa.taa) {
+    if (recordingTaa) {
         const auto historyColorRead = graph.importTexture(*viewport->historyColor[readIndex],
                                                           pendingHistoryColorState[readIndex], "taa-history-color-read");
         const auto historyDepthRead = graph.importTexture(*viewport->historyDepth[readIndex],
@@ -355,23 +369,30 @@ void Renderer::Impl::recordFrame(rhi::CommandList& commands, const RenderSetting
     }
 
     const auto toneMapped = graph.importTexture(*viewport->toneMapped, viewport->toneMappedState, "tone-mapped");
-    auto toneGraphPass = graph.addPass("Tone Mapping", RenderGraph::PassType::Graphics, RenderGraph::PassFlags::None,
-                                       [this, &commands](RenderGraph::PassContext&) { drawToneMapping(commands); });
-    toneGraphPass.read(toneSource, RenderGraph::Usage::SampledRead)
-        .write(toneMapped, RenderGraph::Usage::ColorWrite)
-        .setFinalState(toneMapped, rhi::ResourceState::Sampled)
-        .setExternalRenderPass(*this->tonePass, *viewport->toneFrame, viewport->extent());
+    RenderGraph::Handle output = toneSource;
+    if (recordingToneMapping) {
+        auto toneGraphPass = graph.addPass("Tone Mapping", RenderGraph::PassType::Graphics,
+                                           RenderGraph::PassFlags::None,
+                                           [this, &commands](RenderGraph::PassContext&) { drawToneMapping(commands); });
+        toneGraphPass.read(toneSource, RenderGraph::Usage::SampledRead)
+            .write(toneMapped, RenderGraph::Usage::ColorWrite)
+            .setFinalState(toneMapped, rhi::ResourceState::Sampled)
+            .setExternalRenderPass(*this->tonePass, *viewport->toneFrame, viewport->extent());
+        output = toneMapped;
+    } else if (!recordingTaa) {
+        scenePass.setFinalState(color, rhi::ResourceState::Sampled);
+    }
 
-    RenderGraph::Handle output = toneMapped;
-    if (aa.fxaa) {
+    if (recordingFxaa) {
         const auto intermediate = graph.createTexture(
             {{viewport->width, viewport->height}, displayFormat, outputUsage}, "fxaa-intermediate", true);
+        const auto fxaaSource = output;
         auto fxaaPass = graph.addPass("FXAA", RenderGraph::PassType::Graphics, RenderGraph::PassFlags::None,
-                                      [this, intermediate, &commands](RenderGraph::PassContext& context) {
+                                      [this, intermediate, fxaaSource, &commands](RenderGraph::PassContext& context) {
                                           auto& texture = context.texture(intermediate);
                                           graphIntermediate = &texture;
                                           graphFiltered = graphPool.lease(texture);
-                                          const std::array writes{rhi::BindingWrite{0, nullptr, viewport->toneMapped.get(),
+                                          const std::array writes{rhi::BindingWrite{0, nullptr, &context.texture(fxaaSource),
                                                                                    viewportSampler.get()}};
                                           graphPostDescriptor = device.createBindingSet(*postSetLayout, writes);
                                           commands.bindPipeline(*postPipeline);
@@ -382,7 +403,7 @@ void Renderer::Impl::recordFrame(rhi::CommandList& commands, const RenderSetting
                                           commands.pushConstants(*postLayout, std::as_bytes(std::span(&reciprocal, 1)));
                                           commands.draw(3);
                                       });
-        fxaaPass.read(toneMapped, RenderGraph::Usage::SampledRead)
+        fxaaPass.read(fxaaSource, RenderGraph::Usage::SampledRead)
             .write(intermediate, RenderGraph::Usage::ColorWrite)
             .setFinalState(intermediate, rhi::ResourceState::Sampled)
             .setExternalRenderPass(*postPass, viewport->extent(), &graphPostFrame);
@@ -393,10 +414,15 @@ void Renderer::Impl::recordFrame(rhi::CommandList& commands, const RenderSetting
     graphDump = graph.debugDump();
     prepareGpuCulling(commands, settings, uniform);
     graph.execute(commands, device, graphPool, ++graphFrame);
-    if (aa.fxaa && !retryingFrame) {
+    if (recordingFxaa && !retryingFrame) {
         viewport->filtered = std::move(graphFiltered);
     }
-    if (!retryingFrame) pendingOutput = aa.fxaa ? viewport->filtered : viewport->toneMapped;
+    if (!retryingFrame) {
+        pendingOutput = recordingFxaa ? viewport->filtered
+                                      : (recordingToneMapping ? viewport->toneMapped :
+                                                                           (recordingTaa ? viewport->historyColor[writeIndex]
+                                                                                         : viewport->color));
+    }
     // std::cerr << "pending=" << pendingOutput.get() << " retry=" << retryingFrame << "\n";
     pendingSettings = settings;
     pendingFrame = true;
@@ -405,7 +431,7 @@ void Renderer::Impl::recordFrame(rhi::CommandList& commands, const RenderSetting
 void Renderer::Impl::frameSubmitted() {
     if (!pendingFrame) return;
     submittedOutput = pendingOutput;
-    if (aa.taa) {
+    if (recordingTaa) {
         recordingHistory.readIndex = 1u - recordingHistory.readIndex;
         recordingHistory.previous = pendingSettings;
         recordingHistory.valid = true;
@@ -435,6 +461,8 @@ void Renderer::setAntialiasing(const AntialiasingSettings& settings) { impl_->se
 AntialiasingSettings Renderer::antialiasing() const { return impl_->aa; }
 std::uint32_t Renderer::supportedMsaaSamples() const { return impl_->sampleMask; }
 bool Renderer::supportsTemporalAA() const { return impl_->temporalSupported; }
+void Renderer::setRenderDebugSettings(const RenderDebugSettings& settings) { impl_->setRenderDebugSettings(settings); }
+RenderDebugSettings Renderer::renderDebugSettings() const { return impl_->debugPasses; }
 void Renderer::setShadows(const ShadowSettings& settings) { impl_->setShadows(settings); }
 ShadowSettings Renderer::shadows() const { return impl_->shadowSettings; }
 bool Renderer::supportsShadows() const { return impl_->shadowSupported; }

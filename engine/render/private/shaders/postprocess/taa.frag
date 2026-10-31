@@ -13,7 +13,8 @@ layout(set = 0, binding = 3) uniform sampler2D historyDepth;
 layout(push_constant) uniform TemporalParameters {
     layout(offset = 0) vec2 inverseResolution;
     layout(offset = 8) float historyWeight;
-    layout(offset = 12) uint historyValid;
+    layout(offset = 12) float depthThreshold;
+    layout(offset = 16) uint historyValid;
 }
 temporal;
 
@@ -62,7 +63,7 @@ void main() {
     ivec2 historyPixel = clamp(ivec2(historyUV / temporal.inverseResolution), ivec2(0), resolution - 1);
     float storedDepth = texelFetch(historyDepth, historyPixel, 0).r;
     float expectedDepth = selectedMotion.z;
-    float depthTolerance = 0.01 * max(abs(storedDepth), abs(expectedDepth)) + 1e-4;
+    float depthTolerance = temporal.depthThreshold * max(abs(storedDepth), abs(expectedDepth)) + 1e-4;
     if (storedDepth < 0.0 || abs(storedDepth - expectedDepth) > depthTolerance) return;
 
     // Only historical RGB is filtered. Current samples stay raw for temporal accumulation.

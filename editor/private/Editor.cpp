@@ -29,6 +29,7 @@ int runEditor(const EditorOptions& options, const EditorBackendFactory& factory)
     EditorState state;
     assets::ModelResources resources;
     state.antialiasing = renderer.antialiasing();
+    state.debugPasses = renderer.renderDebugSettings();
     state.supportedMsaa = renderer.supportedMsaaSamples();
     state.supportedTaa = renderer.supportsTemporalAA();
     if (state.antialiasing.msaaSamples != options.msaaSamples) {
@@ -78,6 +79,7 @@ int runEditor(const EditorOptions& options, const EditorBackendFactory& factory)
             drawImportPanel(state);
             // The inspector applies AA before the viewport records its image descriptor.
             drawInspectorPanel(state, renderer);
+            drawDebugPanel(state, renderer, graphics);
             drawViewportPanel(state, renderer, graphics);
         });
         if (builtUi) ++state.frames;

@@ -3,6 +3,7 @@
 namespace aeg::rhi::vulkan::detail {
 VulkanSwapchain::VulkanSwapchain(VulkanDevice& device) : owner(&device), commands(device) {
     try {
+        commands.initializeTimestampQueries();
         VkCommandBufferAllocateInfo allocate{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
         allocate.commandPool = owner->pool;
         allocate.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
@@ -36,6 +37,7 @@ void VulkanSwapchain::destroyImages() noexcept {
 }
 void VulkanSwapchain::cleanup() noexcept {
     vkDeviceWaitIdle(owner->handle);
+    commands.destroyTimestampQueries();
     destroyImages();
     pass.reset();
     loadPass.reset();
@@ -191,6 +193,7 @@ void VulkanSwapchain::create() {
 bool VulkanSwapchain::beginFrame() {
     if (acquiredFrame || submitted) throw std::logic_error("Previous swapchain frame was not presented");
     check(vkWaitForFences(owner->handle, 1, &fence, VK_TRUE, UINT64_MAX), "vkWaitForFences(frame)");
+    commands.resolveTimestampQueries();
     const auto requested = owner->creationDesc.window.framebufferExtent();
     if (!requested.width || !requested.height) return false;
     if (rebuild || requested != size) {
@@ -217,6 +220,7 @@ bool VulkanSwapchain::beginFrame() {
     VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     check(vkBeginCommandBuffer(commands.handle, &begin), "vkBeginCommandBuffer(frame)");
+    commands.beginTimestampFrame();
     acquiredFrame = true;
     return true;
 }

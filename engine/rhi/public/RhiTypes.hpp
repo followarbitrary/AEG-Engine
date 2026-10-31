@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <string>
 #include <type_traits>
 #include <utility>
 
@@ -105,6 +106,11 @@ struct DeviceCapabilities {
     bool indirectDraw{true};
     bool shaderDrawParameters{};
     std::uint32_t maximumBindlessSampledDescriptors{};
+};
+struct GpuPassTiming {
+    std::string name;
+    double milliseconds{};
+    bool valid{};
 };
 struct ClearValue {
     std::array<float, 4> color{};

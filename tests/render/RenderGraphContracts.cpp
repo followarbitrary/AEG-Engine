@@ -647,6 +647,22 @@ void debugOrderingAndFrameReclamationContracts() {
                 importedResult.passes[0].preBarriers[0].after == State::Storage,
             "First use of imported storage did not emit a Storage-to-Storage dependency barrier");
 }
+
+void diagnosticScopeContracts() {
+    aeg::tests::FakeDevice device;
+    Pool pool(device);
+    Graph graph;
+    const auto target = graph.createTexture({{4, 4}, aeg::rhi::Format::Rgba8Unorm,
+                                             aeg::rhi::TextureUsage::ColorAttachment},
+                                            "diagnostic-target", false);
+    graph.addPass("diagnostic pass", Graph::PassType::Graphics, {}, {}).write(target, Graph::Usage::ColorWrite);
+    graph.compile({target});
+    aeg::tests::FakeCommands commands(&device.caps);
+    graph.execute(commands, device, pool, FrameToken{1});
+    require(commands.debugLabels.size() == 1 && commands.debugLabels.front() == "diagnostic pass" &&
+                commands.gpuPasses.size() == 1 && commands.gpuPasses.front() == "diagnostic pass",
+            "RenderGraph did not emit matching debug label and GPU timing scopes");
+}
 }
 
 int main() {
@@ -671,6 +687,7 @@ int main() {
         culledTransientAllocationContract();
         computeStorageAndCullingContracts();
         debugOrderingAndFrameReclamationContracts();
+        diagnosticScopeContracts();
         std::cout << "PASS RenderGraph contracts\n";
         return 0;
     } catch (const std::exception& error) {

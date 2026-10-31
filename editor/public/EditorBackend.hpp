@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <span>
 struct GLFWwindow;
 namespace aeg::editor {
 struct EditorBackend {
@@ -22,6 +23,7 @@ public:
     [[nodiscard]] render::Renderer& renderer();
     [[nodiscard]] ImTextureID viewportTexture();
     [[nodiscard]] const std::string& renderGraphDump() const;
+    [[nodiscard]] std::span<const rhi::GpuPassTiming> gpuPassTimings() const;
     void drawFrame(render::RenderSettings& settings, const std::function<void()>& buildUi);
 
 private:

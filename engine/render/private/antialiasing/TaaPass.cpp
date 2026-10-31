@@ -13,7 +13,7 @@ bool Renderer::Impl::perspectiveProjection(const aeg::math::Mat4& matrix) {
 }
 
 void Renderer::Impl::drawTemporal(rhi::CommandList& commands) {
-    if (!aa.taa) return;
+    if (!recordingTaa) return;
     // History image transitions and attachment barriers are owned by the
     // renderer graph; this callback only records the resolve draw body.
     commands.setViewport(viewport->extent());
@@ -21,7 +21,9 @@ void Renderer::Impl::drawTemporal(rhi::CommandList& commands) {
     commands.bindSet(*temporalLayout, 0, *viewport->temporalDescriptors[recordingHistory.readIndex]);
     const TemporalPush push{
         {1.0f / static_cast<float>(viewport->width), 1.0f / static_cast<float>(viewport->height)},
-        std::min(0.9f, static_cast<float>(recordingHistory.frames) / (static_cast<float>(recordingHistory.frames) + 1)),
+        std::min(aa.taaHistoryWeight,
+                 static_cast<float>(recordingHistory.frames) / (static_cast<float>(recordingHistory.frames) + 1)),
+        aa.taaDepthThreshold,
         recordingHistory.valid ? 1u : 0u};
     commands.pushConstants(*temporalLayout, std::as_bytes(std::span(&push, 1)));
     commands.draw(3);

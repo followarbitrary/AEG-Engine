@@ -1,12 +1,49 @@
 #include "EditorState.hpp"
 
 namespace aeg::editor {
+namespace {
+void drawEntityNode(EditorState& state, const ecs::Entity entity) {
+    auto& registry = state.scene.registry();
+    const auto& renderable = registry.get<Renderable>(entity);
+    const std::string fallback = "实体 " + std::to_string(static_cast<std::uint32_t>(entity.raw()));
+    const char* name = renderable.model.name.empty() ? fallback.c_str() : renderable.model.name.c_str();
+    const bool hasChildren = std::ranges::any_of(state.renderableEntities, [&](const auto child) {
+        return registry.all_of<Parent>(child) && registry.get<Parent>(child).entity == entity;
+    });
+    ImGui::PushID(static_cast<int>(entity.raw()));
+    const bool selected = state.selectedEntity == entity;
+    ImGuiTreeNodeFlags flags = selected ? ImGuiTreeNodeFlags_Selected : ImGuiTreeNodeFlags_None;
+    if (!hasChildren) flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+    const bool open = ImGui::TreeNodeEx(name, flags);
+    if (ImGui::IsItemClicked()) state.selectedEntity = entity;
+    if (open) {
+        for (const auto child : state.renderableEntities) {
+            if (!registry.all_of<Parent>(child) || registry.get<Parent>(child).entity != entity) continue;
+            drawEntityNode(state, child);
+        }
+        if (hasChildren) ImGui::TreePop();
+    }
+    ImGui::PopID();
+}
+}
+
 void drawScenePanel(EditorState& state) {
     auto& model = state.model();
     auto& frameRequested = state.frameRequested;
     if (ImGui::Begin(sceneWindow)) {
         ImGui::TextDisabled("当前模型");
         ImGui::Selectable(model.name.c_str(), true);
+        ImGui::Separator();
+        ImGui::TextDisabled("场景树");
+        for (const auto entity : state.renderableEntities) {
+            if (state.scene.registry().all_of<Parent>(entity)) {
+                const auto parent = state.scene.registry().get<Parent>(entity).entity;
+                if (parent.raw() != entt::null &&
+                    std::ranges::find(state.renderableEntities, parent) != state.renderableEntities.end())
+                    continue;
+            }
+            drawEntityNode(state, entity);
+        }
         ImGui::Separator();
         ImGui::Text("网格：%zu", model.meshes.size());
         ImGui::Text("材质：%zu", model.materials.size());

@@ -24,7 +24,14 @@ void Renderer::Impl::setAntialiasing(const AntialiasingSettings& requested) {
     if (requested.taa && !temporalSupported)
         throw std::runtime_error("TAA requires independent attachment blending and sampled RGBA32F motion, RGBA16F "
                                  "color and R32F depth attachments");
-    AntialiasingSettings effective{1, requested.fxaa, requested.taa};
+    if (!std::isfinite(requested.taaHistoryWeight) || requested.taaHistoryWeight < 0.0f ||
+        requested.taaHistoryWeight > 0.9f)
+        throw std::invalid_argument("TAA history weight must be finite and within [0, 0.9]");
+    if (!std::isfinite(requested.taaDepthThreshold) || requested.taaDepthThreshold < 0.0f ||
+        requested.taaDepthThreshold > 1.0f)
+        throw std::invalid_argument("TAA depth threshold must be finite and within [0, 1]");
+    AntialiasingSettings effective{1, requested.fxaa, requested.taa, requested.taaHistoryWeight,
+                                   requested.taaDepthThreshold};
     if (!requested.taa)
         for (const auto samples : {8u, 4u, 2u, 1u})
             if (samples <= requested.msaaSamples && (sampleMask & samples)) {

@@ -91,6 +91,15 @@ void VulkanDevice::createInstance() {
     if (version < VK_API_VERSION_1_2) throw std::runtime_error("Vulkan 1.2 or newer is required");
     std::vector<const char*> extensions{VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_WIN32_SURFACE_EXTENSION_NAME};
     std::uint32_t count{};
+    check(vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr),
+          "vkEnumerateInstanceExtensionProperties(global)");
+    std::vector<VkExtensionProperties> instanceExtensions(count);
+    check(vkEnumerateInstanceExtensionProperties(nullptr, &count, instanceExtensions.data()),
+          "vkEnumerateInstanceExtensionProperties(global)");
+    debugUtils = std::ranges::any_of(instanceExtensions, [](const auto& value) {
+        return std::string_view(value.extensionName) == VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
+    });
+    if (debugUtils) extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
     check(vkEnumerateInstanceLayerProperties(&count, nullptr), "vkEnumerateInstanceLayerProperties");
     std::vector<VkLayerProperties> layers(count);
     check(vkEnumerateInstanceLayerProperties(&count, layers.data()), "vkEnumerateInstanceLayerProperties");
@@ -100,11 +109,16 @@ void VulkanDevice::createInstance() {
                  });
     if (creationDesc.validation && !validation) std::cerr << "Validation layer unavailable; continuing without it.\n";
     if (validation) {
-        extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
         check(vkEnumerateInstanceExtensionProperties(layer, &count, nullptr), "vkEnumerateInstanceExtensionProperties");
         std::vector<VkExtensionProperties> available(count);
         check(vkEnumerateInstanceExtensionProperties(layer, &count, available.data()),
               "vkEnumerateInstanceExtensionProperties");
+        if (!debugUtils) {
+            debugUtils = std::ranges::any_of(available, [](const auto& value) {
+                return std::string_view(value.extensionName) == VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
+            });
+            if (debugUtils) extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+        }
         syncValidation = std::ranges::any_of(available, [](const auto& value) {
             return std::string_view(value.extensionName) == VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME;
         });
@@ -119,18 +133,22 @@ void VulkanDevice::createInstance() {
     VkValidationFeaturesEXT features{VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT};
     features.enabledValidationFeatureCount = 1;
     features.pEnabledValidationFeatures = &enabled;
-    if (syncValidation) debug.pNext = &features;
     VkInstanceCreateInfo info{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
     info.pApplicationInfo = &app;
     info.enabledExtensionCount = static_cast<std::uint32_t>(extensions.size());
     info.ppEnabledExtensionNames = extensions.data();
-    if (validation) {
+    if (validation && debugUtils) {
         info.enabledLayerCount = 1;
         info.ppEnabledLayerNames = &layer;
+        debug.pNext = syncValidation ? &features : nullptr;
         info.pNext = &debug;
+    } else if (validation) {
+        info.enabledLayerCount = 1;
+        info.ppEnabledLayerNames = &layer;
+        info.pNext = syncValidation ? &features : nullptr;
     }
     check(vkCreateInstance(&info, nullptr, &instance), "vkCreateInstance");
-    if (validation) {
+    if (validation && debugUtils) {
         auto create = reinterpret_cast<PFN_vkCreateDebugUtilsMessengerEXT>(
             vkGetInstanceProcAddr(instance, "vkCreateDebugUtilsMessengerEXT"));
         if (!create) throw std::runtime_error("Vulkan debug messenger entry point missing");
@@ -197,6 +215,7 @@ void VulkanDevice::selectDevice() {
             properties = props;
             graphicsFamily = *graphics;
             presentFamily = *present;
+            timestampValidBits = queues[*graphics].timestampValidBits;
             caps.compute = (queues[*graphics].queueFlags & VK_QUEUE_COMPUTE_BIT) != 0;
         }
     }
@@ -227,7 +246,10 @@ void VulkanDevice::selectDevice() {
         }
     if (caps.depthFormat == Format::Undefined) throw std::runtime_error("No compatible depth attachment format");
     std::cout << "Vulkan GPU: " << name << " | validation " << (validation ? "on" : "off")
-              << (syncValidation ? " (synchronization enabled)" : "") << '\n';
+              << (syncValidation ? " (synchronization enabled)" : "")
+              << " | debug labels " << (debugUtils ? "on" : "off")
+              << " | timestamps " << ((timestampValidBits && properties.limits.timestampPeriod > 0.0f) ? "on" : "off")
+              << '\n';
 }
 void VulkanDevice::createLogicalDevice() {
     const std::set<std::uint32_t> families{graphicsFamily, presentFamily};
@@ -255,6 +277,12 @@ void VulkanDevice::createLogicalDevice() {
     info.pNext = &features;
     info.pEnabledFeatures = nullptr;
     check(vkCreateDevice(physical, &info, nullptr, &handle), "vkCreateDevice");
+    if (debugUtils) {
+        cmdBeginDebugUtilsLabel = reinterpret_cast<PFN_vkCmdBeginDebugUtilsLabelEXT>(
+            vkGetDeviceProcAddr(handle, "vkCmdBeginDebugUtilsLabelEXT"));
+        cmdEndDebugUtilsLabel = reinterpret_cast<PFN_vkCmdEndDebugUtilsLabelEXT>(
+            vkGetDeviceProcAddr(handle, "vkCmdEndDebugUtilsLabelEXT"));
+    }
     VmaAllocatorCreateInfo allocatorInfo{};
     allocatorInfo.instance = instance;
     allocatorInfo.physicalDevice = physical;

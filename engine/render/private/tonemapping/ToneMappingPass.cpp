@@ -35,7 +35,7 @@ void Renderer::Impl::setToneMapping(const ToneMappingSettings& requested) {
 }
 
 void Renderer::Impl::drawToneMapping(rhi::CommandList& commands) {
-    const auto sourceIndex = aa.taa ? 1u + (1u - recordingHistory.readIndex) : 0u;
+    const auto sourceIndex = recordingTaa ? 1u + (1u - recordingHistory.readIndex) : 0u;
     commands.setViewport(viewport->extent());
     commands.bindPipeline(*tonePipeline);
     commands.bindSet(*toneLayout, 0, *viewport->toneDescriptors[sourceIndex]);

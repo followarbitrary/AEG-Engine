@@ -1,5 +1,6 @@
 #pragma once
 #include <AntialiasingSettings.hpp>
+#include <RenderDebugSettings.hpp>
 #include <ModelData.hpp>
 #include <RenderSettings.hpp>
 #include <ShadowSettings.hpp>
@@ -29,6 +30,8 @@ public:
     [[nodiscard]] AntialiasingSettings antialiasing() const;
     [[nodiscard]] std::uint32_t supportedMsaaSamples() const;
     [[nodiscard]] bool supportsTemporalAA() const;
+    void setRenderDebugSettings(const RenderDebugSettings& settings);
+    [[nodiscard]] RenderDebugSettings renderDebugSettings() const;
     void setShadows(const ShadowSettings& settings);
     [[nodiscard]] ShadowSettings shadows() const;
     [[nodiscard]] bool supportsShadows() const;

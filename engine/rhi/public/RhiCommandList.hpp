@@ -2,6 +2,7 @@
 #include <RhiPipeline.hpp>
 #include <span>
 #include <stdexcept>
+#include <string_view>
 namespace aeg::rhi {
 class CommandList {
 public:
@@ -28,5 +29,9 @@ public:
     }
     virtual void copyBuffer(Buffer& source, Buffer& destination, std::size_t bytes) = 0;
     virtual void copyTextureToBuffer(Texture& source, Buffer& destination, TextureSubresource subresource = {}) = 0;
+    virtual void beginDebugLabel(std::string_view) {}
+    virtual void endDebugLabel() {}
+    virtual void beginGpuPass(std::string_view) {}
+    virtual void endGpuPass() {}
 };
 }

@@ -1,6 +1,97 @@
 #include "VulkanBackendInternal.hpp"
 
 namespace aeg::rhi::vulkan::detail {
+
+void VulkanCommands::initializeTimestampQueries() {
+    if (timestampPool || !owner->timestampValidBits || owner->properties.limits.timestampPeriod <= 0.0f)
+        return;
+    VkQueryPoolCreateInfo info{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+    info.queryType = VK_QUERY_TYPE_TIMESTAMP;
+    info.queryCount = maxGpuPassQueries;
+    // Timestamp queries are optional instrumentation. A device that cannot
+    // allocate the pool still renders normally; the UI simply reports no data.
+    if (vkCreateQueryPool(owner->handle, &info, nullptr, &timestampPool) != VK_SUCCESS) timestampPool = VK_NULL_HANDLE;
+}
+
+void VulkanCommands::destroyTimestampQueries() noexcept {
+    if (timestampPool && owner->handle) vkDestroyQueryPool(owner->handle, timestampPool, nullptr);
+    timestampPool = VK_NULL_HANDLE;
+    pendingGpuPasses.clear();
+    activeGpuPasses.clear();
+    completedGpuPasses.clear();
+    nextTimestampQuery = 0;
+}
+
+void VulkanCommands::beginTimestampFrame() {
+    pendingGpuPasses.clear();
+    activeGpuPasses.clear();
+    nextTimestampQuery = 0;
+    if (timestampPool) vkCmdResetQueryPool(handle, timestampPool, 0, maxGpuPassQueries);
+}
+
+void VulkanCommands::resolveTimestampQueries() {
+    completedGpuPasses.clear();
+    if (!timestampPool) return;
+    completedGpuPasses.reserve(pendingGpuPasses.size());
+    for (const auto& pending : pendingGpuPasses) {
+        GpuPassTiming timing;
+        timing.name = pending.name;
+        if (pending.beginQuery != ~std::uint32_t{0} && pending.endQuery != ~std::uint32_t{0}) {
+            std::array<std::uint64_t, 2> values{};
+            const auto result = vkGetQueryPoolResults(owner->handle, timestampPool, pending.beginQuery, 2,
+                                                      sizeof(values), values.data(), sizeof(std::uint64_t),
+                                                      VK_QUERY_RESULT_64_BIT);
+            if (result == VK_SUCCESS) {
+                std::uint64_t delta = values[1] - values[0];
+                if (owner->timestampValidBits < 64)
+                    delta &= (std::uint64_t{1} << owner->timestampValidBits) - 1;
+                timing.milliseconds = static_cast<double>(delta) * owner->properties.limits.timestampPeriod * 1.0e-6;
+                timing.valid = true;
+            }
+        }
+        completedGpuPasses.push_back(std::move(timing));
+    }
+}
+
+void VulkanCommands::beginDebugLabel(const std::string_view name) {
+    if (!owner->cmdBeginDebugUtilsLabel || name.empty()) return;
+    VkDebugUtilsLabelEXT label{VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT};
+    std::string copy(name);
+    label.pLabelName = copy.c_str();
+    label.color[0] = 0.18f;
+    label.color[1] = 0.50f;
+    label.color[2] = 0.85f;
+    label.color[3] = 1.0f;
+    owner->cmdBeginDebugUtilsLabel(handle, &label);
+}
+
+void VulkanCommands::endDebugLabel() {
+    if (owner->cmdEndDebugUtilsLabel) owner->cmdEndDebugUtilsLabel(handle);
+}
+
+void VulkanCommands::beginGpuPass(const std::string_view name) {
+    if (!timestampPool) return;
+    PendingGpuPass pending;
+    pending.name = name;
+    const auto pendingIndex = static_cast<std::uint32_t>(pendingGpuPasses.size());
+    if (nextTimestampQuery + 1 < maxGpuPassQueries) {
+        pending.beginQuery = nextTimestampQuery++;
+        pending.endQuery = nextTimestampQuery++;
+        vkCmdWriteTimestamp(handle, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, timestampPool, pending.beginQuery);
+    }
+    pendingGpuPasses.push_back(std::move(pending));
+    activeGpuPasses.push_back(pendingIndex);
+}
+
+void VulkanCommands::endGpuPass() {
+    if (!timestampPool || activeGpuPasses.empty()) return;
+    const auto pendingIndex = activeGpuPasses.back();
+    activeGpuPasses.pop_back();
+    auto& pending = pendingGpuPasses[pendingIndex];
+    if (pending.endQuery != ~std::uint32_t{0})
+        vkCmdWriteTimestamp(handle, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, timestampPool, pending.endQuery);
+}
+
 VkImageLayout imageLayout(ResourceState state) {
     switch (state) {
     case ResourceState::Undefined:

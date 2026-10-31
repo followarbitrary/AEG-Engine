@@ -2,6 +2,7 @@ add_library(aeg_render STATIC
     public/Renderer.hpp
     public/RenderSettings.hpp
     public/AntialiasingSettings.hpp
+    public/RenderDebugSettings.hpp
     public/Light.hpp
     public/ShadowSettings.hpp
     public/EnvironmentSettings.hpp

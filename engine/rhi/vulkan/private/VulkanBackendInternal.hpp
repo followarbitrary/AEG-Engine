@@ -11,6 +11,7 @@
 #include <optional>
 #include <set>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 
 namespace aeg::rhi::vulkan::detail {
@@ -143,14 +144,30 @@ public:
 };
 class VulkanCommands final : public CommandList {
 public:
+    static constexpr std::uint32_t maxGpuPassQueries = 512;
+    struct PendingGpuPass {
+        std::string name;
+        std::uint32_t beginQuery{~std::uint32_t{0}};
+        std::uint32_t endQuery{~std::uint32_t{0}};
+    };
     VulkanDevice* owner;
     VkCommandBuffer handle{};
+    VkQueryPool timestampPool{};
+    std::vector<PendingGpuPass> pendingGpuPasses;
+    std::vector<std::uint32_t> activeGpuPasses;
+    std::vector<GpuPassTiming> completedGpuPasses;
+    std::uint32_t nextTimestampQuery{};
     bool inPass{};
     bool indexBound{};
     VulkanComputePipeline* computePipeline{};
     VulkanPipelineLayout* computeBoundLayout{};
     std::vector<VulkanBindingSet*> computeSets;
     explicit VulkanCommands(VulkanDevice& device) : owner(&device) {}
+    void initializeTimestampQueries();
+    void destroyTimestampQueries() noexcept;
+    void beginTimestampFrame();
+    void resolveTimestampQueries();
+    [[nodiscard]] const std::vector<GpuPassTiming>& gpuPassTimings() const { return completedGpuPasses; }
     void beginRenderPass(RenderPass&, Framebuffer&, Extent2D, std::span<const ClearValue>) override;
     void endRenderPass() override;
     void setViewport(Extent2D) override;
@@ -168,6 +185,10 @@ public:
     void transition(Buffer&, ResourceState, ResourceState) override;
     void copyBuffer(Buffer&, Buffer&, std::size_t) override;
     void copyTextureToBuffer(Texture&, Buffer&, TextureSubresource = {}) override;
+    void beginDebugLabel(std::string_view) override;
+    void endDebugLabel() override;
+    void beginGpuPass(std::string_view) override;
+    void endGpuPass() override;
 };
 class VulkanDevice final : public Device {
 public:
@@ -186,7 +207,10 @@ public:
     std::string name;
     std::atomic_uint32_t errors{};
     std::vector<std::function<void()>> deferredCallbacks;
-    bool validation{}, syncValidation{};
+    bool validation{}, syncValidation{}, debugUtils{};
+    std::uint32_t timestampValidBits{};
+    PFN_vkCmdBeginDebugUtilsLabelEXT cmdBeginDebugUtilsLabel{};
+    PFN_vkCmdEndDebugUtilsLabelEXT cmdEndDebugUtilsLabel{};
     explicit VulkanDevice(const DeviceDesc&);
     ~VulkanDevice() override;
     void cleanup() noexcept;
@@ -255,6 +279,9 @@ public:
     std::uint32_t imageCount() const override { return static_cast<std::uint32_t>(frames.size()); }
     Texture& image() override;
     ResourceState imageState() const override;
+    [[nodiscard]] std::span<const GpuPassTiming> gpuPassTimings() const override {
+        return commands.gpuPassTimings();
+    }
     void submit() override;
     void present() override;
     void create();

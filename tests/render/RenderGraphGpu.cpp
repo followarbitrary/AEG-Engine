@@ -49,6 +49,15 @@ int main(int argc, char** argv) {
                 ImGui::End();
             });
         }
+        if (renderer.supportsTemporalAA()) {
+            renderer.setAntialiasing({1, false, true});
+            renderer.setRenderDebugSettings({true, false, true, true});
+            renderer.drawFrame(settings, [&] {
+                renderer.resizeViewport(320, 240);
+                ImGui::Begin("TAA debug pass toggle");
+                ImGui::End();
+            });
+        }
         renderer.captureViewport(capture);
         renderer.waitIdle();
         if (!nonzeroBytes(capture)) throw std::runtime_error("render graph smoke produced an empty frame");

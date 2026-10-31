@@ -657,6 +657,13 @@ int main(int argc, char** argv) {
                 "Plain single-sample output is not the display-linear tone target");
         renderer.frameSubmitted();
         require(renderer.temporalFrameCount() == 0, "Non-temporal frame advanced history");
+        renderer.setRenderDebugSettings({true, false, false, false});
+        tests::FakeCommands debugPasses;
+        renderer.recordFrame(debugPasses, settings);
+        require(debugPasses.passes == std::vector<std::string>{"scene"},
+                "Disabled debug passes did not leave the mandatory Scene pass as the valid output path");
+        renderer.frameSubmitted();
+        renderer.setRenderDebugSettings({});
         // Pin the shader ABI independently from the private uniform declaration.
         require(device.uniform->bytes.size() == 1264, "Scene uniform ABI must be 1264 bytes");
         const auto uploaded = [&]<class T>(std::size_t offset) {
@@ -713,10 +720,10 @@ int main(int argc, char** argv) {
             const auto at = std::ranges::find(commands.passes, "taa");
             if (at != commands.passes.end()) {
                 const auto& draws = commands.recordedPasses.at(std::size_t(at - commands.passes.begin())).draws;
-                require(draws.size() == 1 && draws.front().constants.size() == 16,
+                require(draws.size() == 1 && draws.front().constants.size() == 20,
                         "Temporal push constants have the wrong size");
                 std::uint32_t value{};
-                std::memcpy(&value, draws.front().constants.data() + 12, sizeof(value));
+                std::memcpy(&value, draws.front().constants.data() + 16, sizeof(value));
                 return value;
             }
             throw std::runtime_error("Temporal push constants missing");

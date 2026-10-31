@@ -342,6 +342,8 @@ public:
     std::vector<BufferTransitionSnapshot> bufferTransitions;
     std::vector<TextureCopySnapshot> subresourceCopies;
     std::vector<std::string> operations;
+    std::vector<std::string> debugLabels;
+    std::vector<std::string> gpuPasses;
     rhi::Framebuffer* lastFramebuffer{};
     bool inRenderPass() const { return activePass_ != nullptr; }
     void beginRenderPass(rhi::RenderPass& pass, rhi::Framebuffer& framebuffer, rhi::Extent2D,
@@ -490,6 +492,10 @@ public:
             throw std::invalid_argument("Invalid fake subresource copy");
         subresourceCopies.push_back({&texture, &buffer, subresource});
     }
+    void beginDebugLabel(std::string_view name) override { debugLabels.emplace_back(name); }
+    void endDebugLabel() override {}
+    void beginGpuPass(std::string_view name) override { gpuPasses.emplace_back(name); }
+    void endGpuPass() override {}
 
 private:
     PassSnapshot* activePass_{};

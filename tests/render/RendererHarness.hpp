@@ -25,6 +25,7 @@ public:
     }
     void uploadModel(const assets::ModelData& model) { renderer().uploadModel(model); }
     void setAntialiasing(const render::AntialiasingSettings& settings) { renderer().setAntialiasing(settings); }
+    void setRenderDebugSettings(const render::RenderDebugSettings& settings) { renderer().setRenderDebugSettings(settings); }
     render::AntialiasingSettings antialiasing() { return renderer().antialiasing(); }
     std::uint32_t supportedMsaaSamples() { return renderer().supportedMsaaSamples(); }
     bool supportsTemporalAA() { return renderer().supportsTemporalAA(); }

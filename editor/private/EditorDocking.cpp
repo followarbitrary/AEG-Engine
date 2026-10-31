@@ -15,6 +15,7 @@ void dockLayout(ImGuiID dockId) {
     ImGui::DockBuilderDockWindow(sceneWindow, left);
     ImGui::DockBuilderDockWindow(importWindow, assets);
     ImGui::DockBuilderDockWindow(inspectorWindow, inspector);
+    ImGui::DockBuilderDockWindow(debugWindow, inspector);
     ImGui::DockBuilderFinish(dockId);
 }
 }

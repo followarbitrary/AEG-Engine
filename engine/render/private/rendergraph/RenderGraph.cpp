@@ -642,7 +642,10 @@ void RenderGraph::execute(rhi::CommandList& commands, rhi::Device& device, Trans
         for (std::size_t passIndex = 0; passIndex < impl.lastResult.passes.size(); ++passIndex) {
             const auto& compiled = impl.lastResult.passes[passIndex];
             const auto& source = impl.passes[compiled.originalIndex];
-            for (const auto& barrier : compiled.preBarriers) emitBarrier(barrier);
+            commands.beginDebugLabel(compiled.name);
+            commands.beginGpuPass(compiled.name);
+            try {
+                for (const auto& barrier : compiled.preBarriers) emitBarrier(barrier);
 
             PassContext context;
             context.resolver_ = resolve;
@@ -773,7 +776,14 @@ void RenderGraph::execute(rhi::CommandList& commands, rhi::Device& device, Trans
             } else if (source.callback) {
                 source.callback(context);
             }
-            for (const auto& barrier : compiled.postBarriers) emitBarrier(barrier);
+                for (const auto& barrier : compiled.postBarriers) emitBarrier(barrier);
+            } catch (...) {
+                commands.endGpuPass();
+                commands.endDebugLabel();
+                throw;
+            }
+            commands.endGpuPass();
+            commands.endDebugLabel();
         }
 
         for (auto& resource : impl.resources) {

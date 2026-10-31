@@ -1,5 +1,6 @@
 #pragma once
 #include <RhiDevice.hpp>
+#include <span>
 namespace aeg::rhi {
 class Swapchain {
 public:
@@ -19,6 +20,7 @@ public:
     [[nodiscard]] virtual std::uint32_t imageCount() const = 0;
     [[nodiscard]] virtual Texture& image() = 0;
     [[nodiscard]] virtual ResourceState imageState() const = 0;
+    [[nodiscard]] virtual std::span<const GpuPassTiming> gpuPassTimings() const { return {}; }
     // A successful submit advances temporal state even if present requires recreation.
     virtual void submit() = 0;
     virtual void present() = 0;

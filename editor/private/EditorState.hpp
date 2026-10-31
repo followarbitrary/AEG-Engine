@@ -11,6 +11,7 @@
 #include <ModelResources.hpp>
 #include <OrbitCamera.hpp>
 #include <RenderSettings.hpp>
+#include <RenderDebugSettings.hpp>
 #include <Renderer.hpp>
 
 #include <math.hpp>
@@ -35,6 +36,7 @@ inline constexpr const char* sceneWindow = "场景###Scene";
 inline constexpr const char* importWindow = "导入###Import";
 inline constexpr const char* inspectorWindow = "属性###Inspector";
 inline constexpr const char* viewportWindow = "视口###Viewport";
+inline constexpr const char* debugWindow = "调试###Debug";
 
 struct WindowLifetime {
     bool initialized{false};
@@ -77,6 +79,7 @@ struct EditorState {
     std::vector<ecs::Entity> lightEntities;
     ecs::Scheduler systems;
     render::AntialiasingSettings antialiasing;
+    render::RenderDebugSettings debugPasses;
     std::uint32_t supportedMsaa{1};
     bool supportedTaa{false};
     std::string antialiasingNotice;
@@ -215,4 +218,5 @@ void drawEnvironmentSection(EditorState& state, render::Renderer& renderer);
 void drawToneMappingSection(EditorState& state, render::Renderer& renderer);
 void drawInspectorPanel(EditorState& state, render::Renderer& renderer);
 void drawViewportPanel(EditorState& state, render::Renderer& renderer, EditorGraphics& graphics);
+void drawDebugPanel(EditorState& state, render::Renderer& renderer, EditorGraphics& graphics);
 }

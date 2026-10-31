@@ -68,6 +68,10 @@ ImTextureID EditorGraphics::viewportTexture() {
     return impl_->texture;
 }
 const std::string& EditorGraphics::renderGraphDump() const { return impl_->graphDump; }
+std::span<const rhi::GpuPassTiming> EditorGraphics::gpuPassTimings() const {
+    if (!impl_->backend.swapchain) return {};
+    return impl_->backend.swapchain->gpuPassTimings();
+}
 void EditorGraphics::drawFrame(render::RenderSettings& settings, const std::function<void()>& buildUi) {
     auto& backend = impl_->backend;
     if (!backend.swapchain->beginFrame()) return;

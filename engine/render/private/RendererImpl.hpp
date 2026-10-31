@@ -48,6 +48,7 @@ struct Renderer::Impl {
     std::unique_ptr<rhi::BindingSet> graphPostDescriptor;
     std::string graphDump;
     AntialiasingSettings aa;
+    RenderDebugSettings debugPasses;
     ToneMappingSettings toneMappingSettings;
     rhi::Format sceneFormat{rhi::Format::Undefined};
     std::uint32_t sampleMask{1}, maximumViewport{1}, maximumTemporalViewport{1};
@@ -85,6 +86,9 @@ struct Renderer::Impl {
     RenderSettings pendingSettings;
     bool pendingFrame{};
     bool retryingFrame{};
+    bool recordingTaa{};
+    bool recordingFxaa{};
+    bool recordingToneMapping{};
     bool bindlessSupported{};
     std::array<rhi::ResourceState, 2> pendingHistoryColorState{}, pendingHistoryDepthState{};
 
@@ -112,6 +116,7 @@ struct Renderer::Impl {
                                                     const AntialiasingSettings& settings);
     void resizeViewport(std::uint32_t width, std::uint32_t height);
     void setAntialiasing(const AntialiasingSettings& requested);
+    void setRenderDebugSettings(const RenderDebugSettings& settings);
     void uploadModel(const ModelData& source);
     void initializeEnvironmentSupport();
     void uploadEnvironment(const assets::HdrImageData& image);

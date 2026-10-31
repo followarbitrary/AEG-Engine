@@ -15,6 +15,7 @@ add_library(aeg_editor_module STATIC
     private/panels/LightPanel.cpp
     private/panels/EnvironmentPanel.cpp
     private/panels/ViewportPanel.cpp
+    private/panels/DebugPanel.cpp
     private/gizmo/Transform.cpp
     private/SceneHierarchy.cpp
     private/gizmo/ViewportGizmo.cpp
