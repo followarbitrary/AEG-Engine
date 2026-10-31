@@ -100,17 +100,17 @@ public:
         const auto set = ImGui_ImplVulkan_AddTexture(detail::nativeSampler(device_, sampler),
                                                      detail::nativeImageView(device_, texture),
                                                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        auto record = std::make_unique<TextureRecord>();
-        record->descriptor = set;
-        record->ownerSlot = currentSlot_;
-        const auto logical = record.get();
         try {
+            auto record = std::make_unique<TextureRecord>();
+            record->descriptor = set;
+            record->ownerSlot = currentSlot_;
+            const auto logical = record.get();
             textures_.emplace(logical, std::move(record));
+            return static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(logical));
         } catch (...) {
             ImGui_ImplVulkan_RemoveTexture(set);
             throw;
         }
-        return static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(logical));
     }
     void updateTexture(ImTextureID id, Texture& texture, Sampler& sampler) override {
         (void)updateTextureForFrame(id, texture, sampler);
