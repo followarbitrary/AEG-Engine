@@ -2,9 +2,11 @@
 #include "../VulkanInterop.hpp"
 #include <imgui_impl_vulkan.h>
 #include <cstdint>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace aeg::rhi::vulkan {
@@ -19,11 +21,20 @@ public:
         : device_(device), swapchain_(swapchain), native_(detail::nativeContext(device)) {}
     ~VulkanGuiRenderer() override {
         if (initialized_) {
-            for (const auto& [set, owner] : textures_) {
-                (void)owner;
-                ImGui_ImplVulkan_RemoveTexture(set);
+            // Destruction is the one place where waiting for the whole device
+            // is allowed. It makes every descriptor safe before the ImGui
+            // backend frees its descriptor sets.
+            try {
+                checkGui(vkDeviceWaitIdle(native_.device));
+            } catch (...) {
+            }
+            for (const auto& [record, texture] : textures_) {
+                (void)record;
+                ImGui_ImplVulkan_RemoveTexture(texture->descriptor);
             }
             for (const auto& retired : retiredTextures_) ImGui_ImplVulkan_RemoveTexture(retired.set);
+            textures_.clear();
+            retiredTextures_.clear();
             ImGui_ImplVulkan_Shutdown();
         }
         if (pool_) vkDestroyDescriptorPool(native_.device, pool_, nullptr);
@@ -75,10 +86,6 @@ public:
     void beginFrame(std::uint32_t slot, std::uint32_t slotCount) override {
         if (!slotCount || slot >= slotCount) throw std::invalid_argument("GUI frame slot is out of range");
         currentSlot_ = slot;
-        for (auto& [set, owner] : textures_) {
-            (void)set;
-            owner = slot;
-        }
         auto retired = retiredTextures_.begin();
         while (retired != retiredTextures_.end()) {
             if (retired->ownerSlot != slot) {
@@ -93,63 +100,88 @@ public:
         const auto set = ImGui_ImplVulkan_AddTexture(detail::nativeSampler(device_, sampler),
                                                      detail::nativeImageView(device_, texture),
                                                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        auto record = std::make_unique<TextureRecord>();
+        record->descriptor = set;
+        record->ownerSlot = currentSlot_;
+        const auto logical = record.get();
         try {
-            textures_.emplace(set, currentSlot_);
+            textures_.emplace(logical, std::move(record));
         } catch (...) {
             ImGui_ImplVulkan_RemoveTexture(set);
             throw;
         }
-        return static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(set));
+        return static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(logical));
     }
     void updateTexture(ImTextureID id, Texture& texture, Sampler& sampler) override {
         (void)updateTextureForFrame(id, texture, sampler);
     }
     ImTextureID updateTextureForFrame(ImTextureID id, Texture& texture, Sampler& sampler) override {
-        const auto oldSet = descriptor(id);
+        auto* record = activeTexture(id);
+        const auto oldSet = record->descriptor;
+        const auto oldOwner = record->ownerSlot;
         const auto newSet = ImGui_ImplVulkan_AddTexture(detail::nativeSampler(device_, sampler),
                                                         detail::nativeImageView(device_, texture),
                                                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        const auto old = textures_.find(oldSet);
-        if (old == textures_.end()) {
-            ImGui_ImplVulkan_RemoveTexture(newSet);
-            throw std::invalid_argument("Unknown GUI texture registration");
-        }
-        const auto [inserted, success] = textures_.emplace(newSet, currentSlot_);
-        if (!success) {
-            ImGui_ImplVulkan_RemoveTexture(newSet);
-            throw std::runtime_error("Duplicate GUI texture descriptor");
-        }
         try {
-            // The active slot is the slot whose draw data may still reference
-            // this descriptor, even when it was allocated by an earlier frame.
-            retiredTextures_.push_back({oldSet, old->second});
+            // The old set remains referenced by command buffers recorded in
+            // its owner slot. Keep the logical token and replace only the
+            // descriptor that draw submission sees.
+            retiredTextures_.push_back({oldSet, oldOwner, {}});
         } catch (...) {
-            textures_.erase(inserted);
             ImGui_ImplVulkan_RemoveTexture(newSet);
             throw;
         }
-        textures_.erase(old);
-        return static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(newSet));
+        record->descriptor = newSet;
+        record->ownerSlot = currentSlot_;
+        return id;
     }
     void unregisterTexture(ImTextureID id) override {
-        const auto set = descriptor(id);
-        const auto current = textures_.find(set);
-        try {
-            retiredTextures_.push_back({set, current->second});
-        } catch (...) {
-            throw;
-        }
+        auto current = textures_.find(reinterpret_cast<TextureRecord*>(static_cast<std::uintptr_t>(id)));
+        if (current == textures_.end()) throw std::invalid_argument("Unknown GUI texture registration");
+        // Keep the logical record alive with the retired descriptor until its
+        // owner slot has completed. This makes unregister safe even when it
+        // happens immediately after recording a frame.
+        const auto descriptor = current->second->descriptor;
+        const auto ownerSlot = current->second->ownerSlot;
+        retiredTextures_.push_back({descriptor, ownerSlot, {}});
+        retiredTextures_.back().record = std::move(current->second);
         textures_.erase(current);
     }
     void renderDrawData(CommandList& commands, ImDrawData* data) override {
-        ImGui_ImplVulkan_RenderDrawData(data, detail::nativeCommandBuffer(device_, commands));
+        std::vector<std::pair<ImDrawCmd*, ImTextureID>> patched;
+        std::size_t commandCount = 0;
+        for (int listIndex = 0; listIndex < data->CmdListsCount; ++listIndex)
+            commandCount += static_cast<std::size_t>(data->CmdLists[listIndex]->CmdBuffer.Size);
+        patched.reserve(commandCount);
+        for (int listIndex = 0; listIndex < data->CmdListsCount; ++listIndex) {
+            auto* list = data->CmdLists[listIndex];
+            for (auto& command : list->CmdBuffer) {
+                auto* logical = reinterpret_cast<TextureRecord*>(static_cast<std::uintptr_t>(command.TextureId));
+                const auto texture = textures_.find(logical);
+                if (texture == textures_.end()) continue;
+                patched.emplace_back(&command, command.TextureId);
+                command.TextureId = static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(texture->second->descriptor));
+            }
+        }
+        try {
+            ImGui_ImplVulkan_RenderDrawData(data, detail::nativeCommandBuffer(device_, commands));
+        } catch (...) {
+            for (const auto& [command, id] : patched) command->TextureId = id;
+            throw;
+        }
+        for (const auto& [command, id] : patched) command->TextureId = id;
     }
 
 private:
-    VkDescriptorSet descriptor(ImTextureID id) const {
-        const auto set = reinterpret_cast<VkDescriptorSet>(static_cast<std::uintptr_t>(id));
-        if (!textures_.contains(set)) throw std::invalid_argument("Unknown GUI texture registration");
-        return set;
+    struct TextureRecord {
+        VkDescriptorSet descriptor{};
+        std::uint32_t ownerSlot{};
+    };
+    TextureRecord* activeTexture(ImTextureID id) const {
+        auto* logical = reinterpret_cast<TextureRecord*>(static_cast<std::uintptr_t>(id));
+        const auto texture = textures_.find(logical);
+        if (texture == textures_.end()) throw std::invalid_argument("Unknown GUI texture registration");
+        return texture->second.get();
     }
     Device& device_;
     Swapchain& swapchain_;
@@ -158,10 +190,11 @@ private:
     std::uint32_t minimumImageCount_{};
     std::uint32_t currentSlot_{};
     bool initialized_{};
-    std::unordered_map<VkDescriptorSet, std::uint32_t> textures_;
+    std::unordered_map<TextureRecord*, std::unique_ptr<TextureRecord>> textures_;
     struct RetiredTexture {
         VkDescriptorSet set{};
         std::uint32_t ownerSlot{};
+        std::unique_ptr<TextureRecord> record;
     };
     std::vector<RetiredTexture> retiredTextures_;
 };
