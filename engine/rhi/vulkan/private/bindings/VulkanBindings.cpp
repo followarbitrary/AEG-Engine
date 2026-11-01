@@ -109,7 +109,14 @@ std::unique_ptr<BindingSet> VulkanDevice::createBindingSet(BindingLayout& generi
         rounded[i] = roundedDescriptorCount(static_cast<std::uint32_t>(counts[i]));
     }
     result->page = allocateDescriptorSet(layout.handle, rounded, result->handle);
-    result->update(writes);
+    // Descriptor allocation precedes descriptor-write validation, so make the
+    // failure path explicit even when a build does not emit full EH unwinding.
+    try {
+        result->update(writes);
+    } catch (...) {
+        result.reset();
+        throw;
+    }
     return result;
 }
 

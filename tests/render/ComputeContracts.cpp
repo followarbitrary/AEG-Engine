@@ -317,6 +317,8 @@ void cullingCommands(rhi::Device& device) {
             "GPU culling changed the visible indirect command");
     require(commands[7] == 0 && commands[8] == 0 && commands[9] == 0,
             "GPU culling failed to zero the culled indirect command");
+    cullSet.reset();
+    set0.reset();
 }
 }
 
