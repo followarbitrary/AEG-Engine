@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <exception>
+#include <string>
 
 namespace aeg::editor {
 namespace {
@@ -70,9 +71,13 @@ void drawDebugContents(EditorState& state, render::Renderer& renderer, EditorGra
 
     ImGui::Spacing();
     if (ImGui::CollapsingHeader("RenderGraph dump###Debug graph dump")) {
+        const auto& dump = graphics.renderGraphDump();
+        if (!dump.empty() && ui::SecondaryButton("复制 dump###Debug copy graph dump"))
+            ImGui::SetClipboardText(dump.c_str());
         ImGui::BeginChild("##GraphDump", ImVec2(0, 180), true);
-        ImGui::TextUnformatted(graphics.renderGraphDump().empty() ? "暂无 graph dump。"
-                                                                    : graphics.renderGraphDump().c_str());
+        std::string text = dump.empty() ? "暂无 graph dump。" : dump;
+        ImGui::InputTextMultiline("##GraphDumpText", text.data(), text.size() + 1, ImVec2(-1, -1),
+                                  ImGuiInputTextFlags_ReadOnly);
         ImGui::EndChild();
     }
     ImGui::PopStyleVar(2);
