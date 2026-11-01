@@ -63,10 +63,15 @@ void cubeUpload(rhi::Device& device) {
     rejects([&] { (void)device.readback(*cube, rhi::ResourceState::Sampled, {1, 0}); }, "Unprovided cube mip was read");
     rejects([&] { (void)device.uploadTexture(description, std::as_bytes(std::span(pixels)).first(16)); },
             "Single-face data initialized a declared six-face cube");
-    auto absentMips = description;
-    absentMips.mipLevels = 2;
-    rejects([&] { (void)device.uploadTexture(absentMips, std::as_bytes(std::span(pixels))); },
-            "Upload accepted a missing mip chain");
+    auto generatedMips = description;
+    generatedMips.mipLevels = 2;
+    auto generatedCube = device.uploadTexture(generatedMips, std::as_bytes(std::span(pixels)));
+    for (unsigned face = 0; face < 6; ++face) {
+        const auto result = device.readback(*generatedCube, rhi::ResourceState::Sampled, {1, face});
+        require(result.extent == rhi::Extent2D{1, 1} && result.format == rhi::Format::Rgba8Unorm &&
+                    result.pixels.size() == 4,
+                "Generated cube mip chain returned the wrong extent, format or pixel size");
+    }
 
     auto floatDescription = description;
     floatDescription.format = rhi::Format::Rgba32Float;
