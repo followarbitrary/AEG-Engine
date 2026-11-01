@@ -2,19 +2,20 @@
 #include <EditorBackend.hpp>
 #include <VulkanBackend.hpp>
 #include <VulkanGuiBackend.hpp>
+#include <cstdint>
 
 namespace aeg::tests {
 // Preserve the GPU suites' convenience vocabulary while exercising the same
 // coordinator, renderer and backend objects as the application.
 class TestRenderer {
 public:
-    TestRenderer(GLFWwindow* window, bool validation)
+    TestRenderer(GLFWwindow* window, bool validation, std::uint32_t framesInFlight = 2)
         : graphics_(
               window,
-              [](const rhi::NativeWindow& native, bool checked) {
+              [framesInFlight](const rhi::NativeWindow& native, bool checked) {
                   editor::EditorBackend backend;
                   backend.device = rhi::vulkan::createVulkanDevice({native, checked});
-                  backend.swapchain = rhi::vulkan::createVulkanSwapchain(*backend.device);
+                  backend.swapchain = rhi::vulkan::createVulkanSwapchain(*backend.device, framesInFlight);
                   backend.gui = rhi::vulkan::createVulkanGuiRenderer(*backend.device, *backend.swapchain);
                   return backend;
               },

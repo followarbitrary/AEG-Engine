@@ -5,6 +5,12 @@ add_dependencies(aeg_pbr_lighting_test aeg_resources)
 add_test(NAME aeg_pbr_lighting COMMAND aeg_pbr_lighting_test "${CMAKE_BINARY_DIR}/pbr-lighting")
 set_tests_properties(aeg_pbr_lighting PROPERTIES LABELS gpu TIMEOUT 120)
 
+add_executable(aeg_three_frame_test ThreeFrame.cpp)
+target_link_libraries(aeg_three_frame_test PRIVATE aeg::editor aeg::rhi_vulkan aeg::rhi_vulkan_gui glfw)
+aeg_project_options(aeg_three_frame_test)
+add_test(NAME aeg_three_frame_test COMMAND aeg_three_frame_test "${CMAKE_BINARY_DIR}/three-frame.ppm")
+set_tests_properties(aeg_three_frame_test PROPERTIES LABELS gpu TIMEOUT 120)
+
 add_executable(aeg_transparency_test Transparency.cpp)
 target_link_libraries(aeg_transparency_test PRIVATE aeg::editor aeg::rhi_vulkan aeg::rhi_vulkan_gui glfw)
 target_compile_definitions(aeg_transparency_test PRIVATE AEG_TEST_FIXTURES="${PROJECT_SOURCE_DIR}/tests/fixtures")
