@@ -14,13 +14,7 @@ void Renderer::Impl::uploadModel(const ModelData& source) {
     const MaterialData fallback{};
     const assets::ImageData neutralNormal{1, 1, {128, 128, 255, 255}};
     auto batch = device.beginUploadBatch();
-    struct BatchCancelGuard {
-        rhi::UploadBatch* batch;
-        bool ended{};
-        ~BatchCancelGuard() {
-            if (!ended) batch->cancel();
-        }
-    } guard{batch.get()};
+    try {
     const auto uploadTexture = [&](const assets::ImageData& image, rhi::Format format) {
         const auto maximum = device.capabilities().maximumImageDimension;
         const auto bytes = static_cast<std::uint64_t>(image.width) * image.height * 4;
@@ -135,8 +129,13 @@ void Renderer::Impl::uploadModel(const ModelData& source) {
         scenePipeline(aa.msaaSamples, aa.taa, true, true);
     }
     batch->end();
-    guard.ended = true;
     model = std::move(replacement);
     resetTemporalHistory();
+    } catch (...) {
+        batch->cancel();
+        batch.reset();
+        replacement.reset();
+        throw;
+    }
 }
 }
